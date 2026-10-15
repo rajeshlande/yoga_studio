@@ -1,0 +1,44 @@
+import {test,expect} from '@playwright/test';
+test('dashboard, class creation, detail, search and persistence',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('/');await expect(page.getByRole('heading',{name:'A little more balance.'})).toBeVisible();
+ await expect(page.locator('.class-card')).toHaveCount(8);
+ await page.getByRole('button',{name:'Create a class',exact:true}).click();
+ await page.getByLabel('Class name').fill('Mindful test practice');
+ await page.getByRole('button',{name:'Create class',exact:true}).click();
+ await expect(page.locator('.class-card')).toHaveCount(9);
+ await page.getByLabel('Search classes').fill('Mindful test');
+ await expect(page.locator('.class-card')).toHaveCount(1);
+ await page.locator('.class-card').click();
+ await page.getByLabel('Studio dialog').locator('select').selectOption('completed');
+ await page.getByRole('button',{name:'Close dialog'}).click();
+ await page.reload();await expect(page.locator('.class-card')).toHaveCount(9);
+ await page.screenshot({path:'/home/user/yoga_studio-desktop.png',fullPage:true});
+ expect(errors).toEqual([]);
+});
+test('profile, settings and honest demo authentication',async({page})=>{
+ await page.goto('/');await page.getByRole('button',{name:'My profile',exact:true}).click();
+ await page.getByLabel('Full name').fill('Maya Patel');
+ await page.getByRole('button',{name:'Save changes'}).click();
+ await page.reload();await expect(page.getByLabel('Full name')).toHaveValue('Maya Patel');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByRole('switch',{name:'Class reminders'}).click();
+ await expect(page.getByRole('switch',{name:'Class reminders'})).toHaveAttribute('aria-checked','false');
+ await page.getByRole('button',{name:'Sign out',exact:true}).click();
+ await page.getByLabel('Email address',{exact:true}).fill('test@example.com');
+ await page.getByLabel('Password',{exact:true}).fill('password123');
+ await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await expect(page.getByRole('alert')).toContainText('No credentials have been saved');
+ await page.getByRole('button',{name:'Create an account',exact:true}).click();
+ await expect(page.getByLabel('Full name',{exact:true})).toBeVisible();
+});
+test('mobile sidebar and responsive board',async({page})=>{
+ await page.setViewportSize({width:390,height:844});await page.goto('/');
+ await expect(page.getByRole('button',{name:'Open menu'})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+ await page.screenshot({path:'/home/user/yoga_studio-mobile.png',fullPage:true});
+ await page.getByRole('button',{name:'Open menu'}).click();
+ await page.getByRole('button',{name:'My profile',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Your mindful profile'})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+});
