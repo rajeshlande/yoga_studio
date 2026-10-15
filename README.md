@@ -1,90 +1,83 @@
-# yoga_studio
+# Yoga Studio
 
-A minimal, responsive yoga-studio PWA built with React, Vite, Lucide icons, and Supabase Authentication.
+A minimal, mobile/desktop-friendly PWA built with React, Vite and Supabase Authentication. **Current release: 1.1.0.**
 
-## Included screens
+Live application: https://rajeshlande.github.io/yoga_studio/
 
-**Before sign-in:** Login, sign-up, forgot password, and password update from a Supabase recovery link.
+## Scope
 
-**After sign-in:** A simple welcome dashboard, editable profile, and settings (account details, password-reset email, app installation, and sign-out).
+- Login, sign-up, forgot-password email and recovery-link password update.
+- After authentication: simple dashboard, editable name/bio profile, read-only account email, settings, installation and logout.
+- Responsive sidebar/mobile drawer, keyboard-focus handling and offline app shell.
+- Visible application version, sourced from `package.json` (authentication footer, private footer and Settings).
 
-The previous class board, class creation/booking, filters, search, summary statistics, notifications, and extra navigation have been removed. Dashboard, profile, and settings do not render before a session is established. A clearly labeled **Sign in to demo** button is available only when Supabase is not configured.
+**There is no demo account, demo sign-in, seeded user profile, local sample-data mode or authentication bypass.** The dashboard requires a Supabase session. Without a configured public key, account forms display a setup message and no private pages are accessible. Test fixtures are isolated under `tests/`, mocked at the network boundary, and are not bundled in the app.
 
-## Run
+The product display/PWA name is **Yoga Studio**. The repository, npm package identifier and Pages deployment directory remain `yoga_studio`, preserving the live URL.
+
+## Run locally
+
+Use Node 22.
 
 ```sh
 npm ci
 cp .env.example .env.local
+# Add the project's publishable / anon public key to .env.local.
 npm run dev
 ```
 
-## Supabase setup
+Configuration:
 
-Project URL: `<SUPABASE_PROJECT_URL>`
-
-1. Copy your **publishable / anon public** key from the Supabase project settings.
-2. Set `VITE_SUPABASE_ANON_KEY` in `.env.local`.
-3. Enable Email authentication in Supabase.
-4. Set the Site URL and allowed redirect URLs to your application origins (including your local development URL).
-5. Restart Vite, or rebuild and redeploy after changing environment variables.
-
-**Never use a secret/service-role key, database password, or GitHub token in client environment variables or committed files.** `.env.local` is ignored by Git.
-
-### Authentication behavior
-
-- Supabase provides email/password login, sign-up, confirmation emails (when enabled in project settings), persisted sessions, reset-password emails, recovery-link password updates, and logout.
-- Signed-in profile name and bio are saved in Supabase user metadata. Email is read-only in the profile.
-- When confirmation is disabled in Supabase, successful sign-up may immediately establish a session.
-- Without the public key, real account actions show an explicit setup message. No passwords are stored. A separate demo sign-in stores a demo session flag in sessionStorage; the demo profile is stored locally in localStorage.
-- Demo sign-out clears the demo session. A new independent browser session must sign in again.
-- Frontend session gating is not a replacement for backend authorization. If adding database tables, protect them with row-level security and per-user policies.
-- Real authentication and email delivery require a configured Supabase project and an internet connection. Real email flows have not been integration-tested without the project's public key.
-
-## Mobile, desktop, and PWA
-
-- Desktop sidebar; mobile drawer with Dashboard, Profile, and Settings.
-- Compact, single-column authentication forms on mobile and a two-column pastel layout on desktop.
-- Web app manifest, icons, install instructions, and production service worker.
-- The service worker precaches the app shell and JavaScript/CSS. Offline revisits can open the login screen or an existing local session; authentication and server-side profile changes need internet.
-- Installation requires HTTPS (or localhost) and a supported browser. iOS users install through Safari's Share menu.
-- External fonts gracefully fall back to system fonts while offline.
-- Production service-worker caches are automatically versioned from built assets, worker and manifest contents, and scoped to the deployed app path.
-
-## Production
-
-```sh
-npm run build
-npm run preview
+```text
+VITE_SUPABASE_URL=<SUPABASE_PROJECT_URL>
+VITE_SUPABASE_ANON_KEY=your_public_publishable_or_anon_key
 ```
 
-For GitHub Pages, use `npm run build:pages` and the included `.github/workflows/pages.yml`. Set **Settings → Pages → Source → GitHub Actions**. The deployment URL is `https://rajeshlande.github.io/yoga_studio/` after a successful workflow. Set public Supabase configuration in repository Actions Variables before building. Auth Site URL and redirects must include `/yoga_studio/`. See [the Pages deployment guide](docs/08-devops-deployment/github-pages.md) for exact steps. `npm run build` remains available for a domain-root host. Generated `dist/` and dependencies are not committed.
+Never put a service-role/secret key, repository token or database password in browser configuration. `VITE_` values are visible in compiled assets. `.env.local` is ignored by Git.
 
-## Tests
+Enable the Email provider in Supabase; configure confirmation and recovery delivery. Set Site URL and allowed redirect URL to `https://rajeshlande.github.io/yoga_studio/` (with the repository path) for production, and allowlist your development origin separately. Real delivery/authentication still needs testing with the actual configured project and mailbox.
+
+## Version management
+
+`package.json` is the single source of truth. Vite injects its version into the application. Use semantic versions and update the lockfile together:
+
+```sh
+npm run version:patch    # fixes: 1.1.0 -> 1.1.1
+npm run version:minor    # compatible changes: 1.1.0 -> 1.2.0
+npm run version:major    # incompatible changes: 1.1.0 -> 2.0.0
+```
+
+These commands update package files **without creating an automatic commit or tag**. Update `CHANGELOG.md`, run tests/build checks, review, then commit/push. See [the release/version guide](docs/05-development/version-management.md). Service-worker caches are automatically content-versioned separately; users do not have to clear storage to receive an updated release.
+
+## Build and deploy
+
+```sh
+npm run build                 # domain-root hosting
+npm run build:pages           # /yoga_studio/ GitHub Pages hosting
+node scripts/check-pages.mjs
+npm run preview -- --base=/yoga_studio/ --port 4174
+```
+
+The included `.github/workflows/pages.yml` builds, tests and deploys successful pushes to `main`. Repository Pages source must be **GitHub Actions**. Set the two public Supabase values in **Settings → Secrets and variables → Actions → Variables** before building. Re-run the workflow after configuration changes.
+
+The worker/manifest/icons/auth redirects are subpath-aware. Offline mode supports the app shell, not new account authentication or server-side saves. Only the current app's static resources are cached. Passwords and Auth API responses are not cached by the app worker. Installation requires HTTPS/localhost and browser support; iOS installation is through Safari's Share menu.
+
+## Testing
 
 ```sh
 npx playwright install --with-deps chromium
 npm test
+# With the Pages production preview running:
+node scripts/test-pages.mjs
 ```
 
-Four browser tests verify the sign-in gate, signup/forgot-password forms in unconfigured mode, demo sign-in, profile persistence, settings, installation guidance, sign-out, and mobile overflow/navigation down to 320px. Production offline app-shell loading is also manually checked with Playwright.
+Five browser tests run on isolated development ports. Configured-flow tests use a test-only provider URL/key and intercepted responses; no test account is present in application code or deployed assets. The unconfigured test checks that legacy sample storage is removed and cannot authorize access. Mocked API tests are not proof of real Supabase email delivery or production authentication.
 
-## Files
+## Documentation
 
-```text
-src/App.jsx                  Auth, dashboard, profile, settings
-src/style.css                Desktop/mobile pastel UI
-src/main.jsx                 Entry point and production SW registration
-public/manifest.webmanifest   PWA metadata
-public/sw.js                 Offline app-shell caching
-public/icon*                 App icons
-.env.example                 Public environment-variable template
-tests/app.spec.js            Browser tests
-```
+- [Current version and release process](docs/05-development/version-management.md)
+- [Changelog](CHANGELOG.md)
+- [GitHub Pages deployment](docs/08-devops-deployment/github-pages.md)
+- [Essential project documentation](docs/README.md)
 
-## Project documentation
-
-See [the essential documentation index](docs/README.md) for scope, requirements, UI/UX, architecture, data/Auth APIs, test evidence and RTM, security, deployment/rollback, user/support guides, and pending approvals. Documents are drafts; real Supabase integration and production readiness remain unverified.
-
-### Runtime
-
-Use Node 22 (the GitHub Actions runtime); Node 22.23.3 was used for local release verification. No new product features are included in this deployment update.
+The original document package describes a historical pre-1.1.0 baseline. The latest release notes supersede its demo-mode statements; historical test evidence is retained as history, not current-release approval. Security/accessibility reviews, real-provider UAT and operational sign-off remain pending.

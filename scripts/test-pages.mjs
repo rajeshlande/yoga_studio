@@ -16,6 +16,9 @@ try{
  await page.getByRole('heading',{name:'Welcome to your flow.'}).waitFor();
  const manifest=await page.evaluate(async()=>await(await fetch(document.querySelector('link[rel="manifest"]').href)).json());
  assert.equal(manifest.start_url,'./');
+ assert.equal(manifest.name,'Yoga Studio');
+ assert.equal(await page.getByText(/demo/i).count(),0);
+ assert.equal(await page.getByRole('navigation').count(),0);
  await page.evaluate(()=>navigator.serviceWorker.ready);
  await page.waitForFunction(()=>navigator.serviceWorker.controller);
  // A different project may share this github.io origin; its cache must survive.

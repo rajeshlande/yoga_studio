@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "yoga_studio",
-  "short_name": "yoga_studio",
+  "name": "Yoga Studio",
+  "short_name": "Yoga Studio",
   "description": "Your personal space for a little more balance.",
   "start_url": "./",
   "scope": "./",

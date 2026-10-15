@@ -1,4 +1,4 @@
-# GitHub Pages deployment — current release update
+# Yoga Studio — GitHub Pages deployment
 
 - Project: yoga_studio
 - Date: 2026-10-15
@@ -24,11 +24,11 @@ A repository push alone does not prove the website is live. The Pages workflow a
 4. In Supabase Auth URL Configuration set Site URL and allowed redirect URL to **`https://rajeshlande.github.io/yoga_studio/`** (including the repository path). Keep required localhost/staging origins separately allowlisted. Enable Email and configure confirmation/recovery delivery.
 5. Push to `main`, or use Actions → Deploy yoga_studio to GitHub Pages → Run workflow. Rebuild after any variable change.
 
-Without the public key, the website can publish in clearly labeled demo mode; real account actions cannot work. A successful static deployment is not verified signup/email recovery.
+Without the public key, the website can publish the authentication shell, but real account actions cannot work. There is no demo sign-in, seeded account, or private-access fallback in release 1.1.0. A successful static deployment is not verified signup/email recovery.
 
 ## Workflow
 
-`.github/workflows/pages.yml` uses Node 22, a locked install, 4 demo browser tests with no production credentials, the repository-path build, static artifact checks, and a production subpath/offline smoke. Only a successful build is uploaded and deployed. Deployment has `pages:write` and `id-token:write`; other permissions are restricted. GitHub supplies the workflow token; no personal access token is embedded.
+`.github/workflows/pages.yml` uses Node 22, a locked install, 5 account browser tests with isolated provider responses and no production credentials, the repository-path build, static artifact checks, and a production subpath/offline smoke. Only a successful build is uploaded and deployed. Deployment has `pages:write` and `id-token:write`; other permissions are restricted. GitHub supplies the workflow token; no personal access token is embedded.
 
 ```sh
 npm ci
@@ -58,3 +58,7 @@ Development and `npm run build` still work at `/`. `build:pages` selects `/yoga_
 Revert the offending commit and let the same workflow rebuild and deploy the complete artifact. Cache versions derive from assets, worker and manifest contents. Verify existing tabs, new tabs, offline reload, login/recovery redirects and profile saving after rollback. Retain the last-known-good commit and config record; never restore exposed credentials. Real-device upgrade/rollback and real Auth flows still require execution.
 
 GitHub Pages does not provide a custom backend or per-site HTTP security-header configuration. Use provider-side Auth settings for protection; a host requiring configurable HTTP headers may be needed for a stricter security policy. Public Pages hosting does not make backend authorization optional. No custom tables or roles have been added. Security review, privacy/retention decisions, real email tests, UAT and formal go-live approval remain pending.
+
+## Version 1.1.0 update
+
+Visible/PWA name: **Yoga Studio**. Use the [version-management guide](../05-development/version-management.md) for release increments and old sample-storage cleanup. Test-only fixtures never enter the app bundle. Historical demo-mode statements elsewhere are superseded.

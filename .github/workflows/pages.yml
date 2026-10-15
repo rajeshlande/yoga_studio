@@ -1,4 +1,4 @@
-name: Deploy yoga_studio to GitHub Pages
+name: Deploy Yoga Studio to GitHub Pages
 on:
   push:
     branches: [main]
@@ -20,7 +20,7 @@ jobs:
       - run: npm ci
       - name: Install test browser
         run: npx playwright install --with-deps chromium
-      - name: Demo regression tests (no production credentials)
+      - name: Account regression tests (isolated mocked provider; no production credentials)
         run: npm test
         env:
           VITE_SUPABASE_ANON_KEY: ''

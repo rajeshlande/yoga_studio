@@ -1,8 +1,12 @@
-# yoga_studio — Essential project documentation
+# Yoga Studio — Essential project documentation
 
 **Version 0.1 · Draft · 15 October 2026 · Application baseline `92f42e3`**
 
 This package follows the essential-document option from the supplied project checklist. Related documents are combined to avoid duplicate paperwork. It describes the current **auth-first minimal app**, not the removed class-management UI. Code-derived facts, executed test evidence, proposed controls and pending work are distinguished throughout. No approval, production deployment, legal compliance, penetration test or real Supabase integration result is invented.
+
+## Current release: 1.1.0
+
+The current product is **Yoga Studio** and has **no demo access or sample user data**. See [version management and migration](05-development/version-management.md) and the root [changelog](../CHANGELOG.md). Current tests use isolated network fixtures only. Older scope/test documents below retain their historical baseline and are not an instruction to restore demo behavior.
 
 ## Current implementation update
 
