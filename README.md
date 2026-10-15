@@ -4,6 +4,10 @@ A minimal, mobile/desktop-friendly PWA built with React, Vite and Supabase Authe
 
 Live application: https://rajeshlande.github.io/yoga_studio/
 
+## Before working on this project
+
+Read [CLAUDE.md](CLAUDE.md) before any codebase work, including exploration, planning, edits, tests and Git operations. It records the project constraints, Supabase function-only policy, verification commands and documentation references. Read it again at the start of each task or after a context reset, and whenever it changes.
+
 ## Scope
 
 - Login, sign-up, forgot-password email and recovery-link password update.
