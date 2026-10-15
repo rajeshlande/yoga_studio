@@ -20,6 +20,6 @@ test('no key means no private access; previous sample storage is deleted without
  await page.getByLabel('Email address').fill('qa@example.test');
  await page.getByLabel('Password',{exact:true}).fill('valid-test-password');
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await expect(page.getByRole('alert')).toContainText('Supabase public key');
+ await expect(page.getByRole('alert')).toContainText('contact the studio owner');
  await expect(page.getByRole('navigation')).toHaveCount(0);
 });

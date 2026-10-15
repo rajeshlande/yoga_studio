@@ -17,7 +17,7 @@ A repository push alone does not prove the website is live. The Pages workflow a
 ## One-time repository configuration
 
 1. Repository **Settings → Pages → Build and deployment → Source → GitHub Actions**.
-2. Under **Settings → Secrets and variables → Actions → Variables**, optionally set:
+2. Under **Settings → Secrets and variables → Actions → Secrets**, optionally set:
    - `VITE_SUPABASE_URL`: `<SUPABASE_PROJECT_URL>`
    - `VITE_SUPABASE_ANON_KEY`: the project's **publishable / anon public key**.
 3. Only a public key belongs in client configuration. Never set a service-role/secret key or repository token in a `VITE_` value. These values are visible in the built application.

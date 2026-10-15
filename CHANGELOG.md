@@ -2,6 +2,17 @@
 
 Version numbers follow semantic versioning. `package.json` is the authoritative application version.
 
+## 1.1.1 — 2026-10-15
+
+### Security/configuration cleanup
+- Removed the hardcoded project endpoint and project reference from current source, templates and documentation.
+- Deployment configuration now comes from encrypted GitHub Actions secrets, with no public fallback in workflow/source.
+- Browser/build guards reject administrative/service-role and user-session keys; account access stays disabled if configuration is missing or invalid.
+- Added committed-source/built-artifact credential pattern checks and configuration-validation tests.
+- Tightened environment/private-key ignore rules. Git history sanitization was requested by the owner and changes commit IDs; earlier documentation IDs refer to the pre-rewrite baseline.
+
+Public client configuration still appears in an authenticated application's network traffic and compiled client when configured. It is not an administrative secret. Real backend secrets require a trusted server, not browser obfuscation.
+
 ## 1.1.0 — 2026-10-15
 
 ### Changed

@@ -18,6 +18,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Check committed files for exposed credentials
+        run: node scripts/security-check.mjs
       - name: Install test browser
         run: npx playwright install --with-deps chromium
       - name: Account regression tests (isolated mocked provider; no production credentials)
@@ -34,8 +36,10 @@ jobs:
       - name: Build repository-path application
         run: npm run build:pages
         env:
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || '<SUPABASE_PROJECT_URL>' }}
-          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_ANON_KEY != '' && secrets.VITE_SUPABASE_URL || '' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Check build for privileged credentials
+        run: node scripts/security-check.mjs --build
       - name: Verify Pages artifact
         run: node scripts/check-pages.mjs
       - name: Production Pages and offline smoke

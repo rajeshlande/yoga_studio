@@ -1,6 +1,6 @@
 # Yoga Studio
 
-A minimal, mobile/desktop-friendly PWA built with React, Vite and Supabase Authentication. **Current release: 1.1.0.**
+A minimal, mobile/desktop-friendly PWA built with React, Vite and Supabase Authentication. **Current release: 1.1.1.**
 
 Live application: https://rajeshlande.github.io/yoga_studio/
 
@@ -58,7 +58,7 @@ node scripts/check-pages.mjs
 npm run preview -- --base=/yoga_studio/ --port 4174
 ```
 
-The included `.github/workflows/pages.yml` builds, tests and deploys successful pushes to `main`. Repository Pages source must be **GitHub Actions**. Set the two public Supabase values in **Settings → Secrets and variables → Actions → Variables** before building. Re-run the workflow after configuration changes.
+The included `.github/workflows/pages.yml` builds, tests and deploys successful pushes to `main`. Repository Pages source must be **GitHub Actions**. Store the two public Supabase configuration values in encrypted **Settings → Secrets and variables → Actions → Secrets** before building. Re-run the workflow after configuration changes.
 
 The worker/manifest/icons/auth redirects are subpath-aware. Offline mode supports the app shell, not new account authentication or server-side saves. Only the current app's static resources are cached. Passwords and Auth API responses are not cached by the app worker. Installation requires HTTPS/localhost and browser support; iOS installation is through Safari's Share menu.
 

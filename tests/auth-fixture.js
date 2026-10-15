@@ -7,7 +7,7 @@ export function accessToken(){
 export async function mockAuth(page){
  let user=structuredClone(account);
  const calls=[];
- await page.route('https://yoga-studio-test.supabase.co/auth/v1/**',async route=>{
+ await page.route('https://auth.yoga-studio.test/auth/v1/**',async route=>{
   const request=route.request(),url=new URL(request.url());
   const data=request.postDataJSON()||{};
   calls.push({path:url.pathname,method:request.method(),data});

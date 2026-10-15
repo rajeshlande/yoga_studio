@@ -1,8 +1,9 @@
 import {createClient} from '@supabase/supabase-js';
+import {isProjectUrl,isPublicKey} from './public-config.mjs';
 
-const projectUrl=import.meta.env.VITE_SUPABASE_URL||'<SUPABASE_PROJECT_URL>';
+const projectUrl=import.meta.env.VITE_SUPABASE_URL;
 const publicKey=import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const supabase=publicKey?createClient(projectUrl,publicKey):null;
+export const supabase=isProjectUrl(projectUrl)&&isPublicKey(publicKey)?createClient(projectUrl,publicKey):null;
 // Keep email confirmation and recovery callbacks inside the Pages repository path.
 export const authRedirectUrl=new URL(import.meta.env.BASE_URL,window.location.origin).href;
 

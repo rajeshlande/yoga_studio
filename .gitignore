@@ -7,3 +7,16 @@ dist/
 .DS_Store
 test-results/
 playwright-report/
+
+# Never commit environment values or private key material.
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+.credentials
+credentials*.json
+service-account*.json

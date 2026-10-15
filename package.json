@@ -1,9 +1,9 @@
 {
   "name": "yoga_studio",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "main": "index.js",
   "scripts": {
-    "test": "playwright test",
+    "test": "node --test tests/security-config.test.mjs && playwright test",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
@@ -11,7 +11,8 @@
     "build:pages": "vite build --base=/yoga_studio/",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
-    "version:major": "npm version major --no-git-tag-version"
+    "version:major": "npm version major --no-git-tag-version",
+    "security:check": "node scripts/security-check.mjs"
   },
   "keywords": [],
   "author": "",
