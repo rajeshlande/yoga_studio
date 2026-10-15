@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "build:pages": "vite build --base=/yoga_studio/"
   },
   "keywords": [],
   "author": "",
@@ -24,5 +25,8 @@
     "@vitejs/plugin-react": "^4.3.4",
     "vite": "^6.4.4"
   },
-  "private": "true"
+  "private": "true",
+  "engines": {
+    "node": ">=22 <25"
+  }
 }

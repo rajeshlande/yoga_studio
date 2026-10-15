@@ -1,0 +1,53 @@
+name: Deploy yoga_studio to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install test browser
+        run: npx playwright install --with-deps chromium
+      - name: Demo regression tests (no production credentials)
+        run: npm test
+        env:
+          VITE_SUPABASE_ANON_KEY: ''
+      - name: Build repository-path application
+        run: npm run build:pages
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || '<SUPABASE_PROJECT_URL>' }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      - name: Verify Pages artifact
+        run: node scripts/check-pages.mjs
+      - name: Production Pages and offline smoke
+        run: |
+          npm run preview -- --base=/yoga_studio/ --port 4174 > /tmp/yoga-preview.log 2>&1 &
+          node scripts/test-pages.mjs
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

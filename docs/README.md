@@ -4,6 +4,10 @@
 
 This package follows the essential-document option from the supplied project checklist. Related documents are combined to avoid duplicate paperwork. It describes the current **auth-first minimal app**, not the removed class-management UI. Code-derived facts, executed test evidence, proposed controls and pending work are distinguished throughout. No approval, production deployment, legal compliance, penetration test or real Supabase integration result is invented.
 
+## Current implementation update
+
+[GitHub Pages deployment and existing-flow hardening](08-devops-deployment/github-pages.md) supersedes the original root-only hosting/no-CI/cache-cleanup notes. Original documents and raw evidence retain their historical baseline; they are not new-release approvals.
+
 ## Start here
 
 1. [Business scope and delivery plan](01-project-management/scope-and-plan.md)

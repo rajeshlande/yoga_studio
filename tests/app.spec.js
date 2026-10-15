@@ -65,3 +65,23 @@ test('mobile auth and protected pages have no horizontal overflow',async({page})
  await expect(page.getByRole('heading',{name:'Your settings'})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
 });
+
+test('blank signup names are rejected and installation dialog traps/restores focus',async({page})=>{
+ await page.goto('/');
+ await page.getByRole('button',{name:'Create an account',exact:true}).click();
+ await page.getByLabel('Full name').fill('   ');
+ await page.getByLabel('Email address').fill('qa@example.test');
+ await page.getByLabel('Password',{exact:true}).fill('test-password-123');
+ await page.getByRole('button',{name:'Create your account'}).click();
+ await expect(page.getByRole('alert')).toHaveText('Please enter your name.');
+ await page.getByRole('button',{name:'Sign in to demo'}).click();
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ const install=page.getByRole('button',{name:'Install app'});
+ await install.click();
+ const close=page.getByRole('button',{name:'Close installation help'});
+ await expect(close).toBeFocused();
+ await page.keyboard.press('Tab');
+ await expect(close).toBeFocused();
+ await page.keyboard.press('Escape');
+ await expect(install).toBeFocused();
+});

@@ -1,1 +1,26 @@
-{"id":"/","name":"yoga_studio","short_name":"yoga_studio","description":"Your mindful space. Plan your classes and find your flow.","start_url":"/","scope":"/","display":"standalone","background_color":"#f8f9fb","theme_color":"#8263bc","orientation":"any","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}
+{
+  "id": "./",
+  "name": "yoga_studio",
+  "short_name": "yoga_studio",
+  "description": "Your personal space for a little more balance.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8f9fb",
+  "theme_color": "#8263bc",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

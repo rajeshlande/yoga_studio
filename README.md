@@ -48,7 +48,7 @@ Project URL: `<SUPABASE_PROJECT_URL>`
 - The service worker precaches the app shell and JavaScript/CSS. Offline revisits can open the login screen or an existing local session; authentication and server-side profile changes need internet.
 - Installation requires HTTPS (or localhost) and a supported browser. iOS users install through Safari's Share menu.
 - External fonts gracefully fall back to system fonts while offline.
-- Bump the service-worker cache version in `public/sw.js` whenever changing the offline shell.
+- Production service-worker caches are automatically versioned from built assets, worker and manifest contents, and scoped to the deployed app path.
 
 ## Production
 
@@ -57,7 +57,7 @@ npm run build
 npm run preview
 ```
 
-Deploy `dist/` to a static HTTPS host with this app at the domain root. Set the Supabase variables before building. `dist/` and dependencies are generated and not committed.
+For GitHub Pages, use `npm run build:pages` and the included `.github/workflows/pages.yml`. Set **Settings → Pages → Source → GitHub Actions**. The deployment URL is `https://rajeshlande.github.io/yoga_studio/` after a successful workflow. Set public Supabase configuration in repository Actions Variables before building. Auth Site URL and redirects must include `/yoga_studio/`. See [the Pages deployment guide](docs/08-devops-deployment/github-pages.md) for exact steps. `npm run build` remains available for a domain-root host. Generated `dist/` and dependencies are not committed.
 
 ## Tests
 
@@ -66,7 +66,7 @@ npx playwright install --with-deps chromium
 npm test
 ```
 
-Browser tests verify the sign-in gate, signup/forgot-password forms in unconfigured mode, demo sign-in, profile persistence, settings, installation guidance, sign-out, and mobile overflow/navigation down to 320px. Production offline app-shell loading is also manually checked with Playwright.
+Four browser tests verify the sign-in gate, signup/forgot-password forms in unconfigured mode, demo sign-in, profile persistence, settings, installation guidance, sign-out, and mobile overflow/navigation down to 320px. Production offline app-shell loading is also manually checked with Playwright.
 
 ## Files
 
@@ -84,3 +84,7 @@ tests/app.spec.js            Browser tests
 ## Project documentation
 
 See [the essential documentation index](docs/README.md) for scope, requirements, UI/UX, architecture, data/Auth APIs, test evidence and RTM, security, deployment/rollback, user/support guides, and pending approvals. Documents are drafts; real Supabase integration and production readiness remain unverified.
+
+### Runtime
+
+Use Node 22 (the GitHub Actions runtime); Node 22.23.3 was used for local release verification. No new product features are included in this deployment update.
