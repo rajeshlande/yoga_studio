@@ -1,0 +1,23 @@
+{
+  "documentationDate": "2026-10-15",
+  "applicationBaseline": "92f42e3",
+  "environment": "Local production Vite preview; Playwright Chromium; Supabase key absent",
+  "steps": [
+    "Online initial production page load",
+    "Wait for active service-worker control",
+    "Disable network for browser context",
+    "Reload document",
+    "Verify Login heading and cached manifest"
+  ],
+  "result": "PASS",
+  "manifestName": "yoga_studio",
+  "cacheNames": [
+    "yoga-studio-v2"
+  ],
+  "pageErrors": [],
+  "limitations": [
+    "Does not verify native installation",
+    "Does not verify real authentication or server profile saves offline",
+    "Does not verify upgrade or rollback behavior"
+  ]
+}

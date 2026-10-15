@@ -80,3 +80,7 @@ public/icon*                 App icons
 .env.example                 Public environment-variable template
 tests/app.spec.js            Browser tests
 ```
+
+## Project documentation
+
+See [the essential documentation index](docs/README.md) for scope, requirements, UI/UX, architecture, data/Auth APIs, test evidence and RTM, security, deployment/rollback, user/support guides, and pending approvals. Documents are drafts; real Supabase integration and production readiness remain unverified.

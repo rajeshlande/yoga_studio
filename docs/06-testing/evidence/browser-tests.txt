@@ -1,0 +1,12 @@
+
+> yoga_studio@1.0.0 test
+> playwright test
+
+
+Running 3 tests using 1 worker
+
+  ✓  1 tests/app.spec.js:3:5 › only authentication is visible before sign-in; signup and forgot password work (758ms)
+  ✓  2 tests/app.spec.js:25:5 › demo sign-in gates dashboard, profile saves, settings and sign-out work (1.5s)
+  ✓  3 tests/app.spec.js:51:5 › mobile auth and protected pages have no horizontal overflow (1.3s)
+
+  3 passed (4.9s)

@@ -1,0 +1,21 @@
+Requirement ID,Requirement,Implementation reference,Tests,Current verification,Gap / note
+FR-01,Authentication-first gate,App loggedIn/loading render,"TC-01, TC-08",Automated T1/T2 passed,Real-session expiry remains untested
+FR-02,Email/password sign-in,Auth signInWithPassword,TC-12,Implemented / not integration-tested,Public key and real QA account needed
+FR-03,Signup and confirmation,Auth signUp + form,"TC-02, TC-13",Demo/config-error case passed; real flow not run,Confirmation policy/project setup pending
+FR-04,Forgot-password request,Auth resetPasswordForEmail,"TC-03, TC-14, TC-15",Unconfigured case passed; real flow not run,Mailbox/provider access needed
+FR-05,Recovery password update,App recovery event + Auth updateUser,"TC-14, TC-15",Implemented / not integration-tested,Recovery variants and invalid links not run
+FR-06,Minimal dashboard,App dashboard + shortcuts,TC-04,Demo case passed,Business UAT pending
+FR-07,Profile save and validation,Profile updateUser / localStorage,"TC-05, TC-16",Demo persistence passed; server save not run,Real metadata update needed
+FR-08,Settings,App settings + ResetButton,"TC-06, TC-07, TC-14",Demo controls passed; real reset not run,Native install not run
+FR-09,Logout,App logout + SDK signOut,"TC-08, TC-12",Demo logout passed; real logout not run,Session invalidation review pending
+FR-10,Explicit separated demo,App enterDemo/sessionStorage,"TC-02, TC-04, TC-08",Automated demo cases passed,Demo is not a backend identity
+FR-11,Mobile navigation,CSS and drawer state,"TC-09, TC-10",390/320px Chromium passed,Other devices/browser matrix pending
+FR-12,PWA install/offline,"manifest, main.jsx, sw.js","TC-07, TC-11, TC-17",Instructions/offline shell passed,Native install/upgrade pending
+NFR-01,Responsive target range,style.css,"TC-09, TC-10, TC-18",Partially tested,768/1440 matrix to approve
+NFR-02,Accessibility target,labels/focus/reduced motion,TC-18,Not audited,AA conformance not established
+NFR-03,Security and public configuration,env / provider / host,TC-19,Dependency audit only,Security/headers/real auth pending
+NFR-04,Build reproducibility,lockfile / Vite / Playwright,Build + T1–T3,Passed locally,CI absent
+NFR-05,Offline shell boundary,service worker,"TC-11, TC-17",Login shell passed,Upgrade/mutation failure paths pending
+NFR-06,Performance target,production static build,TC-20,Not measured,No benchmark acceptance
+NFR-07,Operational objectives,runbook and readiness,Recovery/rollback rehearsal,Not defined or tested,RTO/RPO/SLA and owners TBD
+NFR-08,Compatibility target,responsive browser app,"TC-17, TC-18",Chromium only,Safari/Firefox/Edge/real devices pending
