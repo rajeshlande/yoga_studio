@@ -4,6 +4,14 @@
 
 This package follows the essential-document option from the supplied project checklist. Related documents are combined to avoid duplicate paperwork. It describes the current **auth-first minimal app**, not the removed class-management UI. Code-derived facts, executed test evidence, proposed controls and pending work are distinguished throughout. No approval, production deployment, legal compliance, penetration test or real Supabase integration result is invented.
 
+## Management expansion — planning only
+
+- [Multi-studio implementation plan](11-management-plan/README.md)
+- [Agreed attendance workflow and corrections](11-management-plan/attendance-workflow.md): automatic current-class selection, Instructor marking, Owner corrections, explicit Admin delegation and audit history; no QR/student self-check-in.
+- [Detailed schema dictionary](11-management-plan/schema-dictionary.md) and [planning workbook](11-management-plan/yoga-studio-management-plan.xlsx).
+
+These documents plan future management features; they do not describe deployed attendance functionality or an approved production release.
+
 ## Current release: 1.1.1
 
 The current product is **Yoga Studio** and has **no demo access or sample user data**. See [version management and migration](05-development/version-management.md) and the root [changelog](../CHANGELOG.md). Current tests use isolated network fixtures only. Older scope/test documents below retain their historical baseline and are not an instruction to restore demo behavior.
