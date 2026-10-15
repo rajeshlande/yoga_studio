@@ -2,6 +2,7 @@ import {test,expect} from '@playwright/test';
 import pkg from '../package.json' with {type:'json'};
 
 test('no key means no private access; previous sample storage is deleted without affecting unrelated keys',async({page})=>{
+ page.on('pageerror',error=>console.error('Browser page error:',error.message));
  await page.addInitScript(()=>{
   localStorage.setItem('yoga-profile',JSON.stringify({name:'Legacy Sample',email:'legacy@example.test'}));
   localStorage.setItem('ys-tasks','[]');

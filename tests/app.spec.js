@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 import {mockAuth,signIn,accessToken} from './auth-fixture';
 import pkg from '../package.json' with {type:'json'};
 
-test.beforeEach(async({page})=>{await mockAuth(page)});
+test.beforeEach(async({page})=>{page.on('pageerror',error=>console.error('Browser page error:',error.message));await mockAuth(page)});
 
 test('real session path gates dashboard; profile persists through mocked provider; logout closes access',async({page})=>{
  await page.goto('/#dashboard');

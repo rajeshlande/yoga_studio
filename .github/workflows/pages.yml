@@ -24,6 +24,13 @@ jobs:
         run: npm test
         env:
           VITE_SUPABASE_ANON_KEY: ''
+      - name: Save failed browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-diagnostics
+          path: test-results/
+          retention-days: 3
       - name: Build repository-path application
         run: npm run build:pages
         env:
