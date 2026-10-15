@@ -7,6 +7,7 @@ This package follows the essential-document option from the supplied project che
 ## Management expansion — planning only
 
 - [Multi-studio implementation plan](11-management-plan/README.md)
+- [Function-only Supabase access and call-efficiency policy](11-management-plan/database-functions-and-call-policy.md): typed RPCs for all business reads/writes, Edge Functions for privileged workflows, bounded screen responses and no direct client table CRUD.
 - [Agreed attendance workflow and corrections](11-management-plan/attendance-workflow.md): automatic current-class selection, Instructor marking, Owner corrections, explicit Admin delegation and audit history; no QR/student self-check-in.
 - [Detailed schema dictionary](11-management-plan/schema-dictionary.md) and [planning workbook](11-management-plan/yoga-studio-management-plan.xlsx).
 

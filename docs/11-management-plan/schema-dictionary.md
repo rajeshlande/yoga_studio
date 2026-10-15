@@ -1,9 +1,13 @@
 # Yoga Studio — Proposed Core Schema Dictionary
 
-**Version:** 0.2 · **Date:** 2026-10-15 · **Status:** Proposed, not applied
+**Version:** 0.3 · **Updated:** 2026-10-16 · **Status:** Proposed, not applied
 **Confirmed scope:** multi-studio Owner; React/Vite + GitHub Pages + Supabase; calendar and anniversary monthly billing.
 
 Read [the implementation plan](README.md) first. This dictionary contains field-level detail for the nine core tables. It is **not executable SQL or a claim of deployment**. Role authority belongs in organization/studio assignment tables, not `profiles.role`. Cross-table relationships must include organization/studio consistency. Supporting entities and assumptions appear below and in the workbook.
+
+## Function-only access boundary
+
+All application reads and writes use approved typed Supabase RPCs; no browser direct table CRUD or raw SQL endpoint. Table names here are logical: planned business storage is in non-exposed `app_data`, user RPCs in `api`, helpers/jobs in `private`. Returned fields are role-scoped, paginated/bounded and safe for their caller. Auth SDK operations are an explicit separate provider API, not table access. See [the detailed access and call policy](database-functions-and-call-policy.md).
 
 ## Conventions
 
@@ -13,7 +17,7 @@ Read [the implementation plan](README.md) first. This dictionary contains field-
 - Money uses positive/nonnegative minor units as applicable, never floating-point accounting. Derived dues/refund totals are not manually editable columns.
 - Historical events/financial postings are retained. Do not use blanket cascades or generic soft-delete flags to conceal posted records.
 - Optional personal/sensitive fields require purpose, minimum access and approved retention. No government ID, card data, bank credentials or medical dossier is proposed.
-- Read/write notes are design intent and must become actual grants/RLS/RPC/projection tests; a table row by itself does not enforce them. RLS is row-level, not field-level: grant universally safe read columns only or use restricted tables/typed authorized RPCs for notes and contacts. Never rely on UI projections after granting unrestricted base-table SELECT.
+- Read/write notes are design intent and must become actual grants/RLS/RPC/projection tests; a table row by itself does not enforce them. RLS is row-level, not field-level: fixed typed RPC outputs and least-privilege internal grants must protect notes/contacts as well as rows. Browser base-table endpoints remain unavailable. Security mode, function ownership and underlying RLS/grants are reviewed per RPC; do not assume definer functions preserve caller RLS.
 
 ## `profiles` — 12 proposed fields
 
@@ -327,7 +331,7 @@ Read [the implementation plan](README.md) first. This dictionary contains field-
 - Instructor's eligible session roster using historical session assignment and enrollment dates.
 - Membership statement: immutable issued charge plus posted adjustments, confirmed receipts and settled refunds.
 - Settlement and overdue projections, kept separate from service lifecycle.
-- Tenant/date-scoped dashboards and collection reports; caller-safe RLS or controlled aggregate RPC, not a global owner-view exposed to every role.
+- Tenant/date-scoped dashboards and collection reports; typed scoped aggregate RPC with reviewed RLS/privileges, not a global owner-view exposed to every role.
 
 ## Schema review questions
 

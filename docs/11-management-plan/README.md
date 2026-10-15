@@ -1,6 +1,6 @@
 # Yoga Studio Management PWA — Implementation Plan
 
-**Plan version:** 0.2 · **Date:** 15 October 2026 · **Status:** Proposed; approval required before implementation
+**Plan version:** 0.3 · **Updated:** 16 October 2026 · **Status:** Proposed; approval required before implementation
 **Current app baseline:** Yoga Studio 1.1.1, commit `f72bee4`
 **Scope of this deliverable:** planning only. No application features, database migrations, roles, jobs, or policies have been deployed by this plan.
 
@@ -9,7 +9,8 @@
 | Topic | Confirmed direction | Consequence |
 |---|---|---|
 | Business structure | Multiple studios/branches under an Owner | Every studio record needs tenant scoping; an Owner must not be a platform-wide superuser. |
-| Architecture | Retain React/Vite and GitHub Pages | Use Supabase PostgreSQL/RPCs, Edge Functions and scheduled jobs for trusted operations. No Next.js server actions or server runtime on Pages. |
+| Architecture | Retain React/Vite and GitHub Pages | All business-data reads/writes use typed Supabase RPCs; Edge Functions handle privileged/external workflows. No direct client table calls or Next.js server runtime. |
+| Database access efficiency | Function-only data access; avoid unnecessary calls | Screen-oriented reads, paginated results, mutation patches, in-memory dedupe and explicit call budgets; preserve RLS/transactions/audit. |
 | Membership billing | Support calendar-month and joining-date monthly billing | Store the selected policy and original billing anchor; preserve historical invoice snapshots. |
 | Identity | Owner, Admin, Instructor, Student | Database-backed, scoped role assignments; never trust editable Auth metadata for privileges. |
 | Attendance workflow | Auto-select Today’s Class; instructor marking; audited Instructor/Owner corrections | No student self-check-in or QR workflow; Admin attendance access requires explicit Owner delegation. |
@@ -39,7 +40,7 @@ Student QR/self-check-in, geofencing/biometric attendance, OpenWA/unofficial Wha
 flowchart LR
     Browser[React + TypeScript PWA] --> Pages[GitHub Pages: static assets]
     Browser -->|User JWT + public client configuration| Auth[Supabase Auth]
-    Browser -->|Scoped reads and validated RPC calls| DB[PostgreSQL + RLS]
+    Browser -->|All business reads/writes via typed RPC| DB[PostgreSQL + RLS]
     Browser -->|Authenticated privileged requests| Edge[Supabase Edge Functions]
     Edge --> DB
     Cron[Scheduled trusted jobs] --> Edge
@@ -49,15 +50,15 @@ flowchart LR
 
 ### Frontend
 
-Keep Vite, current visuals and domain-root/repository-subpath support. Adopt TypeScript incrementally with strict checks, a small validated API layer, query pagination and query invalidation after mutations. Keep existing CSS/tokens initially; a Tailwind rewrite is not required to implement this plan. Maintain role-aware navigation derived from trusted database context, not locally stored roles.
+Keep Vite, current visuals and domain-root/repository-subpath support. Adopt TypeScript incrementally with strict checks, a centralized typed RPC layer, bounded query pagination and targeted in-memory updates from mutation responses. Keep existing CSS/tokens initially; a Tailwind rewrite is not required to implement this plan. Maintain role-aware navigation derived from trusted database context, not locally stored roles.
 
 For Pages-compatible links, use a root-path query-based view selector or another explicitly tested static routing approach. Do not introduce server routes that require Pages rewrites. Supabase must consume recovery fragments before app navigation handles them; do not mix router hashes with password-recovery tokens without integration tests. URLs never authorize access.
 
 ### Backend
 
 - **PostgreSQL constraints/RLS:** durable tenant isolation, ownership checks, financial invariants and concurrency-safe writes.
-- **Validated RPCs:** enrollment, batch/session edits, attendance, manual payment posting and approved role operations where user context can be enforced directly in the database.
-- **Edge Functions:** Auth administration/invitations, payment-provider verification when added, controlled exports/documents and trusted job entry points. Verify caller identity, active role and target tenant inside every privileged function.
+- **Typed RPCs for every business-data read and write:** context, profile, dashboards, rosters, directories, statements, enrollment, batch/session edits, attendance, manual payments and role operations. No component-level `.from(...)`, direct table REST calls or generic SQL/table RPCs. Screen-oriented reads and mutation responses avoid unnecessary round trips.
+- **Edge Functions:** Auth administration/invitations, payment-provider verification when added, controlled exports/documents and trusted job entry points. Verify caller identity, active role and target tenant inside every privileged function; use approved business RPCs rather than ad-hoc table CRUD. Auth/Storage provider operations remain explicit non-table exceptions.
 - **Jobs:** session generation, upcoming membership-period generation and reconciliation. Database roles and service credentials stay in server-managed secrets only.
 - **Storage:** private buckets for generated receipts/exports if needed; no public student or financial files. Use short-lived, authorization-checked links. Initials avatars can remain; document upload is not a prerequisite.
 
@@ -171,9 +172,9 @@ The sample is useful as an outline but should **not** be pasted into production 
 
 1. **No tenant scoping:** UUID uniqueness is not organization/branch authorization. Add composite tenant relationships, scoped uniqueness and branch-aware RLS.
 2. **Global profile role:** cannot support cross-branch/multiple roles safely. Use dedicated assignments; self-editable profile metadata must never grant Owner/Admin.
-3. **Broad profile updates:** the example initially permits updating one's own row, including role. Revoke broad table UPDATE and expose approved profile fields through constrained RPC/column grants. There is no profile-role column in the recommended model.
+3. **Broad profile updates:** the example initially permits updating one's own row, including role. Revoke broad table UPDATE and expose approved profile fields through a constrained typed RPC, with only reviewed underlying grants where its security mode requires them. There is no profile-role column in the recommended model.
 4. **Policy recursion:** `students`, `batches`, `instructors` and `batch_enrollments` read policies join each other and can trigger recursive RLS evaluation. Design narrowly scoped, fixed-search-path helpers over trusted tables and test actual policy execution under ordinary user roles.
-5. **Unsafe grant narrative:** table grants cannot distinguish individual users sharing `authenticated`. Blanket revocation of writes for `authenticated` also removes direct admin writes. Prefer scoped reads plus approved RPCs for writes; do not rely on hidden UI buttons.
+5. **Unsafe grant narrative:** table grants cannot distinguish individual users sharing `authenticated`. Blanket revocation of writes for `authenticated` also removes direct admin writes. Use approved typed RPCs for all business reads and writes; underlying grants depend on reviewed execution mode, not frontend role labels.
 6. **Attendance consistency:** read-policy joins alone do not prevent an admin/privileged write from linking the wrong enrollment/session. Enforce same-tenant, same-batch and student consistency in FKs/triggers and write functions.
 7. **Capacity and clashes:** `count < capacity` in the browser races. Apply database locks/constraints and validate future date intervals and actual sessions.
 8. **Recurring weekdays:** array containment/cardinality alone does not guarantee distinct weekdays or reject null elements. Validate a non-null, duplicate-free set of integers 0–6.
@@ -186,7 +187,11 @@ The sample is useful as an outline but should **not** be pasted into production 
 
 ### 7.1 Default-deny design
 
-Enable RLS on every exposed application table and revoke default privileges. Anonymous users get no student/roster/billing access. Authenticated roles get only approved selects and RPC execution; write-heavy invariants go through transactional functions. No ordinary application role receives `BYPASSRLS` or a service key.
+Enable RLS on every application table, including internal/non-exposed tables, and revoke default privileges. Proposed layout: business tables in non-exposed `app_data`, reviewed user RPCs in exposed `api`, helpers/jobs in non-exposed `private`. Browser application-data access is RPC-only; no public table/view endpoints. Grant only approved RPC execution and the narrowly justified underlying privileges required by each reviewed invoker/definer mode. Anonymous users get no business data. No ordinary application role receives `BYPASSRLS` or a service key.
+
+See [Function-only data access and call policy](database-functions-and-call-policy.md) for contracts, schema exposure, execution-mode risks, call budgets and DBF-01–DBF-12 acceptance gates. Auth SDK calls remain separate from business-table operations.
+
+Default to invoker execution where its underlying grants/RLS are appropriate; use a constrained definer only when required. A definer uses its owner’s privileges and does not automatically preserve the caller’s RLS; table-owner/BYPASSRLS behavior and effective-role policies must be reviewed/tested per function.
 
 Keep security helpers in a non-exposed schema with `search_path = ''`, fully qualified objects, explicit EXECUTE grants and no caller-controlled dynamic SQL. Definer functions must validate `auth.uid()`, target tenant, active membership, role, allowed field transitions and actor attribution. Avoid relying on `auth.uid()` in unauthenticated scheduled jobs; use a separate narrowly authorized job path.
 
@@ -198,10 +203,10 @@ Keep security helpers in a non-exposed schema with `search_path = ''`, fully qua
 - Admin: assigned studios only; no organization-wide data by default.
 - Instructor: only assigned sessions and eligible student roster/attendance; no fees, payments, private notes, guardian/legal records or unrelated profiles.
 - Student: records linked to their identity, including historical attendance/financial periods even after an enrollment ends where retention permits.
-- Profile directories expose minimum display fields through safe scoped queries/views, never the whole global profile or Auth tables.
-- Reporting views use caller-safe semantics and explicit RLS/authorization; do not accidentally expose owner-privileged materialized results to other roles.
+- Profile directories expose minimum display fields through typed, safe, scoped read RPCs, never the whole global profile or Auth tables.
+- Reporting projections stay behind authorized RPCs and use caller-safe semantics and explicit RLS/authorization; do not accidentally expose owner-privileged materialized results to other roles.
 
-**Column privacy must also be enforced.** RLS hides rows, not fields. Since all app users normally share the database `authenticated` role, do not grant unrestricted base-table SELECT and expect a safe UI projection to hide `internal_notes`, contact details or correction reasons. Grant only universally safe columns where direct reads are used; retrieve additional own/Admin/Owner fields through narrowly scoped, explicitly authorized RPCs with fixed typed/allowlisted outputs, or move restricted extensions into separately protected tables. Instructors must fail when directly querying forbidden columns, not merely when clicking a hidden UI control. Apply the same principle to attendance notes, financial exception reasons and exports.
+**Column privacy must also be enforced.** RLS hides rows, not fields. Since all app users normally share the database `authenticated` role, do not grant unrestricted base-table SELECT and expect a safe UI projection to hide `internal_notes`, contact details or correction reasons. Do not expose base-table reads to the browser. All screen reads use narrowly scoped, explicitly authorized RPCs with fixed typed/allowlisted outputs; underlying column grants remain least-privilege according to each function’s execution mode. Restricted extensions may additionally live in separately protected tables. Instructors must fail when directly querying forbidden columns, not merely when clicking a hidden UI control. Apply the same principle to attendance notes, financial exception reasons and exports.
 
 ### 7.3 Planned operations
 
@@ -213,7 +218,7 @@ Keep security helpers in a non-exposed schema with `search_path = ''`, fully qua
 | Upsert batch/schedule exception | RPC | Tenant/role, 60-min rule, dates, instructor/room conflicts, schedule version |
 | Enroll/pause/withdraw student | RPC | Student/batch scope/status, eligibility, seat policy, capacity, date conflicts |
 | Generate sessions | Idempotent job/RPC | Studio timezone, horizon, schedule versions, no duplicate/overlap, retain cancellations |
-| Resolve Today’s Class | Scoped RPC/read service | Actual dated session, active authority, studio context, server time; chooser for ambiguity |
+| Resolve Today’s Class | `get_today_attendance` RPC | Actual dated session, active authority, studio context, server time; chooser for ambiguity |
 | Mark/correct/finalize attendance | RPC | Assigned session or Owner/explicitly delegated Admin; eligible enrollment; normal/correction window; version/reason/audit |
 | Generate/issue monthly period | Job/RPC | Subscription policy, anchor, period uniqueness/non-overlap, immutable price snapshot |
 | Record manual payment | RPC | Role, amount/currency, invoice state, idempotency, receipt number, audit |
@@ -222,6 +227,10 @@ Keep security helpers in a non-exposed schema with `search_path = ''`, fully qua
 | Produce receipt/export | Authorized Edge workflow | Recheck scope, safe template/CSV, no cross-tenant rows, private storage, expiry/audit |
 
 Every mutation returns a structured success or safe error code such as `FORBIDDEN`, `CAPACITY_FULL`, `SCHEDULE_CONFLICT`, `STALE_VERSION`, `PERIOD_EXISTS`, `PAYMENT_DUPLICATE` or `ATTENDANCE_LOCKED`. A client-side role check is a convenience only.
+
+### 7.4 Request efficiency requirements
+
+Cold authenticated navigation normally uses one context RPC plus one requested-screen RPC; warm screen loads use one bounded screen RPC. Attendance selection includes server time, permissions, windows, counts and a paginated roster in the same response. Mutations return changed safe fields, counts and revisions so the UI does not reread all records. No per-card/per-student fetches, whole-organization preloads or clock queries every second. Auth traffic and necessary pagination are counted separately. Deduplicate reads, debounce filters, bound retries, stop polling when hidden and invalidate only affected memory. All writes reauthorize even if display context is cached. One network call can still run inefficient SQL: require indexed query-plan/load evidence.
 
 ## 8. Scheduling, enrollment and attendance rules
 
@@ -247,13 +256,13 @@ The detailed contract is in [Attendance workflow and corrections](attendance-wor
 
 **Normal flow:** instructor opens the app → Today’s Class is selected automatically → instructor taps roster statuses → reviews and finalizes. No QR, student self-marking, GPS or biometric step is included. The instructor checks physical presence; no software promise of complete protection against staff collusion is made.
 
-Select actual dated sessions using the authenticated scope, studio timezone and server time. Normal marking opens **10 minutes before start** and remains open through **15 minutes after end** by configurable default. If no class matches, show the next class; if several match, show a small chooser. A finalized class defaults to a read-only summary with a correction action for eligible users. Cancelled classes cannot be marked. The PWA selects a class when opened/foregrounded; it cannot reliably launch itself at class time. Server checks, not the phone clock, enforce every write.
+Select actual dated sessions using the authenticated scope, studio timezone and server time. Normal marking opens **10 minutes before start** and remains open through **15 minutes after end** by configurable default. If no class matches, show the next class; if several match, show a small chooser. A finalized class defaults to a read-only summary with a correction action for eligible users. Cancelled classes cannot be marked. The PWA selects a class when opened/foregrounded; it cannot reliably launch itself at class time. Server checks, not the phone clock, enforce every write. `get_today_attendance` returns the class decision, server time, boundaries, counts and first roster page in one bounded response; UI timers do not repeatedly query the clock.
 
 No row means **Unmarked**, never automatically Absent. Stored statuses remain Present, Absent and Late. Finalization reviews unmarked students and must not silently convert them to Absent.
 
 **Corrections:** the assigned Instructor can fix missed/saved/finalized attendance until **24 hours after class end** by default. The Owner can correct older retained sessions within their own organization. Admin writes require an **explicit Owner-granted studio attendance permission**; being an Admin is insufficient. Students are read-only. Correcting a saved status, a finalized class or a missed mark outside the normal window requires a short reason: Forgot to mark, Wrong status, Student arrived late, or Other (brief detail required). Finalization does not eliminate the Instructor correction window.
 
-Every write verifies active authority, same tenant/batch/student, historical enrollment eligibility, non-cancelled session, applicable time boundary and expected versions. Original marks/finalization evidence remain; corrections append previous/new status, actor, server time and reason atomically. A missed mark's previous state is null/Unmarked. Conflicting concurrent edits return a conflict, not silent last-write-wins. Private rosters and attendance writes are not cached/queued offline.
+Every write verifies active authority, same tenant/batch/student, historical enrollment eligibility, non-cancelled session, applicable time boundary and expected versions. Original marks/finalization evidence remain; corrections append previous/new status, actor, server time and reason atomically. A missed mark's previous state is null/Unmarked. Conflicting concurrent edits return a conflict, not silent last-write-wins. Saved mutations return changed rows/counts/revisions for an in-memory patch rather than a complete roster/profile refetch. Private rosters and attendance writes are not cached/queued offline.
 
 ## 9. Billing and payment model
 
@@ -315,7 +324,7 @@ The estimates below are provisional engineering ranges for one experienced full-
 | Phase | Scope | Dependencies | Exit gate | Rough effort |
 |---|---|---|---|---|
 | 0 — Design approval | Confirm authority, data dictionary, billing/seat/refund/retention policies; threat model and fixtures | Owner decisions and reviewers | Signed design/requirements and migration test plan | 2–4 days |
-| 1 — Tenant/security foundation | TypeScript boundaries, organizations/studios, memberships/roles, trusted provisioning, Owner safeguards, RLS helpers, audit base | Phase 0 | Owner/Admin/Instructor/Student isolation and anti-escalation tests pass | 10–15 days |
+| 1 — Tenant/security foundation | TypeScript/RPC boundaries, organizations/studios, memberships/roles, trusted provisioning, Owner safeguards, RLS helpers, audit base | Phase 0 | Isolation/anti-escalation plus RPC exposure/execution-mode tests pass | 10–15 days |
 | 2 — Studio records/enrollment | Students/instructors/contacts, plans groundwork, batch CRUD, enrollment and capacity/conflicts | Phase 1 | Concurrent final-seat tests, cross-branch isolation, no leaked roster fields | 10–15 days |
 | 3 — Classes/attendance | Idempotent sessions, automatic current-class selection, instructor roster/finalization, timed corrections and audit | Phase 2 | One-hour/timezone/auto-selection/window/delegation/correction tests; role-based UAT | 10–15 days |
 | 4 — Monthly memberships | Plan/subscription rules, both billing policies, period generation, proration/snapshots/dues | Phase 1–3 policies | Golden billing cases, period non-overlap and retry tests pass | 10–15 days |
@@ -335,7 +344,7 @@ Recommended release numbering is proposed, not a promised roadmap: patch current
 | Authorization | Default-deny RLS, explicit grants, scoped assignments, no metadata authority, ordinary-user isolation tests for every read/write path; revoked role/session tests | Any cross-organization/branch/peer leakage or privilege escalation |
 | Data integrity | Composite tenant FKs; same-batch attendance; exact 60-minute sessions; effective-date uniqueness; enrollment/financial locks; negative and concurrent tests | Overbooking, instructor clashes, mismatched attendance, overlapping charges |
 | Financial records | Minor-unit arithmetic, immutable posted facts, adjustment/refund trails, idempotency, receipt uniqueness, provider proof before online success, daily reconciliation | Silent deletion, duplicate/forged payment, excessive refund, inconsistent balance |
-| Performance | Server pagination, indexes with query-plan evidence, caller-safe aggregation, bounded jobs; connection pooling for direct DB clients where appropriate; agreed load dataset/concurrency | Unbounded queries/exports, N+1 roster fetches, unacceptable measured latency |
+| Performance | RPC-only screen reads/writes, call budgets, no N+1, server pagination, indexes with query-plan evidence, scoped aggregation, bounded jobs; connection pooling for direct DB clients where appropriate; agreed load dataset/concurrency | Unbounded queries/exports, N+1 roster fetches, unacceptable measured latency |
 | Auditability | Append-only scoped audit records for roles, batch/enrollment changes, attendance edits, invoice/payment/refund/export events; actor/time/reason/correlation ID | User-editable audit, missing money/role change trail |
 | Privacy | Field minimization, guardian/consent review if minors admitted, least-privilege views, approved retention and erasure/anonymization, private exports/backups, no sensitive logs | Unrestricted personal data, unsafe exports, unapproved sensitive collection |
 | PWA | HTTPS, scoped static-only caches, no private API/roster/payment/attendance cache; account/branch switch purge of in-memory data; install/update/offline tests | Private shared caching, stale cross-account data, broken recovery navigation |
@@ -348,7 +357,7 @@ No gate is currently claimed passed for the proposed management system. Existing
 
 Use realistic branch/student/session volumes and measure before committing to an SLA. Starting targets: p95 indexed list reads under 500 ms of backend time at an agreed concurrent workload; p95 transactional mutations under 1 s excluding external providers; server-paginated lists default 25/maximum 100; dashboard queries bounded by explicit tenant/date range; no long-running export on an interactive request. Mobile web-vital targets can retain proposed LCP ≤2.5 s, INP ≤200 ms, CLS ≤0.1 at p75 for an agreed device/network cohort. These are **proposals, unmeasured**.
 
-Connection pooling is relevant to jobs/functions using direct Postgres connections; browser PostgREST traffic must not be given a database connection string. RTO/RPO depend on plan, budget and verified restore capabilities; no untested default is a commitment.
+Connection pooling is relevant to jobs/functions using direct Postgres connections; browser PostgREST RPC traffic must not be given a database connection string. RTO/RPO depend on plan, budget and verified restore capabilities; no untested default is a commitment.
 
 ### 12.2 Initial query/index design to validate
 
@@ -370,12 +379,13 @@ Index all frequently joined tenant FKs deliberately; verify plans with represent
 
 - **Pure/unit:** billing anchor/proration/rounding, money validation, timezone boundaries, policy transitions, permissions presentation and safe error mapping.
 - **Database integration:** fresh migrations, constraints, immutable issued records, cross-table FKs, audit triggers/functions and exact transaction outcomes.
-- **RLS isolation:** two organizations, at least two studios in one organization, separate Owners/Admins/Instructors/Students, multi-role identities, pending/suspended/revoked membership and unrelated logged-in user. Test selects and every write/RPC using ordinary JWTs, never only the SQL-editor owner.
+- **RLS isolation:** two organizations, at least two studios in one organization, separate Owners/Admins/Instructors/Students, multi-role identities, pending/suspended/revoked membership and unrelated logged-in user. Test every read/write RPC and blocked direct table access using ordinary JWTs, never only the SQL-editor owner.
 - **Concurrency:** final seat, simultaneous date changes/capacity reductions, duplicate invoice jobs, payment retries, simultaneous refunds, last-owner removal and receipt sequence allocation.
 - **Calendar:** leap years, day 29/30/31 anchors, partial first month, end-exclusive boundaries, timezone midnight, cancelled and rescheduled sessions, duplicate weekdays and DST edge cases where supported.
 - **Financial:** split payments, zero-due periods, invalid currency/amount, failed/pending receipts, duplicate references/idempotency, cancellation with/without credit, partial/full refund and reconciliation after retry.
 - **Auth/security:** role spoofing via metadata/JSON/URL, forged tenant IDs, expired/reused invites/recovery links, suspension during open session, trusted provisioning checks, MFA/reauthentication, safe logs and secret scans.
 - **UI/PWA:** Owner/Admin/Instructor/Student workflows at 320px and larger; keyboard/screen reader/contrast/reflow; no private cache entries; logout/branch switch; update and offline shell; no fake data.
+- **Function-only access:** execute DBF-01–DBF-12 for blocked direct table calls, invoker/definer privileges, scoped RPC reads/writes, network call budgets, pagination, mutation patches, idempotency, private-cache exclusions and measured SQL performance.
 - **Attendance contract:** execute ATT-01–ATT-17 from the attendance workflow, including server-time boundaries, finalized-but-correctable records, Admin delegation, missed marks, cancellation, offline failure and concurrent finalization/corrections.
 - **UAT:** independently exercise an Owner managing two studios, a branch Admin without cross-branch powers, an Instructor marking only own attendance and a Student reading only own dues/records. Obtain accountant/Owner approval of billing examples.
 
@@ -385,7 +395,7 @@ Test fixtures belong only in isolated test environments. No synthetic users, cla
 
 1. Create separate development/staging/production projects and secure configuration; do not copy production personal data to tests.
 2. Inventory existing Auth users and their metadata. Back up using supported provider procedures; test restore scope, including Auth. Do not assume all plans include the same recovery features.
-3. Add tenant/role tables, constraints and RLS in reviewed migrations. Bootstrap organization/first Owner through a trusted one-time procedure; public signup must not grant authority.
+3. Add tenant/role tables in internal `app_data`, typed entry RPCs in `api`, helper/job functions in `private`, constraints, RLS and least-privilege function grants in reviewed migrations. Review exposed-schema configuration and existing dependencies before changing it. Bootstrap organization/first Owner through a trusted one-time procedure; public signup must not grant authority.
 4. Map existing verified users to explicit memberships with an approved import/invitation process. Do not promote users because their metadata or email resembles an admin.
 5. Deploy expand-first schema/RPC contracts, then compatible frontend changes, then remove obsolete paths only after verification. Use dry runs, staged backfill and reconciliation counts.
 6. CI: formatting/typecheck, unit tests, migration/constraint/RLS tests, security scanning, UI tests, Pages artifact checks and function checks; deploy staging before approved production.
@@ -420,10 +430,19 @@ Receipts/exports require server-side authorization, appropriate expiry and reten
 ## 16. Deliverables and immediate next step
 
 Companion files:
+- [Supabase function-only data access, RPC catalog and call budgets](database-functions-and-call-policy.md).
 - [Attendance workflow, permissions, windows and acceptance tests](attendance-workflow.md).
 - [Field-by-field schema dictionary](schema-dictionary.md).
-- [**Planning workbook**](yoga-studio-management-plan.xlsx): nine core table dictionaries, shared conventions, support-table inventory, role matrix, work packages, quality gates and open decisions.
+- [**Planning workbook**](yoga-studio-management-plan.xlsx): nine core table dictionaries, shared conventions, support-table inventory, role matrix, work packages, quality gates, open decisions, RPC catalog, call budgets and database-function acceptance gates.
 
 - [Implementation work packages as CSV](implementation-backlog.csv).
 
 **Next step:** approve Phase 0 decisions and the tenant/role model, then implement and prove **tenant isolation + trusted Owner/Admin provisioning** before adding operational CRUD. Do not deploy the supplied sample SQL or build financial UI before the database enforcement paths exist.
+
+## 17. Planning revision history
+
+| Plan version | Date | Change |
+|---|---|---|
+| 0.1 | 2026-10-15 | Initial multi-studio management plan, detailed core schema and quality gates |
+| 0.2 | 2026-10-15 | Agreed automatic class selection, Instructor/Owner correction workflow, explicit Admin delegation and attendance acceptance cases |
+| 0.3 | 2026-10-16 | Required function-only Supabase business reads/writes, RPC/Edge contracts, schema/privilege boundary, call budgets and DBF acceptance gates; no live implementation |

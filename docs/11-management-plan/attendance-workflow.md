@@ -1,7 +1,7 @@
 # Yoga Studio — Attendance workflow and corrections
 
-- Document version: 0.1
-- Updated: 2026-10-15
+- Document version: 0.2
+- Updated: 2026-10-16
 - Status: Agreed planning direction; implementation and verification pending
 - Scope: Instructor-controlled attendance, time-based class selection, and audited corrections
 - No application/database deployment is performed by this document update.
@@ -76,6 +76,8 @@ Optional detail is not mandatory for the three standard reasons. No health, medi
 A missed student with no previous attendance row is still correctable if their enrollment was eligible on the class date. Record the old state as **Unmarked/null** in the correction event; do not invent an earlier absent/present record.
 
 ## 6. Backend enforcement and transaction
+
+All attendance reads and writes are function-only. `get_today_attendance` returns the server-time class decision, windows, permissions, counts and the first bounded roster page in one RPC. History is paginated through `get_attendance_history`. `save_attendance_marks` and `finalize_attendance` return safe patches/counts/revisions so the UI avoids per-student reads and whole-roster refetches. Do not poll the server every second for the clock or expose direct attendance table CRUD. See [the RPC/call policy](database-functions-and-call-policy.md) for DBF acceptance gates.
 
 Use approved attendance RPCs rather than unrestricted table writes. Each mutation must:
 
