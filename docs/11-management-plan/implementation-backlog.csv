@@ -1,9 +1,9 @@
-ID,Phase,Scope,Suggested responsibility,Dependencies,Exit evidence,Rough effort
-WP-01,0,Confirm role/tenant/billing/retention model,Owner + technical/security/accounting reviewers,None,Approved Phase 0 decisions; no implementation implied,2–4 days
-WP-02,1,"Organizations, branch roles, RPC-only schema/grants/context and trusted provisioning",Developer + security/DB reviewer,WP-01,RLS/anti-escalation plus DBF RPC schema/execution-mode tests,10–15 days
+ID,Phase,Scope,Suggested responsibility,Dependencies,Exit evidence,Rough engineering effort
+WP-01,0,"Approve applicable P0/P1 contracts, Co-Owner scope and blocking decisions",Owner + technical/security/accounting reviewers,None,Applicable readiness-register approvals; no invented sign-off,2–4 days
+WP-02,1,"Owner/Co-Owner vs staff isolation, protected ownership, RPC context, trusted provisioning, audit and Phase 1 idempotency",Developer + security/DB reviewer,WP-01,"GOV-01–GOV-10; ordinary-role RLS, concurrent last-Owner, replay/rollback and external-recovery tests",10–15 days
 WP-03,2,"Student/instructor/contacts, batches and enrollment through typed read/write RPCs",Developer + operations/QA,WP-02,Tenant FKs; final-seat/date tests; paginated screen reads; no direct table CRUD,10–15 days
-WP-04,3,"Dated sessions, one-call Today’s Class/roster, RPC marking/finalization and audited corrections",Developer + instructor UAT/QA,WP-03,"ATT-01–ATT-17 plus DBF budgets: safe mutation patches, no per-student reads/refetch storms",10–15 days
-WP-05,4,"Plans/subscriptions, monthly billing and scoped statement RPCs",Developer + Owner/accountant,WP-02 through WP-04 policy interfaces,"Golden billing cases; exact money strings, bounded statements; period/idempotency tests",10–15 days
+WP-04,3,"Actual sessions, one-call roster, marking/finalization and independently delegated Admin correction capabilities",Developer + instructor UAT/QA,WP-03,ATT-01–ATT-17 plus GOV-11–GOV-14 and DBF budgets; Co-Owner retrospective correction UAT,10–15 days
+WP-05,4,"Plans/subscriptions, monthly billing and scoped statement RPCs",Developer + Owner/accountant,WP-02 through WP-04 policy interfaces,"Approved BIL-01–BIL-16; exact money, anchor, tax/numbering/entitlement fixtures and idempotency",10–15 days
 WP-06,5,"Transactional payment/refund/receipt RPCs, scoped reports and controlled exports",Developer + Owner/accountant/QA,WP-05,No silent deletion; reconciliation/audit/idempotency; aggregation/call-budget evidence,10–15 days
-WP-07,6,RPC/access/security/a11y/load/UAT/restore and production operations,QA + security/operations + Owner,WP-02 through WP-06,All quality gates plus DBF-01–DBF-12; query plans/call counts and approval evidence,10–15 days
+WP-07,6,RPC/access/security/a11y/load/UAT/restore and production operations,QA + security/operations + Owner,WP-02 through WP-06,"All GOV/ATT/DBF and approved BIL gates; benchmark, five-role UAT, timed restore and named release approvals",10–15 days
 WP-08,Later,Optional online gateway and automated reminders,Separate approved project work,Core release + provider/privacy approval,Signature/replay/out-of-order callbacks; consent/delivery tests,Estimate separately

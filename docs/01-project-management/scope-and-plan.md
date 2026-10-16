@@ -1,58 +1,41 @@
-# Business summary, scope, and delivery plan
+# Business summary, scope and delivery plan
 
-- Project: yoga_studio
+- Project: yoga_studio / Yoga Studio
 - Document ID: YS-PM-001
-- Version: 0.1
-- Status: Draft — not formally approved
-- Author: Arena project assistant (code-derived draft)
-- Proposed accountable owner: Product owner — assignment pending
-- Reviewer / approver: Not assigned
-- Created / last updated: 2026-10-15 (Asia/Calcutta)
-- Classification: Internal
-- Baseline: application commit `92f42e3`; repository `rajeshlande/yoga_studio`
+- Version: 0.2
+- Updated: 2026-10-16
+- Status: Current-code description plus planned expansion; formal approval pending
+- Code baseline: application 1.1.1 (`f72bee4`); management plan 0.4 is documentation only
+- Accountable reviewer/approver: assignment pending
 
-## 1. Purpose and business outcome
-Provide a simple, welcoming account portal for yoga_studio, using the supplied pastel dashboard reference as a visual direction. The current product is an account/PWA foundation, not a class-management system. The intended outcome is a responsive entry point where users can authenticate, view a minimal dashboard, maintain their profile, and access account settings.
+## 1. Current business scope
 
-## 2. Stakeholders and responsibilities
-| Role | Proposed responsibility | Assignment |
-|---|---|---|
-| Product owner | Scope, business acceptance, prioritization | Pending |
-| Technical maintainer | Code, builds, dependency updates, architecture | Pending |
-| Supabase project administrator | Auth settings, redirect allowlist, email delivery, account operations | Pending |
-| QA / security reviewer | Independent verification and release risk review | Pending |
-| Release owner | Hosting, rollback, production approval | Pending |
+Yoga Studio is an auth-first, responsive React/Vite PWA: signup/login, confirmation/recovery paths, minimal dashboard, editable name/bio, read-only email, settings, install help and logout. Private pages require a Supabase session. There is **no demo access, sample-data mode, seeded account or authentication bypass**. Missing public configuration disables real account actions; it does not unlock a preview identity.
 
-The repository account owner is not automatically assumed to hold every operational role. No RACI approvals or support commitments have been supplied.
+GitHub Pages is the selected static host at `/yoga_studio/`; an Actions build/test/deploy workflow exists. Node 22 is the supported project runtime. Public configuration is supplied outside tracked source. Actual mailbox/provider UAT, independent reviews and release approvals remain distinct from mocked tests.
 
-## 3. Scope baseline
-Included: login, signup, forgotten-password request, password update after a recovery link, post-login dashboard, editable name/bio, read-only email, account settings, logout, responsive UI, and installable PWA shell. Real authentication uses the specified Supabase project after public-key configuration. A separately labeled local demo is available only without that configuration.
+## 2. Planned management expansion
 
-Excluded: classes, booking, payments, notifications, statistics, search, calendar, admin screens, staff/member permission tiers, uploads, custom database tables, native apps, and background jobs. These were deliberately removed or never implemented. New requests require scope review rather than implicit inclusion.
+The [single consolidated management plan](../11-management-plan/README.md) defines future requirements, five-role permissions, typed core/support contracts, RPC-only data access, attendance, billing examples, phase gates and operations. Owner and **operational Co-Owner** operate across their own organization; only Owner controls ownership/security policy. Admin/Instructor/Student roles are branch-scoped.
 
-## 4. Delivery stages and acceptance gates
-| Stage | Evidence / deliverable | Current state |
-|---|---|---|
-| Scope and UI foundation | Responsive auth-first app | Implemented; owner approval pending |
-| Local verification | Production build and 3 browser tests | Passed on documentation date |
-| Real authentication | Configured key, provider settings, email and recovery end-to-end tests | Blocked: public key not provided |
-| Release hardening | Security/a11y/browser review, hosting and operational controls | Pending |
-| UAT and release | Signed acceptance and deployment verification | Not performed |
+Management features are not implemented by documentation. No database migrations, new runtime roles, collections, rosters or exports have been deployed. Gateways, messaging, QR/self-check-in and private offline synchronization are excluded unless separately approved; OpenWA remains rejected.
 
-Dates for remaining stages, budget, staffing, and launch are not committed. Dependencies: public key, project-admin access, deployment origin, email-provider configuration, reviewers, and release owner.
+## 3. Delivery and accountability
 
-## 5. Change control and definitions
-A change record must contain ID, requester, rationale, affected requirements, privacy/security impact, acceptance criteria, implementation owner, and approval. Record decisions in the risk/decision register.
+Use [the phase-readiness matrix and decision register](../11-management-plan/README.md#governance-and-readiness), rather than a competing timeline. Phase 1 must prove tenant/RPC security, protected ownership, provisioning, audit and idempotency before operational features. The 62–94-day estimate is provisional, excludes optional work/approval delays, and must be reassessed after the foundation.
 
-**Ready:** scope understood, acceptance criteria agreed, dependencies available, test approach identified. **Done for implementation:** code reviewed, build and regression tests pass, related docs updated, secrets scan completed, known issues recorded. **Done for release:** additionally real Supabase verification, UAT, security review, deployment/rollback rehearsal, and release approval completed.
+Owner approves business scope and mappings; technical/DB/security reviewers own constraints and isolation evidence; accountant approves billing/tax/numbering; privacy reviewer approves retention/minors/erasure; QA validates; operations/release lead owns recovery and release. Named assignments, signatures and support commitments remain pending.
 
-## 6. Success measures (proposed, not measured)
-Users can complete supported account journeys without layout failures on target devices; authenticated profile changes survive reload; logout removes access to private UI; no non-scope features are visible. Business conversion, uptime, and engagement targets require owner agreement.
+## 4. Change control and completion
+
+Preserve request/requirement IDs and record rationale, affected contracts, privacy/security impact, tests, rollback/recovery and approver. Documentation completion means specifications are coherent and linked. Implementation completion additionally requires code/migrations and executed tests. Production readiness additionally requires real-provider UAT, measured performance, restore evidence and actual approval. None is interchangeable.
 
 ## Document control
 
-Source of truth: current code, `.env.example`, `package-lock.json`, and automated evidence where cited. Proposed controls are not statements of implementation. Approval and owner assignment are pending.
+Current code/package manifest govern implemented behavior; the consolidated management plan governs future specifications. Historical evidence is not a new test run or approval.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-10-15 | Arena project assistant | Initial code-derived draft; review pending |
+
+| 0.2 | 2026-10-16 | Arena project assistant | Current no-demo/Node 22/Pages baseline and consolidated management-plan references; no runtime changes |

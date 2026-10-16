@@ -1,5 +1,7 @@
 # Test strategy, plan, test cases, and UAT
 
+> Historical baseline below: demo-mode and old setup/test statements are not current instructions. For current app behavior see the project README and current requirements. For management risks, five-role permissions, acceptance cases and pending approvals use [the consolidated plan](../11-management-plan/README.md#governance-and-readiness). Historical test results are not rerun evidence.
+
 - Project: yoga_studio
 - Document ID: YS-QA-001
 - Version: 0.1

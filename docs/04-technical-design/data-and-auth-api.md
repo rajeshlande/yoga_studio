@@ -1,76 +1,51 @@
-# Data dictionary, authentication API, and integration design
+# Data dictionary, authentication API and integration design
 
-- Project: yoga_studio
+- Project: yoga_studio / Yoga Studio
 - Document ID: YS-TECH-002
-- Version: 0.1
-- Status: Draft — not formally approved
-- Author: Arena project assistant (code-derived draft)
-- Proposed accountable owner: Technical maintainer / Supabase administrator — assignment pending
-- Reviewer / approver: Not assigned
-- Created / last updated: 2026-10-15 (Asia/Calcutta)
-- Classification: Internal
-- Baseline: application commit `92f42e3`; repository `rajeshlande/yoga_studio`
+- Version: 0.2
+- Updated: 2026-10-16
+- Status: Current-code description plus planned expansion; formal approval pending
+- Code baseline: application 1.1.1 (`f72bee4`); management plan 0.4 is documentation only
+- Accountable reviewer/approver: assignment pending
 
-## 1. Data design and logical ERD
-No custom public-schema tables or migrations exist. Supabase Auth manages its internal user schema; the app accesses it through the SDK, not direct SQL. The logical relationship below is descriptive and does not propose a migration.
+## 1. Implemented data and storage
 
-```mermaid
-erDiagram
-  AUTH_USER ||--o{ AUTH_SESSION : has
-  AUTH_USER {
-    uuid id
-    string email
-    json user_metadata
-  }
-  AUTH_SESSION {
-    string access_token
-    string refresh_token
-    number expires_at
-  }
-```
+Current data flows use Supabase Auth SDK, not custom business tables. Auth identity/email are provider-managed. Editable `user_metadata.full_name` (UI max 80, trimmed/nonblank) and `bio` (UI max 250) are profile display values, never authorization attributes. Session/profile drafts are in memory; SDK session persistence is separate from forbidden private business-result caching.
 
-## 2. Data dictionary and storage
-| Field/key | Format / limits | Storage and usage |
-|---|---|---|
-| Auth user ID | Provider UUID | Supabase identity; not a client-assigned role |
-| email | Provider-validated email | Read-only in Profile; used for sign-in and recovery |
-| `user_metadata.full_name` | UI signup 80 max; profile trims and rejects blank | Editable display name; never an authorization attribute |
-| `user_metadata.bio` | UI 250 max | Editable profile biography |
-| `yoga-profile` | JSON `{name,email,bio}` | localStorage demo profile; remains after logout until cleared |
-| `yoga-demo-session` | String `true` or absent | sessionStorage demo flag; cleared by demo logout |
-| `session` / profile state | JS objects | In-memory UI; SDK persists real auth sessions by default |
-| App cache | `yoga-studio-v2` | Cache Storage containing same-origin shell/assets |
+Startup removes obsolete sample-profile/session keys; those keys cannot authorize access. The service worker caches scoped static shell/assets, not Auth responses or private records. Its cache name is content-versioned, not a fixed historical cache label.
 
-The Supabase JS default persisted-session mechanism is browser storage; exact SDK key naming is an implementation detail. Passwords are sent through the SDK but not intentionally persisted by application code. UI length limits are not a backend data policy. Email/password must never enter analytics or support logs.
+## 2. Auth SDK contract
 
-## 3. Supported API contract (SDK is authoritative)
-Base project: `<SUPABASE_PROJECT_URL>`. Underlying routes below describe typical Supabase Auth HTTP mapping; the app calls SDK methods, not handwritten requests. Provider settings/version govern exact wire details.
+| Action | Supported call / behavior |
+|---|---|
+| Initialize / subscribe | `getSession()` and `onAuthStateChange`; clean up subscription |
+| Sign in | `signInWithPassword({email,password})` |
+| Sign up | `signUp` with validated display name and base-path-aware confirmation redirect |
+| Request recovery | `resetPasswordForEmail` with base-path-aware redirect; neutral success wording |
+| Change password | `updateUser({password})` in authenticated/recovery flow |
+| Save current profile | `updateUser({data:{full_name,bio}})` until approved business-profile migration |
+| Logout | `signOut`; do not report success on a provider failure |
 
-| App action | SDK call / input | Typical HTTP mapping | Consumed result |
-|---|---|---|---|
-| Session initialization | `auth.getSession()` | Local session read; refresh may call Auth | `data.session`, `error` |
-| Login | `signInWithPassword({email,password})` | POST `/auth/v1/token?grant_type=password` | Session/auth event; provider error |
-| Signup | `signUp({email,password,options:{data:{full_name},emailRedirectTo:origin}})` | POST `/auth/v1/signup` | Session or email confirmation required |
-| Request password reset | `resetPasswordForEmail(email,{redirectTo:origin})` | POST `/auth/v1/recover` | Error or neutral success |
-| Update password | `updateUser({password})` | PUT `/auth/v1/user` with authenticated session | Error or completion |
-| Update profile | `updateUser({data:{full_name,bio}})` | PUT `/auth/v1/user` | Error or updated metadata |
-| Logout | `signOut()` | POST `/auth/v1/logout` when online/session applicable | Error or signed-out event |
-| Subscribe | `onAuthStateChange(callback)` | SDK event stream, not custom HTTP endpoint | Session changes, recovery event |
+The SDK manages HTTP headers/key/token/session refresh. Do not print real identifiers, tokens or recovery links in documentation. Public URL/anon config is browser-visible by design; no privileged credential belongs in VITE variables.
 
-Headers, bearer tokens, refresh, and public API key are SDK-managed. Never document live session tokens. Use synthetic example identity such as `qa@example.test`, not a user's real password or email. No custom REST API, class CRUD, upload API, search, or pagination endpoints exist.
+## 3. Planned business schema and APIs
 
-## 4. Error handling and dependency behavior
-HTML validation prevents some malformed submissions; the app disables busy submits and shows returned errors. Missing key produces an explicit setup error without pretending an account was created. Reset-email success uses non-enumerating wording. Network/rate-limit/invalid-login/expired-link failures require manual and automated integration validation. No explicit application retry, timeout, offline queue, or idempotency layer exists; SDK internals must not be described as app-owned guarantees. No centralized audit logging or monitoring exists.
+The [core dictionary](../11-management-plan/README.md#core-schema) now specifies nine core tables and **232** fields, including business `profiles.bio` for the existing biography migration. The [supporting contracts](../11-management-plan/README.md#supporting-contracts) define 24 supporting entities with per-phase scope, fields, integrity, indexes, access and deletion rules. These are not executable/applied migrations.
 
-## 5. Authorization boundaries and retention
-Visitor: public auth views. Signed-in member: dashboard, own name/bio updates, own email reset request. Demo visitor: local preview only. Project admin: external Supabase console, not an application role. User metadata is self-editable, not trustworthy for permissions.
+All business reads/writes use approved typed RPCs. [The governance contract](../11-management-plan/README.md#governance-and-readiness) specifies Owner/operational Co-Owner and branch roles, granular attendance delegation and Phase 1 idempotency. [The RPC catalog](../11-management-plan/README.md#database-functions) defines safe bounded responses and call budgets. Auth login/recovery/refresh remains Auth SDK, not a forced RPC wrapper.
 
-Retention/deletion of real Auth records, email events, backups, and sessions depends on project settings and approved privacy policy; neither has been provided. Demo profile can be removed through browser site-data controls. App has no account-deletion or export UI. Any custom table requires an approved schema, owner isolation and RLS, migration/rollback plan, and deletion rules before implementation.
+Use one-time reviewed name/bio migration and staged cutover; do not dual-write Auth metadata and business profiles on every save. External provisioning ambiguity is durably reconciled before retry. Retention/erasure and last-Owner safeguards must be approved/tested before raw account deletion; no cascade of business/audit history.
+
+## 4. Verification boundary
+
+Automated tests include mocked provider responses and missing-config behavior, not real mailbox delivery or live RLS. Production provider/account UAT, management database tests, performance and recovery drills remain pending. Use the consolidated readiness register; never turn a described SDK/RPC path into a claim of executed integration evidence.
 
 ## Document control
 
-Source of truth: current code, `.env.example`, `package-lock.json`, and automated evidence where cited. Proposed controls are not statements of implementation. Approval and owner assignment are pending.
+Current code/package manifest govern implemented behavior; the consolidated management plan governs future specifications. Historical evidence is not a new test run or approval.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-10-15 | Arena project assistant | Initial code-derived draft; review pending |
+
+| 0.2 | 2026-10-16 | Arena project assistant | Current no-demo/Node 22/Pages baseline and consolidated management-plan references; no runtime changes |

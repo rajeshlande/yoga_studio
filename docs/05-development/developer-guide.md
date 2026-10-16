@@ -1,61 +1,57 @@
-# Development, configuration, and repository guide
+# Development, configuration and repository guide
 
-- Project: yoga_studio
+- Project: yoga_studio / Yoga Studio
 - Document ID: YS-DEV-001
-- Version: 0.1
-- Status: Draft — not formally approved
-- Author: Arena project assistant (code-derived draft)
-- Proposed accountable owner: Technical maintainer — assignment pending
-- Reviewer / approver: Not assigned
-- Created / last updated: 2026-10-15 (Asia/Calcutta)
-- Classification: Internal
-- Baseline: application commit `92f42e3`; repository `rajeshlande/yoga_studio`
+- Version: 0.2
+- Updated: 2026-10-16
+- Status: Current-code description plus planned expansion; formal approval pending
+- Code baseline: application 1.1.1 (`f72bee4`); management plan 0.4 is documentation only
+- Accountable reviewer/approver: assignment pending
 
-## 1. Local setup
-Prerequisites: Git, a compatible Node/npm runtime, browser, and optional Supabase project public key. Use a currently supported runtime validated against the lockfile; the repo has no engines declaration.
+## 1. Read first and setup
+
+Read [CLAUDE.md](../../CLAUDE.md) before codebase work and after context resets. Use **Node 22**; package.json declares the engines policy. Keep the repository/base path yoga_studio and display name Yoga Studio.
 
 ```sh
-git clone https://github.com/rajeshlande/yoga_studio.git
-cd yoga_studio
 npm ci
 cp .env.example .env.local
 npm run dev
 ```
-Vite listens on `0.0.0.0` (normally 5173); use the URL printed by Vite. Local preview runs on 4173 by default. Development/preview host allowlists are broad for the sandbox environment; do not expose those servers as production hosting.
 
-## 2. Configuration reference
-| Variable | Default / requirement | Sensitivity |
-|---|---|---|
-| `VITE_SUPABASE_URL` | Falls back to the specified project URL | Public project identifier |
-| `VITE_SUPABASE_ANON_KEY` | Absent by default; required for real Auth | Public publishable/anon key, never service-role/secret |
+Supply VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY through ignored local configuration or encrypted Actions configuration. There is no hardcoded fallback project URL. Only publishable/anon public values are allowed; they are observable in compiled assets. Never put service-role/admin credentials in browser configuration. Missing valid config means no real account actions, not demo access.
 
-`VITE_` values are compiled into browser assets. Changing a host env value requires rebuild/redeploy. `.env.local` is ignored; `.env.example` contains no credential. Separate development/staging/production Supabase projects are recommended but not provisioned. Set Email provider, Site URL, redirect allowlist, and recovery delivery in the relevant project; SDK project config cannot be inferred from source.
+## 2. Build and verify
 
-## 3. Build and test
 ```sh
-npm run build
-npm run preview
+node --test tests/security-config.test.mjs
 npx playwright install --with-deps chromium
 npm test
-npm audit
+npm run build:pages
+node scripts/check-pages.mjs
+npm run security:check
+node scripts/security-check.mjs --build
 ```
-Generated `dist/` and dependencies are ignored. Playwright starts/reuses the local dev server through `playwright.config.js`. Current tests require missing-key demo mode; run in an isolated test checkout with no real key. Do not accidentally point automated signup tests at a production project. `npm audit` is point-in-time dependency evidence, not a security sign-off.
 
-## 4. Coding and review conventions (proposed)
-Use descriptive React components/hooks; split auth services/screens before growth. Validate at boundaries, keep user data out of HTML injection sinks/logs, provide busy/error states, label controls, honor reduced motion, and never use editable metadata as role authority. Add tests for new behavior and update related requirement IDs. No lint/formatter/type-check pipeline currently exists; do not claim it ran.
+Pages checks require the repository-path build in dist/. The security source scan covers tracked files; include intended new files in review. Run the existing production preview as a managed background process only when requested, then `node scripts/test-pages.mjs` for Pages/offline smoke. Do not restart servers after an explicit stop request without renewed authorization.
 
-Suggested review checklist: [ ] scope/acceptance met; [ ] no secrets; [ ] auth/data boundary maintained; [ ] accessible labels/focus; [ ] mobile/reflow checks; [ ] build/regression pass; [ ] dependency/security review; [ ] PWA version increment where required; [ ] docs/evidence updated; [ ] independent review recorded.
+There are four configuration unit tests and five browser tests at this code baseline. Browser fixtures intercept provider requests in isolated test projects; they require neither production accounts nor demo mode. Do not point automated account creation at production. Lint/typecheck/database management suites are target work, not scripts claimed to exist today. Report only checks actually executed for the current change.
 
-## 5. Git and pull requests
-Existing changes were committed directly to `main`; branch protection and CI are not evidenced. Proposed workflow: short-lived `feature/<topic>` or `fix/<topic>` branch, PR to `main`, one independent reviewer, passing build/tests, no force push to protected branch. PR template should identify requirements, behavior, tests, screenshots where relevant, security/privacy effects, known issues, and rollback. Treat this as a recommended process until the owner enables enforcement.
+## 3. Planned development contract
 
-## 6. Secrets and dependency hygiene
-Do not place tokens in remote URLs, source, docs, screenshots, or logs. Use an approved OS credential manager/CI secret store for repository access. Revoke any exposed credential, including the previously chat-disclosed repository token; never reproduce it. Use `npm ci` for builds and review lockfile diffs. Review licenses and generate an approved SBOM before production if required; the lockfile and audit JSON are not substitutes for a complete SBOM.
+Use [the consolidated management plan](../11-management-plan/README.md) as the sole management specification. All business reads/writes use typed RPCs; no business-table .from CRUD. Review [governance](../11-management-plan/README.md#governance-and-readiness), [supporting tables](../11-management-plan/README.md#supporting-contracts) and [RPC execution modes](../11-management-plan/README.md#database-functions) before migrations. Implement/test Phase 1 idempotency, ownership boundaries and tenant isolation first. No documentation request authorizes implementation or deployment.
+
+## 4. Git, versions and evidence
+
+Review focused diffs; preserve unrelated edits; commit related coherent changes. Push/deploy only when authorized. Existing Pages CI runs on main; do not imply PR protection/reviewer policy is enforced unless verified. Never force-push or reuse a disclosed credential without explicit appropriate authorization. Prefer credential managers/approved secret stores; never ask for chat-pasted tokens.
+
+Application releases update package version + lockfile + changelog using existing scripts. Documentation-only consolidation does not bump app version. Keep historical evidence, but clearly label it rather than applying old demo/hosting assumptions to current code. Real-provider UAT, independent security/a11y review, management tests and sign-off are separate pending activities.
 
 ## Document control
 
-Source of truth: current code, `.env.example`, `package-lock.json`, and automated evidence where cited. Proposed controls are not statements of implementation. Approval and owner assignment are pending.
+Current code/package manifest govern implemented behavior; the consolidated management plan governs future specifications. Historical evidence is not a new test run or approval.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-10-15 | Arena project assistant | Initial code-derived draft; review pending |
+
+| 0.2 | 2026-10-16 | Arena project assistant | Current no-demo/Node 22/Pages baseline and consolidated management-plan references; no runtime changes |

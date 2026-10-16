@@ -77,6 +77,10 @@ node scripts/test-pages.mjs
 
 Five browser tests run on isolated development ports. Configured-flow tests use a test-only provider URL/key and intercepted responses; no test account is present in application code or deployed assets. The unconfigured test checks that legacy sample storage is removed and cannot authorize access. Mocked API tests are not proof of real Supabase email delivery or production authentication.
 
+## Management expansion — planning only
+
+The [single consolidated management plan v0.4](docs/11-management-plan/README.md) defines operational Co-Owner, P0/P1 contracts, supporting schema, attendance, RPC policy and phase readiness. These management features are not implemented in the current app.
+
 ## Documentation
 
 - [Current version and release process](docs/05-development/version-management.md)
@@ -84,4 +88,4 @@ Five browser tests run on isolated development ports. Configured-flow tests use 
 - [GitHub Pages deployment](docs/08-devops-deployment/github-pages.md)
 - [Essential project documentation](docs/README.md)
 
-The original document package describes a historical pre-1.1.0 baseline. The latest release notes supersede its demo-mode statements; historical test evidence is retained as history, not current-release approval. Security/accessibility reviews, real-provider UAT and operational sign-off remain pending.
+Some retained documents/evidence describe a historical pre-1.1.0 baseline; refreshed core guides and the consolidated plan are explicitly labelled. The latest release notes supersede its demo-mode statements; historical test evidence is retained as history, not current-release approval. Security/accessibility reviews, real-provider UAT and operational sign-off remain pending.

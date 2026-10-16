@@ -3,7 +3,7 @@
 - Version: 0.1 of this guide
 - Updated: 2026-10-15
 - Status: Implementation guide; formal release approval remains separate
-- Current application release: **1.1.0**
+- Current application release: **1.1.1** (package.json is authoritative)
 
 ## Identity and source of truth
 
@@ -17,7 +17,7 @@ The version appears on the auth footer, private footer and Settings → Applicat
 - **MINOR:** compatible feature/behavior additions or approved product changes.
 - **MAJOR:** incompatible behavior/data/API changes that require migration or coordination.
 
-This release is 1.1.0 because it removes the previous preview access mode and adds app-version visibility and release management. Version assignment is a maintainer policy; it does not constitute UAT/security approval.
+Release 1.1.0 was introduced because it removes the previous preview access mode and adds app-version visibility and release management. Version assignment is a maintainer policy; it does not constitute UAT/security approval.
 
 ```sh
 npm run version:patch

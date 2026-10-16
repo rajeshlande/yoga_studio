@@ -1,0 +1,13 @@
+Decision ID,Area,Required decision/evidence,Accountable role,Actual state,Named approver,Due date,Evidence location,Approval date
+APR-01,Authority/security,"Owner-only ownership/security, Co-Owner operational scope, granular Admin grants and last-Owner security review",Owner + security reviewer,Specified; implementation/review pending,Unassigned,,,
+APR-02,Operational defaults,"Confirm initial INR, studio timezone and 60-minute class constraint; accepted attendance defaults remain configurable",Owner + operations,Business default approval pending,Unassigned,,,
+APR-03,Billing,"Approve BIL fixtures, proration/rounding, tax applicability, discount sequencing, due/grace and fiscal numbering",Owner + accountant,Accounting approval pending,Unassigned,,,
+APR-04,Entitlements/pauses,Approve product-family entitlements and retain-seat/no-auto-credit baseline; exceptions effective-dated,Owner + operations/accountant,Business approval pending,Unassigned,,,
+APR-05,Minors/contacts,"Approve notices, guardian/consent and restricted collection before minors enabled",Owner + privacy reviewer,Blocked until approved,Unassigned,,,
+APR-06,Production retention,"Approve data-class durations, erasure/pseudonymization and account-deletion procedure; not indefinite storage",Privacy reviewer + accountant/Owner,Legal/business review pending,Unassigned,,,
+APR-07,Migration,Approve verified existing-user mappings and rehearsal counts/exceptions/rollback compatibility,Owner + technical/DB reviewer,Staging rehearsal pending,Unassigned,,,
+APR-08,Real Auth,Verify signup/confirmation/recovery/profile/logout using approved staging project/mailbox,Project administrator + QA,Real-provider UAT pending,Unassigned,,,
+APR-09,Performance/cost,"Approve benchmark workload/actual provider plan, spending ceiling and alerts; record measured results",Owner + technical/operations,Targets proposed; not measured,Unassigned,,,
+APR-10,Recovery,Record numeric RTO/RPO against actual provider capabilities; prove timed DB/Auth/private-object restore,Owner + recovery lead,Commitments/drill pending,Unassigned,,,
+APR-11,Accountability,"Assign named migration, incident/on-call, DB/security, accountant/privacy, QA and release approvers",Owner + operations,Names and private contact register pending,Unassigned,,,
+APR-12,Management release,"Five-role UAT, GOV/ATT/DBF/BIL tests, privacy/a11y review, phase evidence and go-live signatures",Owner + relevant approvers,Not implemented / not executed / not approved,Unassigned,,,

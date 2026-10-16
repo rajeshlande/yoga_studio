@@ -12,12 +12,13 @@ This is project guidance, not permission to bypass tool safeguards or higher-pri
 - Retain React/Vite, Supabase and GitHub Pages. Keep the UI responsive, accessible and installable; preserve scoped offline-shell behavior.
 - Current implemented scope is authentication, dashboard, profile and settings. Management features are **planning only** until explicitly authorized. Documentation requests do not authorize code, migrations or live database changes.
 - No demo accounts, demo access, authentication bypasses or seeded business data. Keep synthetic fixtures isolated in tests and out of deployed assets.
+- Future roles include organization-scoped operational Co-Owner: operational branch/staff/billing/retrospective attendance rights, but no ownership/security-policy changes. At least one active Owner must remain; Co-Owner does not count. Follow the consolidated governance contract.
 - Do not introduce OpenWA or other unofficial WhatsApp integrations. Consult the accepted attendance specification before changing attendance decisions.
 - Preserve unrelated user edits. Do not reset, clean, rewrite history, delete data, deploy migrations or push without authorization for that action. Never claim a push or deployment succeeded without evidence.
 
 ## Supabase business-data contract
 
-Read [the function-only access policy](docs/11-management-plan/database-functions-and-call-policy.md) before any data-access design or implementation.
+Read [the function-only access policy](docs/11-management-plan/README.md#database-functions) before any data-access design or implementation.
 
 - All application business-data **reads and writes** use approved, typed PostgreSQL RPCs. No business-table `.from(...)` CRUD, raw table REST endpoints or generic SQL/table-query functions, including inside Edge Functions.
 - Use authorized Edge Functions for server secrets, Auth Admin, external services and trusted orchestration; their business-data access also uses approved RPCs.
@@ -64,7 +65,7 @@ For documentation-only work, check links, paths, content consistency and `git di
 - `package.json` is the application version source of truth. For app releases, use the existing `version:patch`, `version:minor` or `version:major` script as appropriate, keep the lockfile aligned and update `CHANGELOG.md`. Documentation-only changes do not require an application version bump.
 - [Project README](README.md): current scope, setup and release commands.
 - [Documentation index](docs/README.md): navigate only to the relevant topic; historical drafts/evidence do not override current decisions.
-- [Management plan](docs/11-management-plan/README.md), [schema dictionary](docs/11-management-plan/schema-dictionary.md) and [attendance contract](docs/11-management-plan/attendance-workflow.md): future business scope and acceptance rules; not proof of deployed features.
+- [Management plan](docs/11-management-plan/README.md), [schema dictionary](docs/11-management-plan/README.md#core-schema) and [attendance contract](docs/11-management-plan/README.md#attendance-workflow): future business scope and acceptance rules; not proof of deployed features.
 - [Version management](docs/05-development/version-management.md) and [Pages deployment](docs/08-devops-deployment/github-pages.md): release/deployment procedures; verify current versions against the package manifest.
 
 Keep this file concise and update it when durable project rules change. Link detailed workflows rather than importing the entire documentation tree. Do not refetch external references on every task.

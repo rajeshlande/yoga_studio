@@ -1,17 +1,19 @@
 # Yoga Studio — Essential project documentation
 
-**Version 0.1 · Draft · 15 October 2026 · Application baseline `92f42e3`**
+**Index version 0.2 · Updated 16 October 2026 · Current application baseline 1.1.1 / `f72bee4`**
 
 This package follows the essential-document option from the supplied project checklist. Related documents are combined to avoid duplicate paperwork. It describes the current **auth-first minimal app**, not the removed class-management UI. Code-derived facts, executed test evidence, proposed controls and pending work are distinguished throughout. No approval, production deployment, legal compliance, penetration test or real Supabase integration result is invented.
 
-## Management expansion — planning only
+## Management expansion — one consolidated specification
 
-- [Multi-studio implementation plan](11-management-plan/README.md)
-- [Function-only Supabase access and call-efficiency policy](11-management-plan/database-functions-and-call-policy.md): typed RPCs for all business reads/writes, Edge Functions for privileged workflows, bounded screen responses and no direct client table CRUD.
-- [Agreed attendance workflow and corrections](11-management-plan/attendance-workflow.md): automatic current-class selection, Instructor marking, Owner corrections, explicit Admin delegation and audit history; no QR/student self-check-in.
-- [Detailed schema dictionary](11-management-plan/schema-dictionary.md) and [planning workbook](11-management-plan/yoga-studio-management-plan.xlsx).
+[**Management plan v0.4**](11-management-plan/README.md) is the single authoritative planning document. It includes operational Co-Owner, P0/P1 resolutions, 232 core fields, 24 typed support contracts, attendance, RPC-only access, billing examples and phase/retention/recovery readiness.
 
-These documents plan future management features; they do not describe deployed attendance functionality or an approved production release.
+- [Governance, Co-Owner and readiness](11-management-plan/README.md#governance-and-readiness)
+- [Core fields](11-management-plan/README.md#core-schema) and [supporting contracts](11-management-plan/README.md#supporting-contracts)
+- [Attendance](11-management-plan/README.md#attendance-workflow) and [RPC/call policy](11-management-plan/README.md#database-functions)
+- [Workbook](11-management-plan/yoga-studio-management-plan.xlsx), [backlog](11-management-plan/implementation-backlog.csv) and [blocking decision register](11-management-plan/readiness-register.csv) are derived formats.
+
+Documentation specifications are not deployed features or passed management tests. Accounting/privacy approvals, measured capacity, restore evidence and production sign-off remain pending. Current core guides were refreshed; older reports/evidence below remain historical.
 
 ## Current release: 1.1.1
 
@@ -53,7 +55,7 @@ The current product is **Yoga Studio** and has **no demo access or sample user d
 
 ## Structured tracker and evidence
 
-- [RTM workbook](02-requirements/requirements-traceability-matrix.xlsx) — 20 functional/non-functional requirements, implementation references, test mapping, current verification and gaps.
+- [RTM workbook](02-requirements/requirements-traceability-matrix.xlsx) — 20 stable application IDs (FR-10 retired) plus 12 specified management requirements, with implementation/test mapping and pending evidence.
 - [RTM CSV](02-requirements/requirements-traceability-matrix.csv) — text-friendly copy for Git review.
 - [Build evidence](06-testing/evidence/build.txt), [3-test browser result](06-testing/evidence/browser-tests.txt), [dependency audit](06-testing/evidence/dependency-audit.json), [offline smoke result](06-testing/evidence/offline-smoke.json).
 
@@ -64,12 +66,12 @@ The current product is **Yoga Studio** and has **no demo access or sample user d
 | BRD, charter, scope, plan | PM-001 business summary/scope/stages; dates and staffing pending |
 | SRS/FRD, user stories, acceptance, NFR | REQ-001 and RTM |
 | UI/UX, sitemap, flows, screen specification | UX-001; Mermaid diagrams render in compatible Markdown viewers |
-| HLD/LLD, stack, data design/ERD/API/auth | TECH-001 and TECH-002; no custom schema to invent |
+| HLD/LLD, stack, data design/ERD/API/auth | TECH-001 and TECH-002; current Auth plus planned business/supporting schema |
 | Caching/PWA | TECH-003 |
 | Coding/Git/review/configuration/build | DEV-001; recommended process distinguished from enforced tooling |
 | Test strategy/plan/cases/data/report/regression/UAT | QA-001, QA-002, RTM and raw evidence |
 | Security/threats/access/privacy/secrets | SEC-001; no independent security or compliance certification |
-| Deployment/CI/environment/rollback/release notes | OPS-001; pipeline and production environment not provisioned |
+| Deployment/CI/environment/rollback/release notes | OPS-001; Pages pipeline exists; controlled management migrations/operations remain planned |
 | User/admin/support/backup/recovery | USER-001 and OPS-002; no in-app admin feature; external administration documented |
 | Approvals/handover/closure | GOV-001; all formal approvals pending |
 
@@ -79,7 +81,7 @@ The current product is **Yoga Studio** and has **no demo access or sample user d
 2. Revoke the previously exposed repository credential; do not paste secrets into documents.
 3. Configure the Supabase **public** key in a controlled environment and execute real login/signup/confirmation/recovery/profile/logout tests.
 4. Resolve/review accessibility, recovery, caching, security and operational risks before release.
-5. Select HTTPS hosting, rehearse rollback/restore, complete UAT and obtain explicit go-live approval.
+5. Verify the existing Pages deployment, rehearse rollback/restore, complete real-provider/management UAT as applicable, and obtain actual go-live approval.
 
 ## Maintenance rules
 
