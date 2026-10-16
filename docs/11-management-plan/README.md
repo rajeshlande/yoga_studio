@@ -1,6 +1,6 @@
 # Yoga Studio Management PWA — Consolidated Implementation Plan
 
-<a id="plan-overview"></a>
+## Plan overview
 
 **Plan version:** 0.4 · **Updated:** 16 October 2026 · **Status:** Proposed; approval required before implementation
 **Current app baseline:** Yoga Studio 1.1.1, commit `f72bee4`
@@ -460,9 +460,9 @@ P0/P1 **documentation specifications** are consolidated here. Production approva
 | 0.3 | 2026-10-16 | Function-only Supabase business reads/writes and bounded call contracts |
 | 0.4 | 2026-10-16 | Single-document consolidation; operational Co-Owner; exact authorization; Phase 1 idempotency; granular Admin attendance; typed support contracts; P1 billing/recovery/performance/readiness/retention specifications |
 
-<a id="governance-and-readiness"></a>
+## Governance and readiness
 
-## 18. Governance, Co-Owner and P0/P1 readiness
+**Section 18 — Governance, Co-Owner and P0/P1 readiness**
 
 ### Closure register and source of truth
 
@@ -683,9 +683,9 @@ All GOV cases below are **specified, not executed**. Existing ATT and DBF cases 
 | GOV-15 | Complete approved BIL fixtures, request budgets and benchmark evidence; no mocked/live-performance equivalence |
 | GOV-16 | Restore/cutover/erasure drills preserve retained facts, last Owner, revoked access and accounting reconciliation; no release with unsigned blocking decisions |
 
-<a id="core-schema"></a>
+## Core schema
 
-## 19. Core field dictionary — nine tables, 232 proposed fields
+**Section 19 — Core field dictionary — nine tables, 232 proposed fields**
 
 ### Function-only access boundary
 
@@ -1020,9 +1020,9 @@ All application reads and writes use approved typed Supabase RPCs; no browser di
 
 Confirm exact enums, retention periods, minor/guardian rules, plan entitlements, pause/seat semantics, correction deadlines, numbering/tax policy and cross-branch schedule conflict policy before SQL generation. The approved migration must add tenant FKs, non-overlap/uniqueness rules, restricted grants, RLS, validated RPCs and tests together. Do not implement this dictionary as unchecked direct client CRUD.
 
-<a id="supporting-contracts"></a>
+## Supporting contracts
 
-## 20. Supporting-entity contracts by phase
+**Section 20 — Supporting-entity contracts by phase**
 
 These are complete minimum **planning contracts**, not SQL or proof of deployment. Add the required entities only in their phase; optional qualification/room/gateway/export stores remain disabled until approved. All names are logical business tables in non-exposed `app_data`. No direct browser or Edge table CRUD.
 
@@ -1511,9 +1511,9 @@ Per-phase migration review must prove every required field/check/FK, actor attri
 **Deletion/security:** shared RESTRICT, no runtime hard-delete, fixed projections and reviewed RPC/RLS execution apply.
 
 
-<a id="attendance-workflow"></a>
+## Attendance workflow
 
-## 21. Attendance workflow and acceptance tests
+**Section 21 — Attendance workflow and acceptance tests**
 
 ### Selected approach
 
@@ -1663,9 +1663,9 @@ Use scoped `studio_permission_grants` rows, one per `attendance.mark`, `attendan
 
 The workflow is captured as the agreed planning direction, with 10-minute/15-minute/24-hour values as documented configurable defaults. Production enforcement, database migration, RLS/RPC tests, UI implementation, real-user UAT and formal go-live approval are still pending. Do not treat a document update as a deployed attendance feature.
 
-<a id="database-functions"></a>
+## Database functions
 
-## 22. Supabase function-only API and call-efficiency policy
+**Section 22 — Supabase function-only API and call-efficiency policy**
 
 ### Mandatory rule
 
