@@ -1,5 +1,3 @@
-<div align="center">
-
 # 🧘 Yoga Studio
 
 **A calm, installable PWA for your personal yoga practice — built with React, Vite, and Supabase.**
@@ -10,11 +8,7 @@
 [![License](https://img.shields.io/badge/license-ISC-blue?style=flat-square)](LICENSE)
 [![Build](https://img.shields.io/badge/build-Vite-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
 
-<p align="center">
-  <em>Small steps. Meaningful progress.</em>
-</p>
-
-</div>
+*Small steps. Meaningful progress.*
 
 ---
 
@@ -327,6 +321,4 @@ Released under the [ISC License](LICENSE).
 
 ---
 
-<div align="center">
-  <sub>A mindful space, made for you. <code>🌿</code></sub>
-</div>
+*A mindful space, made for you. 🌿*
