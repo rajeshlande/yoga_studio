@@ -2,6 +2,22 @@
 
 Version numbers follow semantic versioning. `package.json` is the authoritative application version.
 
+## 1.1.2 — 2026-10-19
+
+### Added
+- Light / Dark / System theme toggle with live OS-preference sync, accessible segmented picker in Settings and a quick sun/moon toggle in the topbar. Pre-paint bootstrap in `index.html` prevents a flash of the wrong theme on load; `<meta name="theme-color">` stays in sync with the active theme for browser UI.
+
+### Documentation
+- Rewrote `README.md` to industry-standard structure — badges, table of contents, about, features, tech stack, project structure, getting-started, scripts, testing, versioning, deployment, documentation index, roadmap, security notes, contributing and license.
+- Repositioned project framing around yoga-studio operations management (students, batches, attendance, payments) with a clear "status at a glance" table distinguishing live foundation features from planned modules.
+- Added `docs/feature-breakdown.md` — per-feature breakdown of the consolidated management plan with complexity ratings, dependencies, per-feature effort estimates, phase exit gates, deferred scope and a recommended delivery order.
+- Added the app icon to the top of the README.
+
+### Internals
+- Added `src/lib/theme.js` helper for reading/writing/applying/cycling themes.
+- Dark theme is implemented as a layered `[data-theme="dark"]` override set in `style.css`; the original light theme is untouched.
+- Installed Playwright browser dependencies so the full test suite (security-config unit checks + 5 Playwright browser tests) runs cleanly.
+
 ## 1.1.1 — 2026-10-15
 
 ### Security/configuration cleanup
