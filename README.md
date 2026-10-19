@@ -1,91 +1,332 @@
-# Yoga Studio
+<div align="center">
 
-A minimal, mobile/desktop-friendly PWA built with React, Vite and Supabase Authentication. **Current release: 1.1.1.**
+# 🧘 Yoga Studio
 
-Live application: https://rajeshlande.github.io/yoga_studio/
+**A calm, installable PWA for your personal yoga practice — built with React, Vite, and Supabase.**
 
-## Before working on this project
+[![Live App](https://img.shields.io/badge/Live-rajeshlande.github.io%2Fyoga__studio-8664ba?style=flat-square)](https://rajeshlande.github.io/yoga_studio/)
+[![Version](https://img.shields.io/badge/version-1.1.1-8664ba?style=flat-square)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D22%20%3C25-339933?style=flat-square&logo=node.js&logoColor=white)](package.json)
+[![License](https://img.shields.io/badge/license-ISC-blue?style=flat-square)](LICENSE)
+[![Build](https://img.shields.io/badge/build-Vite-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
 
-Read [CLAUDE.md](CLAUDE.md) before any codebase work, including exploration, planning, edits, tests and Git operations. It records the project constraints, Supabase function-only policy, verification commands and documentation references. Read it again at the start of each task or after a context reset, and whenever it changes.
+<p align="center">
+  <em>Small steps. Meaningful progress.</em>
+</p>
 
-## Scope
+</div>
 
-- Login, sign-up, forgot-password email and recovery-link password update.
-- After authentication: simple dashboard, editable name/bio profile, read-only account email, settings, installation and logout.
-- Responsive sidebar/mobile drawer, keyboard-focus handling and offline app shell.
-- Visible application version, sourced from `package.json` (authentication footer, private footer and Settings).
+---
 
-**There is no demo account, demo sign-in, seeded user profile, local sample-data mode or authentication bypass.** The dashboard requires a Supabase session. Without a configured public key, account forms display a setup message and no private pages are accessible. Test fixtures are isolated under `tests/`, mocked at the network boundary, and are not bundled in the app.
+## Table of Contents
 
-The product display/PWA name is **Yoga Studio**. The repository, npm package identifier and Pages deployment directory remain `yoga_studio`, preserving the live URL.
+- [About the Project](#about-the-project)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Environment Variables](#environment-variables)
+  - [Running Locally](#running-locally)
+- [Scripts](#scripts)
+- [Testing](#testing)
+- [Versioning](#versioning)
+- [Build & Deployment](#build--deployment)
+  - [Local Production Build](#local-production-build)
+  - [GitHub Pages Deployment](#github-pages-deployment)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [Security Notes](#security-notes)
+- [Contributing](#contributing)
+- [License](#license)
 
-## Run locally
+---
 
-Use Node 22.
+## About the Project
+
+Yoga Studio is a minimal, mobile- and desktop-friendly **Progressive Web App** that gives users a personal, distraction-free space to manage their yoga practice. It handles account creation, sign-in, password recovery, a personalized dashboard, profile management, settings, and offline access — all wrapped in a calm, responsive interface.
+
+The product display and PWA name is **Yoga Studio**. The repository, npm package identifier, and GitHub Pages deployment path remain `yoga_studio` to preserve the live URL.
+
+> 📍 **Live application:** [https://rajeshlande.github.io/yoga_studio/](https://rajeshlande.github.io/yoga_studio/)
+
+> ⚠️ There is **no demo account**, seeded user profile, local sample-data mode, or authentication bypass. Private pages require a real Supabase session.
+
+---
+
+## Features
+
+- 🔐 **Authentication** — Email sign-up, sign-in, forgot-password, and secure password-reset flow via Supabase Auth.
+- 🏠 **Personal dashboard** — Warm welcome experience with quick access to essentials.
+- 👤 **Profile management** — Editable full name and bio; read-only connected email.
+- ⚙️ **Settings** — Password reset, PWA installation prompt, app version, and sign-out.
+- 🌓 **Theme toggle** — Light, Dark, and System themes, persisted across sessions.
+- 📱 **Installable PWA** — Add to home screen on mobile and desktop; offline app shell after first visit.
+- 📶 **Offline shell** — Static assets are cached; auth actions require connectivity (passwords/API responses are never cached).
+- 🧭 **Responsive navigation** — Sidebar on desktop, accessible drawer on mobile, keyboard focus handling, and focus traps.
+- 🏷️ **Visible versioning** — App version surfaced in auth footer, private footer, and Settings (sourced from `package.json`).
+- 🔄 **Auto-updating** — Content-versioned service worker means users receive new releases without clearing storage.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| UI framework | [React 19](https://react.dev/) |
+| Build tool | [Vite 6](https://vitejs.dev/) |
+| Authentication | [Supabase Auth](https://supabase.com/auth) (`@supabase/supabase-js`) |
+| Icons | [Lucide React](https://lucide.dev/) |
+| Testing | [Node.js test runner](https://nodejs.org/api/test.html) + [Playwright](https://playwright.dev/) |
+| Deployment | GitHub Pages (via GitHub Actions) |
+| PWA | Service worker, manifest, installable — all generated by Vite |
+
+### Engine Requirements
+
+- **Node.js** `>=22 <25`
+- **npm** (bundled with Node 22)
+
+---
+
+## Project Structure
+
+```text
+yoga_studio/
+├── index.html                # App entry; pre-paint theme bootstrap
+├── public/                   # Static assets (manifest, icons, SW)
+├── src/
+│   ├── App.jsx               # Root component (auth, routing, layout, pages)
+│   ├── main.jsx              # React mount + service-worker registration
+│   ├── style.css             # All styling + dark theme overrides
+│   └── lib/
+│       ├── auth.js           # Supabase client + auth helpers
+│       ├── theme.js          # Light/dark/system theme manager
+│       ├── useFocusTrap.js   # Accessibility focus-trap hook
+│       └── version.js        # App name + version from package.json
+├── scripts/                  # Build/verification helpers
+├── tests/                    # Security-config unit tests + Playwright suite
+├── docs/                     # Full project documentation (see docs/README.md)
+├── .github/workflows/        # CI + GitHub Pages deployment
+├── .env.example              # Environment variable template
+├── CLAUDE.md                 # Contributor constraints & verification commands
+├── CHANGELOG.md              # Release history
+└── package.json
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+1. **Node.js 22** installed ([download](https://nodejs.org/)).
+2. A **Supabase project** with the Email provider enabled.
+3. Your Supabase **Project URL** and **anon/public** publishable key (from Project Settings → API).
+
+### Installation
 
 ```sh
+# 1. Clone the repository
+git clone https://github.com/rajeshlande/yoga_studio.git
+cd yoga_studio
+
+# 2. Install dependencies (uses package-lock.json for reproducible installs)
 npm ci
+
+# 3. Create your local environment file
 cp .env.example .env.local
-# Add the project's publishable / anon public key to .env.local.
+```
+
+### Environment Variables
+
+Edit `.env.local` and fill in your Supabase project credentials:
+
+```env
+# Browser-visible configuration only.
+# Use a publishable / anon public key — NEVER a service-role or secret key.
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your_public_anon_key
+```
+
+> 🔒 `VITE_` variables are compiled into the production bundle and **are visible to end users**. Never put service-role keys, database passwords, or secrets here. `.env.local` is gitignored.
+
+### Supabase Configuration
+
+Before running the app, in your Supabase dashboard:
+
+1. **Authentication → Providers → Email** — enable Email auth.
+2. **Authentication → URL Configuration**:
+   - **Site URL** (production): `https://rajeshlande.github.io/yoga_studio/`
+   - **Redirect URLs** (production): `https://rajeshlande.github.io/yoga_studio/`
+   - **Redirect URLs** (development): add your local origin, e.g. `http://localhost:5173/`
+3. Configure email confirmation and password-recovery delivery as needed.
+
+### Running Locally
+
+```sh
 npm run dev
 ```
 
-Configuration:
+The Vite dev server starts at [http://localhost:5173/](http://localhost:5173/) (bound to `0.0.0.0`). You can now sign up, confirm your email, sign in, and explore the app.
 
-```text
-VITE_SUPABASE_URL=<SUPABASE_PROJECT_URL>
-VITE_SUPABASE_ANON_KEY=your_public_publishable_or_anon_key
-```
+---
 
-Never put a service-role/secret key, repository token or database password in browser configuration. `VITE_` values are visible in compiled assets. `.env.local` is ignored by Git.
+## Scripts
 
-Enable the Email provider in Supabase; configure confirmation and recovery delivery. Set Site URL and allowed redirect URL to `https://rajeshlande.github.io/yoga_studio/` (with the repository path) for production, and allowlist your development origin separately. Real delivery/authentication still needs testing with the actual configured project and mailbox.
+All scripts are defined in [`package.json`](package.json). Run them with `npm run <name>`.
 
-## Version management
+| Script | Description |
+|---|---|
+| `dev` | Start the Vite dev server (binds `0.0.0.0`, port `5173`). |
+| `build` | Production build for domain-root hosting (outputs to `dist/`). |
+| `build:pages` | Production build for **GitHub Pages** (`base: /yoga_studio/`). |
+| `preview` | Serve the built `dist/` folder locally for production preview. |
+| `test` | Run security-config unit tests followed by the Playwright browser suite. |
+| `test:ui` | Open Playwright's interactive UI runner. |
+| `security:check` | Scan tracked files for accidental secrets / unsafe patterns. |
+| `version:patch` | Bump patch version (`1.1.0 → 1.1.1`) — no commit, no tag. |
+| `version:minor` | Bump minor version (`1.1.0 → 1.2.0`). |
+| `version:major` | Bump major version (`1.1.0 → 2.0.0`). |
 
-`package.json` is the single source of truth. Vite injects its version into the application. Use semantic versions and update the lockfile together:
-
-```sh
-npm run version:patch    # fixes: 1.1.0 -> 1.1.1
-npm run version:minor    # compatible changes: 1.1.0 -> 1.2.0
-npm run version:major    # incompatible changes: 1.1.0 -> 2.0.0
-```
-
-These commands update package files **without creating an automatic commit or tag**. Update `CHANGELOG.md`, run tests/build checks, review, then commit/push. See [the release/version guide](docs/05-development/version-management.md). Service-worker caches are automatically content-versioned separately; users do not have to clear storage to receive an updated release.
-
-## Build and deploy
-
-```sh
-npm run build                 # domain-root hosting
-npm run build:pages           # /yoga_studio/ GitHub Pages hosting
-node scripts/check-pages.mjs
-npm run preview -- --base=/yoga_studio/ --port 4174
-```
-
-The included `.github/workflows/pages.yml` builds, tests and deploys successful pushes to `main`. Repository Pages source must be **GitHub Actions**. Store the two public Supabase configuration values in encrypted **Settings → Secrets and variables → Actions → Secrets** before building. Re-run the workflow after configuration changes.
-
-The worker/manifest/icons/auth redirects are subpath-aware. Offline mode supports the app shell, not new account authentication or server-side saves. Only the current app's static resources are cached. Passwords and Auth API responses are not cached by the app worker. Installation requires HTTPS/localhost and browser support; iOS installation is through Safari's Share menu.
+---
 
 ## Testing
 
 ```sh
+# First time only — install Chromium for Playwright
 npx playwright install --with-deps chromium
+
+# Run the full test suite (unit + browser)
 npm test
-# With the Pages production preview running:
+
+# Optional — Pages production smoke test
+npm run build:pages
+npm run preview -- --base=/yoga_studio/ --port 4174
+node scripts/check-pages.mjs
 node scripts/test-pages.mjs
 ```
 
-Five browser tests run on isolated development ports. Configured-flow tests use a test-only provider URL/key and intercepted responses; no test account is present in application code or deployed assets. The unconfigured test checks that legacy sample storage is removed and cannot authorize access. Mocked API tests are not proof of real Supabase email delivery or production authentication.
+- **Unit tests** (`tests/security-config.test.mjs`) validate that only legitimate public Supabase keys are accepted by the client.
+- **Browser tests** (Playwright) run against isolated development ports and use mocked network responses — no test account is bundled into the app.
+- Mocked API tests are **not** a substitute for real-provider UAT against an actual Supabase project and mailbox.
 
-## Management expansion — planning only
+---
 
-The [single consolidated management plan v0.4](docs/11-management-plan/README.md) defines operational Co-Owner, P0/P1 contracts, supporting schema, attendance, RPC policy and phase readiness. These management features are not implemented in the current app.
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/). `package.json` is the single source of truth; Vite injects the version into the app at build time.
+
+```sh
+npm run version:patch    # Bug fixes / tweaks            1.1.0 → 1.1.1
+npm run version:minor    # Backwards-compatible features 1.1.0 → 1.2.0
+npm run version:major    # Breaking changes              1.1.0 → 2.0.0
+```
+
+Version bump commands update `package.json` and `package-lock.json` **without creating an automatic commit or tag**. The release workflow is:
+
+1. Bump the version.
+2. Update [`CHANGELOG.md`](CHANGELOG.md).
+3. Run tests and the build.
+4. Review, then commit and push.
+
+Service-worker caches are content-versioned separately, so users automatically receive the new release without clearing storage.
+
+See [`docs/05-development/version-management.md`](docs/05-development/version-management.md) for the full release process.
+
+---
+
+## Build & Deployment
+
+### Local Production Build
+
+```sh
+# Standard build (domain root)
+npm run build
+npm run preview -- --port 4173
+
+# GitHub Pages build (base path = /yoga_studio/)
+npm run build:pages
+node scripts/check-pages.mjs
+npm run preview -- --base=/yoga_studio/ --port 4174
+```
+
+### GitHub Pages Deployment
+
+The repository ships with a CI workflow at [`.github/workflows/pages.yml`](.github/workflows/pages.yml) that builds, tests, and deploys successful pushes to `main`.
+
+**One-time setup:**
+
+1. In GitHub, go to **Settings → Pages** and set **Source** to **GitHub Actions**.
+2. In **Settings → Secrets and variables → Actions → Secrets**, add two encrypted repository secrets:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+3. Push to `main`. The workflow handles build, tests, and deploy automatically.
+
+Re-run the workflow after any configuration change. The service worker, manifest, icons, and auth redirects are all subpath-aware for the `/yoga_studio/` deployment base.
+
+---
 
 ## Documentation
 
-- [Current version and release process](docs/05-development/version-management.md)
-- [Changelog](CHANGELOG.md)
-- [GitHub Pages deployment](docs/08-devops-deployment/github-pages.md)
-- [Essential project documentation](docs/README.md)
+In-depth documentation lives under [`docs/`](docs/README.md). The main entry points:
 
-Some retained documents/evidence describe a historical pre-1.1.0 baseline; refreshed core guides and the consolidated plan are explicitly labelled. The latest release notes supersede its demo-mode statements; historical test evidence is retained as history, not current-release approval. Security/accessibility reviews, real-provider UAT and operational sign-off remain pending.
+| Topic | Link |
+|---|---|
+| Documentation index | [`docs/README.md`](docs/README.md) |
+| Version management & release process | [`docs/05-development/version-management.md`](docs/05-development/version-management.md) |
+| Changelog / release history | [`CHANGELOG.md`](CHANGELOG.md) |
+| GitHub Pages deployment | [`docs/08-devops-deployment/github-pages.md`](docs/08-devops-deployment/github-pages.md) |
+| Contributor guide & constraints | [`CLAUDE.md`](CLAUDE.md) ⭐ |
+| Future management feature plan | [`docs/11-management-plan/README.md`](docs/11-management-plan/README.md) |
+
+> ⚠️ **Read [`CLAUDE.md`](CLAUDE.md) before any codebase work** — it captures project constraints, the Supabase function-only data-access policy, verification commands, and documentation references. Re-read it at the start of every task, after context resets, and whenever it changes.
+
+---
+
+## Roadmap
+
+The [**Consolidated Management Plan v0.4**](docs/11-management-plan/README.md) scopes a future studio-management expansion (multi-role portals, recurring batches, attendance, monthly billing, payments, and owner oversight across branches). These management features are **planning only** — they are **not** implemented in the current app, and no database migrations, roles, or RPCs are deployed by the plan document.
+
+Approval, security review, and operational sign-off are required before implementation. The provisional 62–94 engineering-day estimate will be reassessed after the foundation phase. See [`docs/11-management-plan/implementation-backlog.csv`](docs/11-management-plan/implementation-backlog.csv) for the work-package breakdown.
+
+---
+
+## Security Notes
+
+- **Never** commit service-role keys, admin keys, repository tokens, or database passwords.
+- Only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (the publishable/anon key) belong in browser configuration.
+- Passwords and Supabase Auth API responses are **never** cached by the service worker.
+- Test fixtures are isolated under `tests/` and are mocked at the network boundary — they are never bundled into application code.
+- There is no authentication bypass, demo account, or seeded business data in the app.
+- Run `npm run security:check` to scan tracked files for accidental credential leaks.
+
+---
+
+## Contributing
+
+1. Read [`CLAUDE.md`](CLAUDE.md) end-to-end first.
+2. Create a feature branch off `main`.
+3. Make focused, minimal changes using existing patterns — do not add dependencies or frameworks without task-related need.
+4. Add or update tests for any changed behavior.
+5. Run the full verification before pushing:
+   ```sh
+   npm ci
+   npm test
+   npm run build
+   npm run security:check
+   ```
+6. Update `CHANGELOG.md` if the change is user-visible, and bump the version per the release guide.
+7. Open a pull request describing the change, checks run, and any remaining blockers.
+
+---
+
+## License
+
+Released under the [ISC License](LICENSE).
+
+---
+
+<div align="center">
+  <sub>A mindful space, made for you. <code>🌿</code></sub>
+</div>
