@@ -1,6 +1,6 @@
 # 🧘 Yoga Studio
 
-**A calm, installable PWA for your personal yoga practice — built with React, Vite, and Supabase.**
+**An installable PWA for running yoga studio operations — students, batches, attendance, and payments. Built with React, Vite, and Supabase.**
 
 [![Live App](https://img.shields.io/badge/Live-rajeshlande.github.io%2Fyoga__studio-8664ba?style=flat-square)](https://rajeshlande.github.io/yoga_studio/)
 [![Version](https://img.shields.io/badge/version-1.1.1-8664ba?style=flat-square)](package.json)
@@ -39,28 +39,57 @@
 
 ## About the Project
 
-Yoga Studio is a minimal, mobile- and desktop-friendly **Progressive Web App** that gives users a personal, distraction-free space to manage their yoga practice. It handles account creation, sign-in, password recovery, a personalized dashboard, profile management, settings, and offline access — all wrapped in a calm, responsive interface.
+Yoga Studio is a mobile- and desktop-friendly **Progressive Web App** that helps yoga studio owners and staff run day-to-day operations — managing student records, class batches, attendance, memberships, and payments — from a single calm, responsive interface. It is designed as a multi-role system serving Owners, Co-Owners, Admins, Instructors, and Students, with role-scoped access, auditable changes, and typed server-side data access through Supabase.
+
+**Current release (v1.1.1)** ships the foundational layer — secure authentication, a personalized dashboard, profile, settings, PWA installation, offline shell, and a light/dark/system theme. The operational management modules (students, batches, attendance, billing, payments, and multi-role portals) are specified in the [Consolidated Management Plan](docs/11-management-plan/README.md) and are being rolled out in phased work packages.
 
 The product display and PWA name is **Yoga Studio**. The repository, npm package identifier, and GitHub Pages deployment path remain `yoga_studio` to preserve the live URL.
 
 > 📍 **Live application:** [https://rajeshlande.github.io/yoga_studio/](https://rajeshlande.github.io/yoga_studio/)
 
-> ⚠️ There is **no demo account**, seeded user profile, local sample-data mode, or authentication bypass. Private pages require a real Supabase session.
+> ⚠️ There is **no demo account**, seeded data, or authentication bypass. Private pages require a real Supabase session.
+
+### Status at a glance
+
+| Module | Status |
+|---|---|
+| Authentication (sign-up, sign-in, password reset) | ✅ Live |
+| Dashboard, Profile, Settings, PWA install | ✅ Live |
+| Light / Dark / System theme | ✅ Live |
+| Responsive layout & offline app shell | ✅ Live |
+| Student records & directory | 🛠️ Planned (Phase 2) |
+| Batches / class schedules & enrollment | 🛠️ Planned (Phase 2) |
+| Attendance marking & corrections | 🛠️ Planned (Phase 3) |
+| Membership plans & monthly billing | 🛠️ Planned (Phase 4) |
+| Payments, receipts & reports | 🛠️ Planned (Phase 5–6) |
+| Multi-role portals (Owner / Admin / Instructor / Student) | 🛠️ Planned (Phase 1+) |
 
 ---
 
 ## Features
 
+### Available today (foundation)
+
 - 🔐 **Authentication** — Email sign-up, sign-in, forgot-password, and secure password-reset flow via Supabase Auth.
-- 🏠 **Personal dashboard** — Warm welcome experience with quick access to essentials.
+- 🏠 **Dashboard** — Clean welcome workspace with quick access to essentials.
 - 👤 **Profile management** — Editable full name and bio; read-only connected email.
-- ⚙️ **Settings** — Password reset, PWA installation prompt, app version, and sign-out.
-- 🌓 **Theme toggle** — Light, Dark, and System themes, persisted across sessions.
+- ⚙️ **Settings** — Password reset, PWA installation prompt, appearance, app version, and sign-out.
+- 🌓 **Theme toggle** — Light, Dark, and System themes, persisted across sessions and synced to OS preference.
 - 📱 **Installable PWA** — Add to home screen on mobile and desktop; offline app shell after first visit.
-- 📶 **Offline shell** — Static assets are cached; auth actions require connectivity (passwords/API responses are never cached).
-- 🧭 **Responsive navigation** — Sidebar on desktop, accessible drawer on mobile, keyboard focus handling, and focus traps.
-- 🏷️ **Visible versioning** — App version surfaced in auth footer, private footer, and Settings (sourced from `package.json`).
+- 📶 **Offline shell** — Static assets are cached; auth and business-data actions require connectivity (passwords and API responses are never cached).
+- 🧭 **Responsive navigation** — Sidebar on desktop, accessible drawer on mobile, keyboard focus handling and focus traps.
+- 🏷️ **Visible versioning** — App version surfaced in the auth footer, private footer, and Settings (sourced from `package.json`).
 - 🔄 **Auto-updating** — Content-versioned service worker means users receive new releases without clearing storage.
+
+### Planned operations modules
+
+- 👥 **Student & instructor records** — Role-scoped directories with minimum necessary fields and audit trails.
+- 🗓️ **Batches & schedules** — Recurring class batches, capacity, and enrollment rules.
+- ✅ **Attendance** — Instructor marking window, today's-class auto-selection, audited corrections.
+- 💳 **Memberships & billing** — Monthly plans (calendar-month or anniversary), proration, dues tracking.
+- 💰 **Payments & receipts** — Manual cash/UPI/card/bank-transfer recording with receipt numbers and reconciliation.
+- 📊 **Reports & exports** — Scoped reports for owners/admins and controlled receipt downloads.
+- 🔐 **Role-based portals** — Owner, Co-Owner, Admin, Instructor, and Student views with scoped permissions.
 
 ---
 
@@ -280,9 +309,21 @@ In-depth documentation lives under [`docs/`](docs/README.md). The main entry poi
 
 ## Roadmap
 
-The [**Consolidated Management Plan v0.4**](docs/11-management-plan/README.md) scopes a future studio-management expansion (multi-role portals, recurring batches, attendance, monthly billing, payments, and owner oversight across branches). These management features are **planning only** — they are **not** implemented in the current app, and no database migrations, roles, or RPCs are deployed by the plan document.
+The [**Consolidated Management Plan v0.4**](docs/11-management-plan/README.md) defines the full operations-management system — multi-role portals (Owner, Co-Owner, Admin, Instructor, Student), recurring batch schedules, enrollment, attendance marking with corrections, monthly membership billing, audited payment recording, and owner oversight across branches.
 
-Approval, security review, and operational sign-off are required before implementation. The provisional 62–94 engineering-day estimate will be reassessed after the foundation phase. See [`docs/11-management-plan/implementation-backlog.csv`](docs/11-management-plan/implementation-backlog.csv) for the work-package breakdown.
+These management features are **planned, not yet deployed**. Implementation proceeds in phased work packages (see [`docs/11-management-plan/implementation-backlog.csv`](docs/11-management-plan/implementation-backlog.csv)):
+
+| Phase | Scope | Rough effort |
+|---|---|---|
+| WP-01 | Owner approval of P0/P1 contracts, policies and blocking decisions | 2–4 days |
+| WP-02 | Tenant/security foundation: roles, trusted provisioning, audit, idempotency | 10–15 days |
+| WP-03 | Students, instructors, contacts, batches and enrollment via typed RPCs | 10–15 days |
+| WP-04 | Actual class sessions, roster, attendance marking & corrections | 10–15 days |
+| WP-05 | Membership plans, monthly billing and statements | 10–15 days |
+| WP-06 | Payments, refunds, receipts, reports and exports | 10–15 days |
+| WP-07 | Security, a11y, performance, UAT, restore and production operations | 10–15 days |
+
+Approval, security review, and operational sign-off are required before each phase deploys. Deferred scope (unless separately approved) includes QR self-check-in, geofencing, online payment gateway, automated reminders/push, payroll, and native apps. See the [readiness register](docs/11-management-plan/readiness-register.csv) (APR-01…APR-12) for open approvals.
 
 ---
 
