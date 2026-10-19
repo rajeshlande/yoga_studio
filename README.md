@@ -1,3 +1,5 @@
+<img src="public/icon.svg" width="96" alt="Yoga Studio logo" />
+
 # 🧘 Yoga Studio
 
 **An installable PWA for running yoga studio operations — students, batches, attendance, and payments. Built with React, Vite, and Supabase.**
