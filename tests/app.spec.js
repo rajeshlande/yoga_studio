@@ -13,7 +13,7 @@ test('real session path gates dashboard; profile persists through mocked provide
  await page.getByLabel('Full name').fill('Updated Member');
  await page.getByLabel('A little about you').fill('Updated profile biography.');
  await page.getByRole('button',{name:'Save changes'}).click();
- await expect(page.getByRole('status')).toContainText('updated');
+ await expect(page.locator('.toast')).toContainText('updated');
  await page.reload();
  await expect(page.getByRole('heading',{name:'Welcome back, Updated.'})).toBeVisible();
  await page.getByRole('button',{name:'Settings',exact:true}).click();

@@ -13,7 +13,10 @@
 
 import {supabase} from '../auth.js';
 import {localStore} from './localStore.js';
-import {emptySnapshot, membershipEnd, toISODate} from './logic.js';
+import {
+  emptySnapshot, membershipEnd, toISODate,
+  normalizeBillingSettings, validateBillingSettings,
+} from './logic.js';
 import {
   acknowledgeOperations,
   addConflict,
@@ -70,6 +73,7 @@ const emptySyncSummary = (mode, overrides = {}) => ({
   online: browserOnline(),
   syncing: false,
   setupNeeded: false,
+  storagePersistent: null,
   hasCache: false,
   pendingCount: 0,
   conflictCount: 0,
@@ -100,8 +104,11 @@ export function createErpClient(mode, options = {}) {
   let initPromise = null;
   let syncPromise = null;
   let syncTimer = null;
+  let syncTimerDueAt = 0;
   let syncing = false;
   let setupNeeded = false;
+  let storagePersistent = null;
+  let syncRetryMs = 5_000;
   let lastError = '';
   let contextCheckedAt = 0;
   const lockOwner = newUuid();
@@ -114,6 +121,7 @@ export function createErpClient(mode, options = {}) {
       organizationId: state?.organizationId || '',
       syncing,
       setupNeeded,
+      storagePersistent,
       hasCache: Boolean(state?.lastPulledAt),
       pendingCount: state?.outbox?.length || 0,
       conflictCount: state?.conflicts?.length || 0,
@@ -128,6 +136,25 @@ export function createErpClient(mode, options = {}) {
     try { options.onSyncState?.(summary()); } catch { /* UI callbacks must not break sync. */ }
     if (snapshot && state) {
       try { options.onSnapshot?.(derived()); } catch { /* See above. */ }
+    }
+  }
+
+  async function refreshStoragePersistence({request = false} = {}) {
+    try {
+      const storageManager = globalThis.navigator?.storage;
+      if (!storageManager) return;
+      if (typeof storageManager.persisted === 'function') {
+        storagePersistent = await storageManager.persisted();
+      }
+      if (request && storagePersistent !== true && typeof storageManager.persist === 'function') {
+        // Persistent storage reduces (but does not eliminate) the chance a
+        // browser evicts the offline outbox under storage pressure. The
+        // browser may deny this until the PWA is installed/frequently used.
+        storagePersistent = await storageManager.persist();
+      }
+      emit();
+    } catch {
+      // Persistence is a safety improvement, not a condition for saving.
     }
   }
 
@@ -222,6 +249,7 @@ export function createErpClient(mode, options = {}) {
         state = createEmptySyncState({userId, organizationId: '', context: null, deviceId});
       }
       emit();
+      void refreshStoragePersistence({request: Boolean(state.organizationId)});
       return state;
     })().finally(() => { initPromise = null; });
     return initPromise;
@@ -290,7 +318,10 @@ export function createErpClient(mode, options = {}) {
   async function pull() {
     const snapshot = normalizeSnapshot(await rpc('erp_get_snapshot'));
     state = reconcileServerSnapshot(state, snapshot, {context: state.context || undefined});
-    if (state.outbox.length === 0 && state.conflicts.length === 0) state.lastSyncedAt = nowISO();
+    if (state.outbox.length === 0 && state.conflicts.length === 0) {
+      state.lastSyncedAt = nowISO();
+      syncRetryMs = 5_000;
+    }
     persist({optional: true});
     return derived();
   }
@@ -347,6 +378,7 @@ export function createErpClient(mode, options = {}) {
           const results = Array.isArray(response?.results) ? response.results : [];
           const byOpId = new Map(results.map(result => [result.opId, result]));
           const applied = [];
+          let unsupported = false;
           for (const op of ready) {
             const result = byOpId.get(op.opId);
             if (!result) continue;
@@ -354,13 +386,24 @@ export function createErpClient(mode, options = {}) {
               applied.push({op, result});
               madeProgress = true;
             } else if (result.status === 'conflict' || result.status === 'rejected') {
-              state = addConflict(state, op, result);
-              madeProgress = true;
+              if (result.code === 'UNSUPPORTED_OPERATION') {
+                // An older SQL install cannot apply a newer entity (for
+                // example billingSettings). Keep the operation safely in the
+                // outbox so it auto-syncs after the owner runs the upgraded
+                // one-file SQL, instead of presenting a false data conflict.
+                setupNeeded = true;
+                unsupported = true;
+                lastError = 'This change is saved on this device and is waiting for the latest supabase/erp_setup.sql upgrade.';
+              } else {
+                state = addConflict(state, op, result);
+                madeProgress = true;
+              }
             }
           }
           if (applied.length) state = acknowledgeOperations(state, applied);
           persist({optional: true});
           emit();
+          if (unsupported) break;
         }
 
         try {
@@ -379,6 +422,14 @@ export function createErpClient(mode, options = {}) {
         releaseLock();
         persist({optional: true});
         emit({snapshot: true});
+        // Users should never have to remember to press Sync now. If a
+        // transient network/server failure left sendable work behind, retry
+        // with bounded exponential backoff while this tab/app remains open.
+        if (browserOnline() && state?.organizationId && !setupNeeded
+            && readyOperations(state, 1).length > 0) {
+          scheduleSync(syncRetryMs);
+          syncRetryMs = Math.min(60_000, syncRetryMs * 2);
+        }
       }
       if (pullError && !state.lastPulledAt) throw pullError;
       return derived();
@@ -386,12 +437,31 @@ export function createErpClient(mode, options = {}) {
     return syncPromise;
   }
 
-  function scheduleSync() {
-    if (syncTimer || typeof setTimeout !== 'function') return;
+  function scheduleSync(delayMs = 30) {
+    if (typeof setTimeout !== 'function') return;
+    const delay = Math.max(0, delayMs);
+    const dueAt = Date.now() + delay;
+    if (syncTimer) {
+      // A long backoff timer must not delay a fresh user edit: bring the
+      // next automatic attempt forward when new work is queued.
+      if (dueAt >= syncTimerDueAt) return;
+      clearTimeout(syncTimer);
+    }
+    syncTimerDueAt = dueAt;
     syncTimer = setTimeout(() => {
       syncTimer = null;
-      syncNow().catch(() => { /* State and toolbar carry the error. */ });
-    }, 30);
+      syncTimerDueAt = 0;
+      syncNow().catch(() => {
+        // syncNow can fail before its internal retry block when the network
+        // drops during context/session bootstrap. Queue another bounded
+        // retry here as long as sendable device work remains.
+        if (browserOnline() && state?.organizationId && !setupNeeded
+            && readyOperations(state, 1).length > 0) {
+          scheduleSync(syncRetryMs);
+          syncRetryMs = Math.min(60_000, syncRetryMs * 2);
+        }
+      });
+    }, delay);
   }
 
   async function queue(mutator) {
@@ -405,11 +475,12 @@ export function createErpClient(mode, options = {}) {
       persist();
     } catch (error) {
       state = before;
-      if (error?.code === 'SYNC_CONFLICT_EXISTS') throw error;
+      if (error?.code === 'SYNC_CONFLICT_EXISTS' || error?.code === 'VALIDATION_FAILED') throw error;
       if (error instanceof Error && /required|no longer available|Resolve the sync conflict/i.test(error.message)) throw error;
       throw new Error('This device could not save the change. Check available storage and try again.');
     }
     emit();
+    void refreshStoragePersistence({request: true});
     scheduleSync();
     return derived();
   }
@@ -625,5 +696,26 @@ export function createErpClient(mode, options = {}) {
       typeof input === 'string' ? input : input?.id,
       typeof input === 'string' ? '' : (input?.reason || ''),
     )),
+
+    saveBillingSettings: payload => queue((state, snapshot) => {
+      const settings = normalizeBillingSettings(payload);
+      const errors = validateBillingSettings(settings);
+      if (errors.length) {
+        const error = new Error(errors.join(' '));
+        error.code = 'VALIDATION_FAILED';
+        throw error;
+      }
+      const old = existing(snapshot, 'billingSettings', payload) || snapshot.billingSettings?.[0] || null;
+      return enqueueUpsert(state, 'billingSettings', {
+        ...(old || {}),
+        ...settings,
+        // One billing profile per organization. Using the organization ID as
+        // the singleton record ID prevents two admins who both started from
+        // an empty profile from creating competing settings rows.
+        id: old?.id || payload?.id || state.organizationId,
+        createdAt: old?.createdAt || nowISO(),
+        syncVersion: old?.syncVersion || 0,
+      });
+    }),
   };
 }

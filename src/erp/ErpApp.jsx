@@ -4,10 +4,13 @@ import {
   Pencil, Plus, Printer, RefreshCw, Search, Users, Wallet, WifiOff, X,
 } from 'lucide-react';
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
+import QRCode from 'qrcode';
 import {
   ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, ROLES, attendanceSummary, batchTimeLabel,
-  emptySnapshot, formatDate, formatINR, initials, isBatchOnDate, membershipBalance,
-  membershipEnd, paiseToRupees, rupeesToPaise, toCSV, toISODate,
+  emptySnapshot, formatDate, formatINR, initials, isBatchOnDate, payableBalance,
+  membershipEnd, paiseToRupees, rupeesToPaise, toCSV, toISODate, addDaysISO,
+  INDIA_STATE_CODES, billingReadiness, buildUpiUri, calculateInvoiceTax,
+  formatInvoiceINR, normalizeBillingSettings,
 } from '../lib/erp/logic.js';
 import './erp.css';
 
@@ -15,7 +18,8 @@ import './erp.css';
 
 const defaultSyncState = mode => ({
   enabled: mode === 'supabase', mode, online: typeof navigator === 'undefined' || navigator.onLine,
-  syncing: false, setupNeeded: false, hasCache: false, pendingCount: 0, conflictCount: 0,
+  syncing: false, setupNeeded: false, storagePersistent: null, hasCache: false,
+  pendingCount: 0, conflictCount: 0,
   conflicts: [], lastPulledAt: null, lastSyncedAt: null, error: '',
 });
 
@@ -72,29 +76,64 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
   useEffect(() => {
     if (!enabled || mode !== 'supabase') return undefined;
     const refreshState = () => { if (client.getSyncState) setSyncState(client.getSyncState()); };
-    const onOnline = () => { refreshState(); client.syncNow?.().then(next => { if (next) setData(next); }).catch(() => {}); };
+    const runSync = () => {
+      refreshState();
+      client.syncNow?.().then(next => { if (next) setData(next); }).catch(() => {});
+    };
+    const onOnline = () => runSync();
     const onVisible = () => {
       if (document.visibilityState !== 'visible' || !navigator.onLine) return;
       if (Date.now() - lastFocusSync.current < 15_000) return;
       lastFocusSync.current = Date.now();
-      client.syncNow?.().then(next => { if (next) setData(next); }).catch(() => {});
+      runSync();
     };
     const onStorage = event => {
       if (event.key?.startsWith('yoga-studio-erp-sync-v1:')) client.refreshFromStorage?.();
+    };
+    // Pending-only safety net: if an earlier automatic attempt failed while
+    // the app stayed open, keep retrying without asking the user to remember
+    // Sync now. It does not poll when there is no queued work.
+    const retryTimer = setInterval(() => {
+      const current = client.getSyncState?.();
+      if (navigator.onLine && document.visibilityState === 'visible' && current?.pendingCount) runSync();
+    }, 30_000);
+    const onPageHide = () => {
+      // Best effort only; browsers may stop work during close. The durable
+      // outbox remains the real protection and syncs on the next open.
+      const current = client.getSyncState?.();
+      if (navigator.onLine && current?.pendingCount) client.syncNow?.().catch(() => {});
     };
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', refreshState);
     window.addEventListener('focus', onVisible);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('storage', onStorage);
+    window.addEventListener('pagehide', onPageHide);
     return () => {
+      clearInterval(retryTimer);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', refreshState);
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('storage', onStorage);
+      window.removeEventListener('pagehide', onPageHide);
     };
   }, [client, enabled, mode]);
+
+  useEffect(() => {
+    if (!enabled || mode !== 'supabase') return undefined;
+    const notYetInSupabase = syncState.pendingCount > 0 || syncState.conflictCount > 0 || syncState.syncing;
+    if (!notYetInSupabase) return undefined;
+    const warnBeforeClose = event => {
+      // Changes are already persisted in the device outbox, so closing does
+      // not erase them; this asks permission because they are not yet safely
+      // in Supabase and would remain only on this device until reopened.
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeClose);
+    return () => window.removeEventListener('beforeunload', warnBeforeClose);
+  }, [enabled, mode, syncState.pendingCount, syncState.conflictCount, syncState.syncing]);
 
   useEffect(() => {
     if (syncState.conflictCount > previousConflictCount.current) {
@@ -178,9 +217,9 @@ function instructorName(data, id) { return data.instructors.find(i => i.id === i
 function planName(data, id) { return data.plans.find(p => p.id === id)?.name || '—'; }
 function inBranch(ctx, branchId) { return !ctx.branchId || ctx.branchId === 'all' || ctx.branchId === branchId; }
 
-function Dialog({title, sub, onClose, children}) {
+function Dialog({title, sub, onClose, children, className = ''}) {
   return <div className="modal-backdrop" onClick={onClose}>
-    <div className="erp-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}>
+    <div className={`erp-dialog ${className}`} role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}>
       <button className="icon-button dialog-close" aria-label={`Close ${title}`} onClick={onClose}><X size={20}/></button>
       <h2>{title}</h2>{sub && <p className="dialog-sub">{sub}</p>}{children}
     </div>
@@ -219,7 +258,7 @@ export function ErpBlockingState({erp, mode, setMode}) {
 const SYNC_ENTITY_LABELS = {
   branches: 'Branch', students: 'Student', instructors: 'Instructor', batches: 'Batch',
   enrollments: 'Enrollment', attendance: 'Attendance', plans: 'Plan',
-  memberships: 'Membership', payments: 'Payment',
+  memberships: 'Membership', payments: 'Payment', billingSettings: 'Payment & invoice settings',
 };
 const SYNC_FIELD_LABELS = {
   name: 'Name', fullName: 'Full name', branchId: 'Branch', studentId: 'Student',
@@ -230,6 +269,13 @@ const SYNC_FIELD_LABELS = {
   capacity: 'Capacity', classDate: 'Class date', amountPaise: 'Amount', durationMonths: 'Duration (months)',
   startDate: 'Start date', endDate: 'End date', billingCycle: 'Billing cycle', method: 'Method',
   paidOn: 'Paid on', note: 'Note', receiptNo: 'Receipt', voidReason: 'Void reason',
+  legalName: 'Billing name', stateCode: 'State code', pinCode: 'PIN code', gstEnabled: 'GST enabled',
+  gstin: 'GSTIN', gstRatePercent: 'GST rate (%)', sacCode: 'SAC/HSN', priceIncludesGst: 'Prices include GST',
+  invoicePrefix: 'Invoice prefix', dueDays: 'Due days', upiId: 'UPI ID', upiPayeeName: 'UPI payee',
+  bankName: 'Bank', bankAccountName: 'Bank account name', bankAccountNumber: 'Bank account number',
+  bankAccountType: 'Account type', ifsc: 'IFSC', gatewayProvider: 'Gateway provider',
+  gatewayEnvironment: 'Gateway environment', gatewayPublicKeyId: 'Gateway public key ID',
+  gatewayWebhookUrl: 'Webhook URL', gatewayWebhookConfigured: 'Webhook configured', terms: 'Terms',
 };
 
 function syncValue(field, value, data) {
@@ -386,13 +432,14 @@ export function ErpDashboardSection(props) {
     && (ctx.role !== 'student' || data.enrollments.some(e => e.batchId === b.id && e.studentId === ctx.studentId && e.status === 'active')));
   const todayBatches = myBatches.filter(b => isBatchOnDate(b, today));
   const monthPayments = data.payments.filter(p => p.status !== 'void' && p.paidOn?.startsWith(month) && inBranch(ctx, p.branchId));
+  const billing = billingSettingsOf(data);
   const collected = monthPayments.reduce((s, p) => s + (p.amountPaise || 0), 0);
   const dues = data.memberships.filter(m => m.status === 'active')
-    .map(m => ({m, bal: membershipBalance(m, data.payments, today)}))
+    .map(m => ({m, bal: payableBalance(m, data.payments, billing, today)}))
     .filter(x => x.bal.due > 0 && inBranch(ctx, x.m.branchId) && (ctx.role !== 'student' || x.m.studentId === ctx.studentId));
   const dueTotal = dues.reduce((s, x) => s + x.bal.due, 0);
   const expiring = data.memberships.filter(m => m.status === 'active')
-    .map(m => ({m, bal: membershipBalance(m, data.payments, today)}))
+    .map(m => ({m, bal: payableBalance(m, data.payments, billing, today)}))
     .filter(x => x.bal.daysLeft !== null && x.bal.daysLeft >= 0 && x.bal.daysLeft <= 7);
   const myAttendance = data.attendance.filter(a => a.studentId === ctx.studentId);
   const myRate = attendanceSummary(myAttendance).rate;
@@ -649,6 +696,337 @@ export function AttendancePage(props) {
   </>;
 }
 
+function billingSettingsOf(data) {
+  const raw = data?.billingSettings?.[0] || {};
+  return {
+    ...normalizeBillingSettings(raw),
+    id: raw.id || '',
+    syncVersion: raw.syncVersion || 0,
+    syncPending: Boolean(raw.syncPending),
+    updatedAt: raw.updatedAt || '',
+  };
+}
+
+function SetupStatus({ok, label, detail}) {
+  return <div className="erp-setup-status">
+    <span className={`erp-badge ${ok ? 'green' : 'amber'}`}>{ok ? 'Ready' : 'Not set'}</span>
+    <div><strong>{label}</strong><small>{detail}</small></div>
+  </div>;
+}
+
+function PaymentSetupPanel({data, erp, mode}) {
+  const currentSettings = billingSettingsOf(data);
+  const [form, setForm] = useState(() => billingSettingsOf(data));
+  const ready = billingReadiness(form);
+  const set = (field, value) => setForm(prev => ({...prev, [field]: value}));
+  const setStateByCode = code => {
+    const found = INDIA_STATE_CODES.find(([itemCode]) => itemCode === code);
+    setForm(prev => ({...prev, stateCode: code, state: found?.[1] || prev.state}));
+  };
+  const save = async event => {
+    event.preventDefault();
+    if (ready.errors.length) {
+      erp.act(async () => { throw new Error(ready.errors[0]); });
+      return;
+    }
+    await erp.act(c => c.saveBillingSettings(form), 'Payment & invoice settings saved.');
+  };
+
+  return <section className="erp-panel">
+    <div className="erp-panel-head">
+      <div>
+        <h2>Payment setup</h2>
+        <p>Admin configuration for invoices, GST, UPI/bank instructions and gateway readiness.</p>
+      </div>
+      {currentSettings.syncPending && <span className="erp-badge amber">Saved on this device · waiting to sync</span>}
+    </div>
+
+    <div className="erp-setup-status-grid" aria-label="Payment configuration status">
+      <SetupStatus ok={ready.invoiceProfile} label="Invoice profile" detail={ready.invoiceProfile ? 'Business/GST fields validate.' : 'Complete the billing profile below.'}/>
+      <SetupStatus ok={ready.manualUpi} label="UPI QR" detail={ready.manualUpi ? 'Due invoices can show a scannable UPI QR.' : 'Add a UPI ID to show QR on unpaid invoices.'}/>
+      <SetupStatus ok={ready.bankTransfer} label="Bank transfer" detail={ready.bankTransfer ? 'Bank details are complete for invoices.' : 'Add complete bank details, or leave all bank fields empty.'}/>
+      <SetupStatus ok={ready.gatewayPublicConfig} label="Gateway public config" detail={ready.gatewayPublicConfig ? 'Public key/client ID is present.' : 'No gateway selected or public key missing.'}/>
+      <SetupStatus ok={ready.gatewayAutoConfirmation} label="Auto confirmation" detail={ready.gatewayAutoConfirmation ? 'Webhook is marked configured on a trusted server.' : 'Not ready—payments must be verified and recorded manually.'}/>
+    </div>
+
+    <div className="erp-banner blue" role="note">
+      <AlertCircle size={18}/>
+      <div>
+        <strong>Never enter a gateway secret key or webhook secret here.</strong>{' '}
+        This browser app stores only public key/client IDs. Live checkout and automatic
+        payment confirmation require a trusted Supabase Edge Function/server webhook;
+        until that backend is deployed and tested, collect by UPI/bank/cash/card terminal
+        and record the payment after verifying receipt.
+      </div>
+    </div>
+
+    {ready.errors.length > 0 && <div className="erp-banner" role="alert">
+      <AlertCircle size={18}/>
+      <div><strong>Please fix:</strong><ul className="erp-error-list">{ready.errors.map(error => <li key={error}>{error}</li>)}</ul></div>
+    </div>}
+    {!ready.canShowPaymentInstructions && <div className="erp-banner" role="note">
+      <AlertCircle size={18}/>
+      <div>Unpaid invoices will not show a UPI QR or bank transfer details until at least one manual payment method is configured.</div>
+    </div>}
+    {form.gatewayProvider !== 'none' && !ready.gatewayAutoConfirmation && <div className="erp-banner" role="note">
+      <AlertCircle size={18}/>
+      <div>{form.gatewayProvider === 'razorpay' ? 'Razorpay' : 'Cashfree'} is not ready for automatic payment confirmation. The public configuration can be saved now, but memberships must not be marked paid from a browser callback alone.</div>
+    </div>}
+    {form.gstEnabled && !form.priceIncludesGst && <div className="erp-banner" role="note">
+      <AlertCircle size={18}/>
+      <div>GST is set to be added on top of the plan amount on invoices. Confirm the invoice grand total before collecting; for the simplest studio pricing, keep fee plans GST-inclusive.</div>
+    </div>}
+
+    <form className="erp-form" onSubmit={save}>
+      <h3 className="erp-form-section">Business & invoice profile</h3>
+      <label className="erp-field">Billing legal/business name<input required value={form.legalName} onChange={e => set('legalName', e.target.value)} autoComplete="organization"/></label>
+      <label className="erp-field">Invoice prefix<input required value={form.invoicePrefix} onChange={e => set('invoicePrefix', e.target.value)} placeholder="YS-INV"/></label>
+      <label className="erp-field">Billing email<input type="email" value={form.email} onChange={e => set('email', e.target.value)} autoComplete="email"/></label>
+      <label className="erp-field">Phone<input value={form.phone} onChange={e => set('phone', e.target.value)} autoComplete="tel"/></label>
+      <label className="erp-field full">Address<textarea rows={2} value={form.address} onChange={e => set('address', e.target.value)} autoComplete="street-address"/></label>
+      <label className="erp-field">City<input value={form.city} onChange={e => set('city', e.target.value)} autoComplete="address-level2"/></label>
+      <label className="erp-field">State / state code<select value={form.stateCode} onChange={e => setStateByCode(e.target.value)}>
+        {INDIA_STATE_CODES.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+      </select></label>
+      <label className="erp-field">PIN code<input inputMode="numeric" maxLength={6} value={form.pinCode} onChange={e => set('pinCode', e.target.value)} autoComplete="postal-code"/></label>
+      <label className="erp-field">Payment due in (days)<input type="number" min={0} max={60} value={form.dueDays} onChange={e => set('dueDays', e.target.value)}/></label>
+      <label className="erp-field full">Invoice terms / footer note<textarea rows={2} value={form.terms} onChange={e => set('terms', e.target.value)} placeholder="Optional, e.g. Fees are payable in advance. Please share the UPI reference after payment."/></label>
+
+      <h3 className="erp-form-section">GST (optional)</h3>
+      <label className="erp-toggle-row full"><input type="checkbox" checked={!!form.gstEnabled} onChange={e => set('gstEnabled', e.target.checked)}/> <span>Show GST breakup on invoices</span></label>
+      <label className="erp-field">Seller GSTIN<input value={form.gstin} onChange={e => set('gstin', e.target.value.toUpperCase())} placeholder="27ABCDE1234F1Z5" autoComplete="off" spellCheck={false}/></label>
+      <label className="erp-field">GST rate (%)<input type="number" min={0} max={28} step="0.01" value={form.gstRatePercent} onChange={e => set('gstRatePercent', e.target.value)}/></label>
+      <label className="erp-field">SAC / HSN code<input inputMode="numeric" value={form.sacCode} onChange={e => set('sacCode', e.target.value)} placeholder="Configured by your CA"/></label>
+      <label className="erp-toggle-row"><input type="checkbox" checked={!!form.priceIncludesGst} onChange={e => set('priceIncludesGst', e.target.checked)}/> <span>Plan prices already include GST</span></label>
+
+      <h3 className="erp-form-section">Manual UPI & bank transfer</h3>
+      <label className="erp-field">UPI ID<input value={form.upiId} onChange={e => set('upiId', e.target.value)} placeholder="studio@okhdfcbank" autoComplete="off" spellCheck={false}/></label>
+      <label className="erp-field">UPI payee name<input value={form.upiPayeeName} onChange={e => set('upiPayeeName', e.target.value)} placeholder={form.legalName || 'Business name'}/></label>
+      <label className="erp-field">Bank name<input value={form.bankName} onChange={e => set('bankName', e.target.value)}/></label>
+      <label className="erp-field">Account name<input value={form.bankAccountName} onChange={e => set('bankAccountName', e.target.value)}/></label>
+      <label className="erp-field">Account number<input inputMode="numeric" value={form.bankAccountNumber} onChange={e => set('bankAccountNumber', e.target.value)} autoComplete="off" spellCheck={false}/></label>
+      <label className="erp-field">IFSC<input value={form.ifsc} onChange={e => set('ifsc', e.target.value.toUpperCase())} placeholder="HDFC0000123" autoComplete="off" spellCheck={false}/></label>
+      <label className="erp-field">Account type<select value={form.bankAccountType} onChange={e => set('bankAccountType', e.target.value)}><option>Current</option><option>Savings</option><option>Overdraft</option><option>Other</option></select></label>
+
+      <h3 className="erp-form-section">Payment gateway — public configuration only</h3>
+      <label className="erp-field">Provider<select value={form.gatewayProvider} onChange={e => set('gatewayProvider', e.target.value)}>
+        <option value="none">Not configured / manual only</option><option value="razorpay">Razorpay</option><option value="cashfree">Cashfree</option>
+      </select></label>
+      <label className="erp-field">Environment<select value={form.gatewayEnvironment} onChange={e => set('gatewayEnvironment', e.target.value)}><option value="test">Test</option><option value="live">Live</option></select></label>
+      <label className="erp-field full">{form.gatewayProvider === 'razorpay' ? 'Razorpay Key ID (public)' : form.gatewayProvider === 'cashfree' ? 'Cashfree Client ID (public)' : 'Gateway public key / client ID'}
+        <input value={form.gatewayPublicKeyId} onChange={e => set('gatewayPublicKeyId', e.target.value)} placeholder={form.gatewayProvider === 'razorpay' ? `rzp_${form.gatewayEnvironment}_...` : 'Public identifier only — never a secret'} autoComplete="off" spellCheck={false}/></label>
+      <label className="erp-field full">Trusted webhook / Edge Function URL<input type="url" value={form.gatewayWebhookUrl} onChange={e => set('gatewayWebhookUrl', e.target.value)} placeholder="https://... (deployed separately; no secret in the URL)" autoComplete="off" spellCheck={false}/></label>
+      <label className="erp-toggle-row full"><input type="checkbox" checked={!!form.gatewayWebhookConfigured} onChange={e => set('gatewayWebhookConfigured', e.target.checked)}/> <span>Webhook + signature verification are deployed and tested on a trusted server</span></label>
+
+      <div className="erp-form-actions">
+        <span className="erp-setup-save-note">{mode === 'supabase' ? 'Saves to the same durable offline outbox and syncs automatically.' : 'Stored only in this browser’s local-device ERP data.'}</span>
+        <button className="primary-button">Save payment setup</button>
+      </div>
+    </form>
+  </section>;
+}
+
+function invoiceStatusClass(status) {
+  if (status === 'PAID') return 'paid';
+  if (status === 'VOID') return 'void';
+  return 'unpaid';
+}
+
+function InvoiceDialog({data, invoice, onClose}) {
+  const settings = billingSettingsOf(data);
+  const ready = billingReadiness(settings);
+  const payment = invoice?.payment || null;
+  const membership = invoice?.membership
+    || data.memberships.find(m => m.id === payment?.membershipId)
+    || null;
+  const student = data.students.find(s => s.id === (payment?.studentId || membership?.studentId)) || null;
+  const plan = data.plans.find(p => p.id === membership?.planId) || null;
+  const branch = data.branches.find(b => b.id === (payment?.branchId || membership?.branchId)) || null;
+  const balance = membership ? payableBalance(membership, data.payments, settings) : {total: 0, paid: 0, due: 0};
+  const isPayment = invoice?.type === 'payment';
+  const status = payment
+    ? (payment.status === 'void' ? 'VOID' : 'PAID')
+    : (balance.paid > 0 ? 'PARTIALLY PAID' : 'UNPAID');
+  const amountPaise = payment ? (Number(payment.amountPaise) || 0) : balance.due;
+  const invoiceDate = payment?.paidOn || toISODate();
+  const reference = payment?.receiptNo
+    || `${settings.invoicePrefix}-${invoiceDate.replaceAll('-', '')}-${String(membership?.id || 'FEES').slice(0, 6).toUpperCase()}`;
+  const dueDate = addDaysISO(invoiceDate, settings.dueDays || 0);
+  const [placeCode, setPlaceCode] = useState(settings.stateCode || '27');
+  const [buyerGstin, setBuyerGstin] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  // Both invoice entry points now pass an actual cash amount: the gross due
+  // (payableBalance has already added GST for exclusive pricing) or the gross
+  // amount received. Back-calculate the breakup so a paid receipt can never
+  // add GST a second time on top of cash already collected.
+  const tax = calculateInvoiceTax(amountPaise, {...settings, priceIncludesGst: true}, placeCode);
+  const payablePaise = tax.grandTotalPaise;
+  const upiUri = status === 'PAID' || status === 'VOID'
+    ? ''
+    : buildUpiUri(settings, payablePaise, reference);
+  const placeName = INDIA_STATE_CODES.find(([code]) => code === placeCode)?.[1] || placeCode;
+  const documentTitle = payment
+    ? (settings.gstEnabled ? 'TAX INVOICE / RECEIPT' : 'PAYMENT RECEIPT')
+    : (settings.gstEnabled ? 'FEE INVOICE' : 'FEE INVOICE');
+  const description = payment
+    ? `${plan?.name || 'Yoga Studio membership'} — payment received`
+    : `${plan?.name || 'Yoga Studio membership'}${membership ? ` (${formatDate(membership.startDate)} → ${formatDate(membership.endDate)})` : ''}`;
+
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = reference;
+    return () => { document.title = previousTitle; };
+  }, [reference]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!upiUri) { setQrDataUrl(''); return undefined; }
+    QRCode.toDataURL(upiUri, {width: 240, margin: 1, errorCorrectionLevel: 'M'})
+      .then(url => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrDataUrl(''); });
+    return () => { cancelled = true; };
+  }, [upiUri]);
+
+  const printInvoice = () => window.print();
+  const sellerAddress = [settings.address, [settings.city, settings.state, settings.pinCode].filter(Boolean).join(', ')].filter(Boolean);
+
+  return <Dialog title="Payment invoice" sub="Preview follows the app theme. Choose “Download PDF / Print”, then Save as PDF in the browser dialog." onClose={onClose} className="erp-dialog-wide">
+    {settings.gstEnabled && <div className="erp-form erp-no-print" style={{marginBottom: 14}}>
+      <label className="erp-field">Place of supply<select value={placeCode} onChange={e => setPlaceCode(e.target.value)}>
+        {INDIA_STATE_CODES.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+      </select></label>
+      <label className="erp-field">Customer GSTIN (optional for this PDF)<input value={buyerGstin} onChange={e => {
+        const value = e.target.value.toUpperCase();
+        setBuyerGstin(value);
+        if (/^[0-9]{2}/.test(value)) setPlaceCode(value.slice(0, 2));
+      }} placeholder="Only if the buyer is GST-registered" autoComplete="off" spellCheck={false}/></label>
+    </div>}
+
+    <article className="erp-invoice" aria-label={`${documentTitle} ${reference}`}>
+      <header className="erp-invoice-header">
+        <div className="erp-invoice-seller">
+          <div className="erp-invoice-brand"><Leaf size={22}/><h3>{settings.legalName || 'Yoga Studio'}</h3></div>
+          {sellerAddress.map(line => <p key={line}>{line}</p>)}
+          {(settings.email || settings.phone) && <p>{[settings.email, settings.phone].filter(Boolean).join(' · ')}</p>}
+          {settings.gstEnabled && settings.gstin && <p><strong>GSTIN:</strong> {settings.gstin}</p>}
+        </div>
+        <div className="erp-invoice-meta">
+          <div className="erp-invoice-title">{documentTitle}</div>
+          <span className={`erp-invoice-status ${invoiceStatusClass(status)}`}>{status}</span>
+          <dl>
+            <dt>{payment ? 'Receipt no.' : 'Reference'}</dt><dd>{reference}</dd>
+            <dt>{payment ? 'Payment date' : 'Invoice date'}</dt><dd>{formatDate(invoiceDate)}</dd>
+            {!payment && <><dt>Due date</dt><dd>{formatDate(dueDate)}</dd></>}
+          </dl>
+        </div>
+      </header>
+
+      <section className="erp-invoice-billgrid">
+        <div>
+          <h4>Bill to</h4>
+          <p><strong>{student?.fullName || 'Student'}</strong></p>
+          {branch && <p>{branch.name}{branch.city ? `, ${branch.city}` : ''}</p>}
+          {(student?.phone || student?.email) && <p>{[student.phone, student.email].filter(Boolean).join(' · ')}</p>}
+          {buyerGstin && <p><strong>GSTIN:</strong> {buyerGstin}</p>}
+        </div>
+        <div>
+          <h4>{settings.gstEnabled ? 'Place of supply' : 'Membership'}</h4>
+          {settings.gstEnabled
+            ? <><p>{placeName} ({placeCode})</p><p>{tax.interState ? 'Inter-state supply · IGST' : 'Intra-state supply · CGST + SGST'}</p></>
+            : <p>Studio membership fees</p>}
+          {membership && <p>{formatDate(membership.startDate)} → {formatDate(membership.endDate)}</p>}
+        </div>
+      </section>
+
+      <div className="erp-invoice-table-wrap"><table className="erp-invoice-table">
+        <thead><tr><th>#</th><th>Description</th>{settings.gstEnabled && <th>SAC/HSN</th>}<th className="num">Qty</th><th className="num">Rate</th><th className="num">{settings.gstEnabled ? 'Taxable value' : 'Amount'}</th></tr></thead>
+        <tbody><tr>
+          <td>1</td><td>{description}</td>
+          {settings.gstEnabled && <td>{settings.sacCode || '—'}</td>}
+          <td className="num">1</td><td className="num">{formatInvoiceINR(tax.taxablePaise)}</td><td className="num">{formatInvoiceINR(tax.taxablePaise)}</td>
+        </tr></tbody>
+      </table></div>
+
+      <section className="erp-invoice-footer">
+        <div className="erp-invoice-payment">
+          {status === 'PAID' ? <>
+            <h4>Payment received</h4>
+            <dl className="erp-invoice-details">
+              <dt>Receipt</dt><dd>{payment.receiptNo}</dd>
+              <dt>Method</dt><dd>{PAYMENT_METHODS.find(m => m.id === payment.method)?.label || payment.method}</dd>
+              <dt>Date</dt><dd>{formatDate(payment.paidOn)}</dd>
+              {payment.note && <><dt>Note / reference</dt><dd>{payment.note}</dd></>}
+            </dl>
+            <p className="erp-invoice-note">Payment instructions and UPI QR are hidden because this document is paid.</p>
+          </> : status === 'VOID' ? <>
+            <h4>Void payment</h4>
+            <p>This receipt was voided and must not be used for payment.</p>
+            {payment?.voidReason && <p><strong>Reason:</strong> {payment.voidReason}</p>}
+          </> : <>
+            <h4>Payment instructions</h4>
+            {ready.canShowPaymentInstructions ? <div className="erp-invoice-paycard">
+              <div className="erp-invoice-bank">
+                {ready.bankTransfer ? <>
+                  <p><strong>Bank:</strong> {settings.bankName}</p>
+                  <p><strong>Account name:</strong> {settings.bankAccountName}</p>
+                  <p><strong>Account no.:</strong> {settings.bankAccountNumber}</p>
+                  <p><strong>Account type:</strong> {settings.bankAccountType}</p>
+                  <p><strong>IFSC:</strong> {settings.ifsc}</p>
+                </> : <p>Bank transfer details are not configured.</p>}
+                {ready.manualUpi && <p style={{marginTop: 8}}><strong>UPI ID:</strong> {settings.upiId}</p>}
+                <p className="erp-invoice-note">Please use reference {reference} and share the payment reference with the studio.</p>
+              </div>
+              {upiUri && <div className="erp-invoice-qr">
+                {qrDataUrl
+                  ? <a href={upiUri} aria-label={`Pay ${formatInvoiceINR(payablePaise)} by UPI`}><img src={qrDataUrl} alt={`UPI QR code for ${formatInvoiceINR(payablePaise)} to ${settings.upiId}`}/></a>
+                  : <div className="erp-invoice-qr-placeholder">UPI QR</div>}
+                <span>Scan to pay {formatInvoiceINR(payablePaise)}</span>
+              </div>}
+            </div> : <div className="erp-invoice-warning">Payment instructions are not configured yet. Please contact the studio, or ask an Admin to complete Fees → Payment setup.</div>}
+            <p className="erp-invoice-note">
+              {settings.gatewayProvider === 'none'
+                ? 'Manual payment only. The studio will record the payment after verifying receipt.'
+                : ready.gatewayAutoConfirmation
+                  ? `${settings.gatewayProvider === 'razorpay' ? 'Razorpay' : 'Cashfree'} public config is present and its trusted webhook is marked configured. This PDF still shows UPI/bank instructions for manual payment.`
+                  : `${settings.gatewayProvider === 'razorpay' ? 'Razorpay' : 'Cashfree'} automatic confirmation is not ready yet. Pay by UPI/bank and the studio will record it after verification.`}
+            </p>
+          </>}
+          {settings.terms && <p className="erp-invoice-note">{settings.terms}</p>}
+        </div>
+
+        <div className="erp-invoice-summary" aria-label="Invoice summary">
+          {!payment && balance.paid > 0 && <>
+            <div><span>Membership total</span><strong>{formatInvoiceINR(balance.total)}</strong></div>
+            <div><span>Already paid</span><strong>{formatInvoiceINR(balance.paid)}</strong></div>
+          </>}
+          <div><span>{settings.gstEnabled ? 'Taxable value' : 'Subtotal'}</span><strong>{formatInvoiceINR(tax.taxablePaise)}</strong></div>
+          {tax.gstEnabled && (tax.interState
+            ? <div><span>IGST ({Number(tax.gstRatePercent.toFixed(2))}%)</span><strong>{formatInvoiceINR(tax.igstPaise)}</strong></div>
+            : <><div><span>CGST ({Number((tax.gstRatePercent / 2).toFixed(2))}%)</span><strong>{formatInvoiceINR(tax.cgstPaise)}</strong></div>
+              <div><span>SGST ({Number((tax.gstRatePercent / 2).toFixed(2))}%)</span><strong>{formatInvoiceINR(tax.sgstPaise)}</strong></div></>)}
+          <div className="grand"><span>{status === 'PAID' ? 'Amount paid' : 'Grand total payable'}</span><strong>{formatInvoiceINR(payablePaise)}</strong></div>
+          {settings.gstEnabled && <p>{settings.priceIncludesGst
+            ? 'Fee amount is GST-inclusive; tax is shown by back-calculation.'
+            : payment
+              ? 'Plan prices are GST-exclusive; this breakup is derived from the gross amount received.'
+              : 'Plan prices are GST-exclusive; the payable total includes GST on the remaining taxable fee.'}</p>}
+        </div>
+      </section>
+
+      <footer className="erp-invoice-disclaimer">
+        Computer-generated from Yoga Studio ERP records. {payment
+          ? 'Keep this receipt for your records.'
+          : 'This is a fee invoice/payment request, not a final payment receipt. A receipt is issued after payment is verified and recorded.'}
+      </footer>
+    </article>
+
+    <div className="erp-form-actions erp-no-print">
+      <button className="secondary-button" onClick={onClose}>Close</button>
+      <button className="primary-button" onClick={printInvoice}><Printer size={15}/> Download PDF / Print</button>
+    </div>
+  </Dialog>;
+}
+
 /* ---------------- fees ---------------- */
 
 export function FeesPage(props) {
@@ -656,19 +1034,31 @@ export function FeesPage(props) {
   const today = toISODate();
   const [tab, setTab] = useState('memberships');
   const [planForm, setPlanForm] = useState(null); const [membershipForm, setMembershipForm] = useState(null);
-  const [paymentForm, setPaymentForm] = useState(null); const [receipt, setReceipt] = useState(null);
+  const [paymentForm, setPaymentForm] = useState(null); const [invoice, setInvoice] = useState(null);
   const isStudent = ctx.role === 'student';
   const memberships = data.memberships.filter(m => inBranch(ctx, m.branchId) && (!isStudent || m.studentId === ctx.studentId));
   const payments = data.payments.filter(p => inBranch(ctx, p.branchId) && (!isStudent || p.studentId === ctx.studentId))
     .sort((a, b) => (b.paidOn || '').localeCompare(a.paidOn || ''));
+  const billing = billingSettingsOf(data);
+  const billingReady = billingReadiness(billing);
+  const paymentConfigWarning = paymentForm?.method === 'upi' && !billingReady.manualUpi
+    ? 'A receiving UPI ID is not configured. You can still record a manually verified UPI payment, but unpaid invoices will not show a QR code.'
+    : paymentForm?.method === 'bank' && !billingReady.bankTransfer
+      ? 'Receiving bank details are not completely configured. You can still record a verified bank receipt, but unpaid invoices will not show bank instructions.'
+      : paymentForm?.method === 'card' && !billingReady.gatewayAutoConfirmation
+        ? 'Card gateway automatic confirmation is not configured. Record a card payment only after verifying it on the card terminal, provider dashboard, or bank statement.'
+        : '';
+  const paymentGstWarning = billing.gstEnabled && !billing.priceIncludesGst
+    ? 'GST is added on top in Payment setup. Fees dues are shown as gross payable totals (taxable fee + GST); record the actual gross amount received.'
+    : '';
   const openMembership = () => setMembershipForm({studentId: data.students[0]?.id || '', planId: data.plans[0]?.id || '', startDate: today, billingCycle: 'joining', amountRupees: data.plans[0] ? paiseToRupees(data.plans[0].amountPaise) : ''});
-  const openPayment = m => { const bal = m ? membershipBalance(m, data.payments, today) : null; setPaymentForm({membershipId: m?.id || memberships[0]?.id || '', amountRupees: bal ? paiseToRupees(bal.due) : '', method: 'upi', paidOn: today, note: ''}); };
+  const openPayment = m => { const bal = m ? payableBalance(m, data.payments, billing, today) : null; setPaymentForm({membershipId: m?.id || memberships[0]?.id || '', amountRupees: bal ? paiseToRupees(bal.due) : '', method: 'upi', paidOn: today, note: ''}); };
   return <>
     <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Fees & payments <span className="flower">✳</span></h1><p>Plans, memberships, dues and receipts in ₹.</p></div>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Fees & payments <span className="flower">✳</span></h1><p>Plans, memberships, dues, themed invoice PDFs and payment setup in ₹.</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <div className="erp-seg" role="tablist" aria-label="Fees sections" style={{marginBottom: 16}}>
-      {[['memberships', 'Memberships & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : [])].map(([id, label]) =>
+      {[['memberships', 'Memberships & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : []), ...(canManage(ctx) ? [['setup', 'Payment setup']] : [])].map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
     </div>
 
@@ -676,22 +1066,23 @@ export function FeesPage(props) {
       {canManage(ctx) && <div className="erp-actions"><button className="secondary-button" onClick={() => openPayment(null)}><IndianRupee size={15}/> Record payment</button><button className="primary-button" onClick={openMembership}><Plus size={16}/> New membership</button></div>}</div>
       {memberships.length === 0 ? <Empty icon={Wallet} title="No memberships yet" text={data.plans.length === 0 ? 'Create a monthly plan first (Plans tab), then assign it to a student.' : 'Assign a plan to a student to start tracking fees and dues.'}/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan & period</th><th>Amount</th><th>Paid</th><th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-        {memberships.map(m => { const bal = membershipBalance(m, data.payments, today); return <tr key={m.id}>
+        {memberships.map(m => { const bal = payableBalance(m, data.payments, billing, today); return <tr key={m.id}>
           <td><strong>{studentName(data, m.studentId)}</strong><br/><small style={{color: '#9b92a4'}}>{branchName(data, m.branchId)}</small></td>
           <td>{planName(data, m.planId)}<br/><small style={{color: '#9b92a4'}}>{formatDate(m.startDate)} → {formatDate(m.endDate)}{m.billingCycle === 'calendar' ? ' · calendar month' : ''}</small></td>
           <td>{formatINR(bal.total)}</td><td>{formatINR(bal.paid)}</td><td><strong>{formatINR(bal.due)}</strong></td>
           <td>{m.status === 'cancelled' ? <span className="erp-badge grey">cancelled</span> : bal.expired ? <span className="erp-badge red">expired</span> : <span className={`erp-badge ${bal.paymentStatus === 'paid' ? 'green' : bal.paymentStatus === 'partial' ? 'amber' : 'red'}`}>{bal.paymentStatus}</span>}{!bal.expired && m.status === 'active' && bal.daysLeft !== null && bal.daysLeft <= 7 ? <><br/><small style={{color: '#9a6b31'}}>{bal.daysLeft} day(s) left</small></> : null}</td>
-          <td>{canManage(ctx) && m.status === 'active' && <><button className="erp-link-btn" onClick={() => openPayment(m)}><IndianRupee size={13}/> Collect</button>
+          <td>{bal.due > 0 && m.status === 'active' && <button className="erp-link-btn" onClick={() => setInvoice({type: 'due', membership: m})}><Printer size={13}/> Invoice PDF</button>}
+          {canManage(ctx) && m.status === 'active' && <><button className="erp-link-btn" onClick={() => openPayment(m)}><IndianRupee size={13}/> Collect</button>
           <button className="erp-link-btn erp-danger" onClick={() => erp.act(c => c.cancelMembership(m.id), 'Membership cancelled.')}>Cancel</button></>}</td></tr>; })}
       </tbody></table></div>}</section>}
 
     {tab === 'payments' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Payments</h2><p>{payments.length} payment(s) · {formatINR(payments.filter(p => p.status !== 'void').reduce((s, p) => s + (p.amountPaise || 0), 0))} collected shown</p></div>
       <div className="erp-actions"><button className="secondary-button" onClick={() => exportCSV('payments.csv', payments, [{label: 'Receipt', value: p => p.receiptNo || 'Pending sync'}, {label: 'Date', value: p => p.paidOn}, {label: 'Student', value: p => studentName(data, p.studentId)}, {label: 'Method', value: p => p.method}, {label: 'Amount (INR)', value: p => paiseToRupees(p.amountPaise)}, {label: 'Status', value: p => p.status || 'recorded'}])}><Download size={15}/> CSV</button>
       {canManage(ctx) && <button className="primary-button" onClick={() => openPayment(null)}><Plus size={16}/> Record payment</button>}</div></div>
-      {payments.length === 0 ? <Empty icon={IndianRupee} title="No payments recorded" text="Record cash, UPI, card or bank payments and a receipt number is generated automatically."/> :
+      {payments.length === 0 ? <Empty icon={IndianRupee} title="No payments recorded" text="Record verified cash, UPI, card or bank payments. Supabase assigns the final receipt number after sync; local mode generates one on this device."/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Receipt</th><th>Date</th><th>Student</th><th>Method</th><th>Amount</th><th>Actions</th></tr></thead><tbody>
         {payments.map(p => <tr key={p.id}><td><strong>{p.receiptNo || 'Pending sync'}</strong>{p.syncPending && <><br/><span className="erp-badge amber">On this device</span></>}{p.status === 'void' && <><br/><span className="erp-badge red">VOID</span></>}</td><td>{formatDate(p.paidOn)}</td><td>{studentName(data, p.studentId)}</td><td style={{textTransform: 'capitalize'}}>{PAYMENT_METHODS.find(m => m.id === p.method)?.label || p.method}</td><td><strong style={p.status === 'void' ? {textDecoration: 'line-through'} : undefined}>{formatINR(p.amountPaise)}</strong></td>
-        <td>{p.receiptNo && <button className="erp-link-btn" onClick={() => setReceipt(p)}><Printer size={13}/> Receipt</button>}
+        <td>{p.receiptNo && <button className="erp-link-btn" onClick={() => setInvoice({type: 'payment', payment: p})}><Printer size={13}/> Invoice PDF</button>}
         {canManage(ctx) && p.status !== 'void' && (p.syncPending && !p.receiptNo
           ? <button className="erp-link-btn erp-danger" disabled={erp.syncState?.syncing} onClick={async () => { if (window.confirm('Discard this payment before it syncs? It has not received a Supabase receipt yet.')) await erp.act(c => c.voidPayment({id: p.id}), 'Pending payment discarded.'); }}>Discard pending</button>
           : <button className="erp-link-btn erp-danger" onClick={async () => { const reason = window.prompt('Reason for voiding this payment (required for audit):', ''); if (reason === null) return; if (!reason.trim()) return props.notify('Enter a reason to void this payment.'); await erp.act(c => c.voidPayment({id: p.id, reason: reason.trim()}), 'Payment voided. The original receipt remains in history.'); }}>Void</button>)}</td></tr>)}
@@ -701,14 +1092,16 @@ export function FeesPage(props) {
       {canManage(ctx) && <button className="primary-button" onClick={() => setPlanForm({name: '', amountRupees: '', durationMonths: 1})}><Plus size={16}/> Add plan</button>}</div>
       {data.plans.length === 0 ? <Empty icon={Wallet} title="No plans yet" text="Example: “Monthly — All Batches” at ₹1,500 for 1 month. You decide the names and prices."/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Plan</th><th>Price</th><th>Duration</th><th>Members</th><th>Actions</th></tr></thead><tbody>
-        {data.plans.map(p => <tr key={p.id}><td><strong>{p.name}</strong></td><td>{formatINR(p.amountPaise)}</td><td>{p.durationMonths} month(s)</td><td>{data.memberships.filter(m => m.planId === p.id && m.status === 'active').length}</td>
+        {data.plans.map(p => <tr key={p.id}><td><strong>{p.name}</strong></td><td>{formatINR(p.amountPaise)}{billing.gstEnabled && !billing.priceIncludesGst ? ' + GST' : ''}</td><td>{p.durationMonths} month(s)</td><td>{data.memberships.filter(m => m.planId === p.id && m.status === 'active').length}</td>
         <td>{canManage(ctx) && <button className="erp-link-btn" onClick={() => setPlanForm({...p, amountRupees: paiseToRupees(p.amountPaise)})}><Pencil size={13}/> Edit</button>}</td></tr>)}
       </tbody></table></div>}</section>}
+
+    {tab === 'setup' && canManage(ctx) && <PaymentSetupPanel data={data} erp={erp} mode={props.mode}/>}
 
     {planForm && <Dialog title={planForm.id ? 'Edit plan' : 'Add plan'} sub="Price changes apply to new memberships; existing memberships keep their agreed amount." onClose={() => setPlanForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); if (await erp.act(c => c.savePlan({id: planForm.id, name: planForm.name, amountPaise: rupeesToPaise(planForm.amountRupees), durationMonths: planForm.durationMonths}), 'Plan saved.')) setPlanForm(null); }}>
         <label className="erp-field">Plan name<input required value={planForm.name} onChange={e => setPlanForm({...planForm, name: e.target.value})} placeholder="e.g. Monthly — All Batches"/></label>
-        <label className="erp-field">Price (₹)<input type="number" min={0} step="0.01" required value={planForm.amountRupees} onChange={e => setPlanForm({...planForm, amountRupees: e.target.value})}/></label>
+        <label className="erp-field">Price (₹{billing.gstEnabled && !billing.priceIncludesGst ? ', before GST' : ''})<input type="number" min={0} step="0.01" required value={planForm.amountRupees} onChange={e => setPlanForm({...planForm, amountRupees: e.target.value})}/></label>
         <label className="erp-field">Duration (months)<input type="number" min={1} max={24} required value={planForm.durationMonths} onChange={e => setPlanForm({...planForm, durationMonths: e.target.value})}/></label>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPlanForm(null)}>Cancel</button><button className="primary-button">Save plan</button></div></form></Dialog>}
 
@@ -719,33 +1112,22 @@ export function FeesPage(props) {
         <label className="erp-field">Plan<select required value={membershipForm.planId} onChange={e => { const plan = data.plans.find(p => p.id === e.target.value); setMembershipForm({...membershipForm, planId: e.target.value, amountRupees: plan ? paiseToRupees(plan.amountPaise) : ''}); }}>{data.plans.map(p => <option key={p.id} value={p.id}>{p.name} · {formatINR(p.amountPaise)}</option>)}</select></label>
         <label className="erp-field">Start date<input type="date" required value={membershipForm.startDate} onChange={e => setMembershipForm({...membershipForm, startDate: e.target.value})}/></label>
         <label className="erp-field">Billing cycle<select value={membershipForm.billingCycle} onChange={e => setMembershipForm({...membershipForm, billingCycle: e.target.value})}><option value="joining">Joining date (monthly)</option><option value="calendar">Calendar month</option></select></label>
-        <label className="erp-field">Amount (₹)<input type="number" min={0} step="0.01" required value={membershipForm.amountRupees} onChange={e => setMembershipForm({...membershipForm, amountRupees: e.target.value})}/></label>
+        <label className="erp-field">Amount (₹{billing.gstEnabled && !billing.priceIncludesGst ? ', before GST' : ''})<input type="number" min={0} step="0.01" required value={membershipForm.amountRupees} onChange={e => setMembershipForm({...membershipForm, amountRupees: e.target.value})}/></label>
         <span className="erp-field">Ends on<span style={{fontSize: 14, color: '#3d3547'}}>{formatDate(membershipEnd(membershipForm.startDate, data.plans.find(p => p.id === membershipForm.planId)?.durationMonths || 1, membershipForm.billingCycle))}</span></span>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setMembershipForm(null)}>Cancel</button><button className="primary-button">Create membership</button></div></form></Dialog>}
 
-    {paymentForm && <Dialog title="Record payment" sub="A final receipt number is assigned by Supabase. If you are offline, the payment is saved on this device first and the receipt appears after sync." onClose={() => setPaymentForm(null)}>
+    {paymentForm && <Dialog title="Record verified payment" sub="Record only after funds are received/verified. A final receipt number is assigned by Supabase; if offline, the payment is saved on this device first and the receipt appears after sync." onClose={() => setPaymentForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); const m = data.memberships.find(x => x.id === paymentForm.membershipId); if (!m) return;
         if (await erp.act(c => c.recordPayment({membershipId: m.id, studentId: m.studentId, branchId: m.branchId, amountPaise: rupeesToPaise(paymentForm.amountRupees), method: paymentForm.method, paidOn: paymentForm.paidOn, note: paymentForm.note}), 'Payment recorded. Receipt is in the Payments tab.')) { setPaymentForm(null); setTab('payments'); } }}>
-        <label className="erp-field full">Membership<select required value={paymentForm.membershipId} onChange={e => { const m = data.memberships.find(x => x.id === e.target.value); setPaymentForm({...paymentForm, membershipId: e.target.value, amountRupees: m ? paiseToRupees(membershipBalance(m, data.payments, today).due) : ''}); }}>
-          {data.memberships.filter(m => m.status === 'active').map(m => <option key={m.id} value={m.id}>{studentName(data, m.studentId)} · {planName(data, m.planId)} · due {formatINR(membershipBalance(m, data.payments, today).due)}</option>)}</select></label>
+        <label className="erp-field full">Membership<select required value={paymentForm.membershipId} onChange={e => { const m = data.memberships.find(x => x.id === e.target.value); setPaymentForm({...paymentForm, membershipId: e.target.value, amountRupees: m ? paiseToRupees(payableBalance(m, data.payments, billing, today).due) : ''}); }}>
+          {data.memberships.filter(m => m.status === 'active').map(m => <option key={m.id} value={m.id}>{studentName(data, m.studentId)} · {planName(data, m.planId)} · due {formatINR(payableBalance(m, data.payments, billing, today).due)}</option>)}</select></label>
         <label className="erp-field">Amount received (₹)<input type="number" min="0.01" step="0.01" required value={paymentForm.amountRupees} onChange={e => setPaymentForm({...paymentForm, amountRupees: e.target.value})}/></label>
         <label className="erp-field">Method<select value={paymentForm.method} onChange={e => setPaymentForm({...paymentForm, method: e.target.value})}>{PAYMENT_METHODS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></label>
         <label className="erp-field">Paid on<input type="date" required value={paymentForm.paidOn} onChange={e => setPaymentForm({...paymentForm, paidOn: e.target.value})}/></label>
-        <label className="erp-field">Note<input value={paymentForm.note} onChange={e => setPaymentForm({...paymentForm, note: e.target.value})} placeholder="Optional"/></label>
+        <label className="erp-field">Note / transaction reference<input value={paymentForm.note} onChange={e => setPaymentForm({...paymentForm, note: e.target.value})} placeholder="UPI/bank/card reference (recommended)"/></label>
+        {(paymentConfigWarning || paymentGstWarning) && <div className="erp-banner" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><div>{paymentConfigWarning || paymentGstWarning}{paymentConfigWarning && paymentGstWarning ? <> {paymentGstWarning}</> : null}{paymentConfigWarning && canManage(ctx) ? <> <button type="button" className="erp-link-btn" onClick={() => { setPaymentForm(null); setTab('setup'); }}>Open Payment setup</button></> : null}</div></div>}
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPaymentForm(null)}>Cancel</button><button className="primary-button">Save payment</button></div></form></Dialog>}
 
-    {receipt && <Dialog title="Payment receipt" onClose={() => setReceipt(null)}>
-      <div className="erp-receipt"><dl>
-        <dt>Receipt</dt><dd>{receipt.receiptNo}</dd>
-        <dt>Student</dt><dd>{studentName(data, receipt.studentId)}</dd>
-        <dt>Branch</dt><dd>{branchName(data, receipt.branchId)}</dd>
-        <dt>Date</dt><dd>{formatDate(receipt.paidOn)}</dd>
-        <dt>Method</dt><dd>{PAYMENT_METHODS.find(m => m.id === receipt.method)?.label || receipt.method}</dd>
-        <dt>Amount</dt><dd>{formatINR(receipt.amountPaise)}</dd>
-        {receipt.status === 'void' ? <><dt>Status</dt><dd>VOID</dd>{receipt.voidReason ? <><dt>Void reason</dt><dd>{receipt.voidReason}</dd></> : null}</> : null}
-        {receipt.note ? <><dt>Note</dt><dd>{receipt.note}</dd></> : null}
-      </dl></div>
-      <div className="erp-form-actions"><button className="secondary-button" onClick={() => setReceipt(null)}>Close</button><button className="primary-button" onClick={() => window.print()}><Printer size={15}/> Print receipt</button></div>
-    </Dialog>}
+    {invoice && <InvoiceDialog data={data} invoice={invoice} onClose={() => setInvoice(null)}/>}
   </>;
 }

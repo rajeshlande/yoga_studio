@@ -17,7 +17,7 @@ import {emptySnapshot} from './logic.js';
 
 export const SYNC_COLLECTIONS = [
   'branches', 'students', 'instructors', 'batches', 'enrollments',
-  'attendance', 'plans', 'memberships', 'payments',
+  'attendance', 'plans', 'memberships', 'payments', 'billingSettings',
 ];
 export const SYNC_KEY_PREFIX = 'yoga-studio-erp-sync-v1';
 const DEVICE_KEY = 'yoga-studio-device-id-v1';
@@ -68,6 +68,10 @@ export function syncStorageKey(userId, organizationId) {
 
 export function syncPointerKey(userId) {
   return `${SYNC_KEY_PREFIX}:${userId || 'anonymous'}:last-organization`;
+}
+
+export function syncBackupKey(userId, organizationId) {
+  return `${syncStorageKey(userId, organizationId)}:backup`;
 }
 
 export function normalizeSnapshot(data) {
@@ -213,9 +217,9 @@ function normalizeState(state) {
   };
 }
 
-export function loadSyncState(storage, userId, organizationId) {
+function readSyncStateKey(storage, key, userId, organizationId) {
   try {
-    const raw = storage?.getItem(syncStorageKey(userId, organizationId));
+    const raw = storage?.getItem(key);
     const state = raw ? normalizeState(JSON.parse(raw)) : null;
     // Never let a stale or hand-edited key show another account's copy.
     if (!state || state.userId !== userId || state.organizationId !== organizationId) return null;
@@ -223,6 +227,16 @@ export function loadSyncState(storage, userId, organizationId) {
   } catch {
     return null;
   }
+}
+
+export function loadSyncState(storage, userId, organizationId) {
+  // The primary key is written first on every durable save. If it is ever
+  // truncated/corrupt (quota pressure, browser crash, partial cleanup), fall
+  // back to the mirror written immediately after it instead of dropping the
+  // signed-in outbox. Both copies live in the same origin storage, so this is
+  // corruption protection—not a substitute for syncing or a backup export.
+  return readSyncStateKey(storage, syncStorageKey(userId, organizationId), userId, organizationId)
+    || readSyncStateKey(storage, syncBackupKey(userId, organizationId), userId, organizationId);
 }
 
 function listStorageKeys(storage) {
@@ -245,7 +259,7 @@ export function loadLastSyncState(storage, userId) {
   }
   const prefix = `${SYNC_KEY_PREFIX}:${userId || 'anonymous'}:`;
   const candidates = listStorageKeys(storage)
-    .filter(key => key.startsWith(prefix) && !key.endsWith(':last-organization') && !key.endsWith(':lock'))
+    .filter(key => key.startsWith(prefix) && !key.endsWith(':last-organization') && !key.endsWith(':lock') && !key.endsWith(':backup'))
     .map(key => {
       try { return normalizeState(JSON.parse(storage.getItem(key))); } catch { return null; }
     })
@@ -257,7 +271,14 @@ export function loadLastSyncState(storage, userId) {
 export function saveSyncState(storage, state) {
   if (!storage || !state?.userId || !state?.organizationId) return false;
   const next = normalizeState({...state, updatedAt: nowISO()});
-  storage.setItem(syncStorageKey(next.userId, next.organizationId), JSON.stringify(next));
+  const serialized = JSON.stringify(next);
+  storage.setItem(syncStorageKey(next.userId, next.organizationId), serialized);
+  try {
+    storage.setItem(syncBackupKey(next.userId, next.organizationId), serialized);
+  } catch {
+    // The primary copy is authoritative. A failed mirror (for example at the
+    // storage quota edge) must not turn an otherwise saved change into an error.
+  }
   storage.setItem(syncPointerKey(next.userId), next.organizationId);
   return true;
 }
@@ -265,6 +286,7 @@ export function saveSyncState(storage, state) {
 export function clearSyncState(storage, userId, organizationId) {
   try {
     storage?.removeItem(syncStorageKey(userId, organizationId));
+    storage?.removeItem(syncBackupKey(userId, organizationId));
     storage?.removeItem(`${syncStorageKey(userId, organizationId)}:lock`);
     if (storage?.getItem(syncPointerKey(userId)) === organizationId) {
       storage.removeItem(syncPointerKey(userId));

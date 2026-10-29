@@ -7,7 +7,10 @@
 // manual backup before switching to Supabase. PGlite could replace this
 // module's internals later without any UI change — see docs/12-erp-core.
 
-import {uid, toISODate, membershipEnd, emptySnapshot} from './logic.js';
+import {
+  uid, toISODate, membershipEnd, emptySnapshot,
+  normalizeBillingSettings, validateBillingSettings,
+} from './logic.js';
 
 export const LOCAL_DB_KEY = 'yoga-studio-erp-v1';
 
@@ -32,8 +35,14 @@ function saveDb(db) {
 }
 
 function snapshotOf(db) {
-  const {branches, students, instructors, batches, enrollments, attendance, plans, memberships, payments} = db;
-  return structuredClone({branches, students, instructors, batches, enrollments, attendance, plans, memberships, payments});
+  const {
+    branches, students, instructors, batches, enrollments, attendance,
+    plans, memberships, payments, billingSettings,
+  } = db;
+  return structuredClone({
+    branches, students, instructors, batches, enrollments, attendance,
+    plans, memberships, payments, billingSettings: billingSettings || [],
+  });
 }
 
 function upsert(list, record) {
@@ -199,6 +208,22 @@ export const localStore = {
       payment.voidReason = reason;
       payment.syncVersion = (payment.syncVersion || 1) + 1;
     }
+    return saveDb(db);
+  },
+
+  async saveBillingSettings(payload) {
+    const settings = normalizeBillingSettings(payload);
+    const errors = validateBillingSettings(settings);
+    if (errors.length) throw new Error(errors.join(' '));
+    const db = loadDb();
+    const old = db.billingSettings?.[0];
+    db.billingSettings = [{
+      ...settings,
+      id: old?.id || payload?.id || uid(),
+      createdAt: old?.createdAt || nowISO(),
+      updatedAt: nowISO(),
+      syncVersion: (old?.syncVersion || 0) + 1,
+    }];
     return saveDb(db);
   },
 };

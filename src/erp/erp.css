@@ -73,6 +73,99 @@
 .erp-receipt{border:1px dashed #d9cbe8;border-radius:12px;padding:18px;margin:14px 0;background:#fdfcfe}
 .erp-receipt dl{display:grid;grid-template-columns:auto 1fr;gap:7px 18px;font-size:13px;margin:0}
 .erp-receipt dt{color:#a295ae;font-weight:600}.erp-receipt dd{margin:0;color:#3d3547;font-weight:600;text-align:right}
+
+/* Payment setup */
+.erp-dialog-wide{width:min(920px,calc(100vw - 32px))}
+.erp-form-section{grid-column:1/-1;font-size:15px;color:#3d3547;margin:10px 0 0;padding-top:12px;border-top:1px solid #f0e9f5}
+.erp-form-section:first-child{margin-top:0;padding-top:0;border-top:0}
+.erp-toggle-row{display:flex;gap:10px;align-items:center;min-height:44px;padding:10px 12px;border:1px solid #e7e0ed;border-radius:8px;background:#fdfcfe;color:#514559;font-size:13px;font-weight:600}
+.erp-toggle-row.full{grid-column:1/-1}
+.erp-toggle-row input{width:20px;height:20px;min-height:20px;accent-color:#8664ba;flex-shrink:0}
+.erp-setup-status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:14px 0}
+.erp-setup-status{display:flex;gap:10px;align-items:flex-start;border:1px solid #f0e9f5;background:#fdfcfe;border-radius:12px;padding:13px}
+.erp-setup-status strong{display:block;font-size:13px;color:#3d3547}
+.erp-setup-status small{display:block;font-size:11px;color:#9b92a4;line-height:1.55;margin-top:3px}
+.erp-error-list{margin:6px 0 0;padding-left:18px}
+.erp-setup-save-note{margin-right:auto;font-size:11px;color:#9b92a4;line-height:1.6}
+:root[data-theme="dark"] .erp-form-section{color:#f0e8f7;border-top-color:#33284a}
+:root[data-theme="dark"] .erp-toggle-row,:root[data-theme="dark"] .erp-setup-status{background:#251f34;border-color:#3a304d;color:#e8e2ef}
+:root[data-theme="dark"] .erp-setup-status strong{color:#f0e8f7}
+:root[data-theme="dark"] .erp-setup-status small,:root[data-theme="dark"] .erp-setup-save-note{color:#aa99bd}
+
+/* GST / retail invoice PDF preview — follows app light/dark theme. */
+.erp-invoice{border:1px solid #ded1ef;border-radius:14px;background:#fff;color:#332b3d;padding:24px;box-shadow:0 14px 40px #73559012}
+.erp-invoice p{line-height:1.65}
+.erp-invoice-header{display:flex;justify-content:space-between;gap:24px;border-bottom:2px solid #eee7f7;padding-bottom:18px}
+.erp-invoice-brand{display:flex;align-items:center;gap:10px;color:#8664ba;margin-bottom:8px}
+.erp-invoice-brand h3{font-size:20px;color:#3d3547;letter-spacing:-.02em}
+.erp-invoice-seller p{font-size:12px;color:#7c6c8c}
+.erp-invoice-meta{text-align:right;min-width:230px}
+.erp-invoice-title{font-family:'Manrope',sans-serif;font-size:20px;font-weight:800;color:#8664ba;letter-spacing:.02em}
+.erp-invoice-status{display:inline-flex;margin:8px 0 12px;padding:5px 11px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:.08em}
+.erp-invoice-status.paid{background:#e9f3ed;color:#2f6b45;border:1px solid #bcd8c5}
+.erp-invoice-status.unpaid{background:#fbeaea;color:#a34c4c;border:1px solid #efcaca}
+.erp-invoice-status.void{background:#f1edf5;color:#6d5d7d;border:1px solid #d8cde3}
+.erp-invoice-meta dl,.erp-invoice-details{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;margin:0;font-size:12px}
+.erp-invoice-meta dt,.erp-invoice-details dt{color:#a295ae;font-weight:700;text-align:left}
+.erp-invoice-meta dd,.erp-invoice-details dd{margin:0;color:#3d3547;font-weight:700;text-align:right;overflow-wrap:anywhere}
+.erp-invoice-billgrid{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:18px 0}
+.erp-invoice-billgrid h4,.erp-invoice-payment h4{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#a295ae;margin:0 0 8px}
+.erp-invoice-billgrid p{font-size:13px;color:#514559}
+.erp-invoice-table-wrap{overflow-x:auto;border:1px solid #ece6f1;border-radius:10px}
+.erp-invoice-table{width:100%;border-collapse:collapse;font-size:12px;min-width:520px}
+.erp-invoice-table th{background:#8664ba;color:#fff;text-align:left;padding:10px;font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.erp-invoice-table td{padding:11px 10px;color:#40364c;vertical-align:top}
+.erp-invoice-table .num{text-align:right;white-space:nowrap}
+.erp-invoice-footer{display:grid;grid-template-columns:1.25fr .95fr;gap:24px;padding-top:20px}
+.erp-invoice-paycard{display:flex;justify-content:space-between;gap:18px;border:1px solid #cfe3d5;background:#eef8f1;border-radius:12px;padding:14px}
+.erp-invoice-bank{font-size:12px;color:#405447;min-width:0;overflow-wrap:anywhere}
+.erp-invoice-bank p{margin:0 0 4px}
+.erp-invoice-qr{text-align:center;flex-shrink:0;width:128px}
+.erp-invoice-qr img{width:112px;height:112px;border-radius:8px;border:3px solid #fff;background:#fff;display:block;margin:0 auto}
+.erp-invoice-qr span{display:block;font-size:9px;font-weight:800;color:#3f6f50;line-height:1.5;margin-top:6px}
+.erp-invoice-qr-placeholder{width:112px;height:112px;border:2px dashed #8eb79b;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#4d7a5e;font-weight:800;margin:0 auto}
+.erp-invoice-note{font-size:11px;color:#8d7d99;margin-top:10px}
+.erp-invoice-warning{border:1px solid #f3dcbd;background:#fffaf2;color:#7a5527;border-radius:10px;padding:12px;font-size:12px;line-height:1.65}
+.erp-invoice-summary{align-self:start;border:1px solid #ece6f1;border-radius:12px;padding:14px;background:#fdfcfe}
+.erp-invoice-summary>div{display:flex;justify-content:space-between;gap:16px;padding:6px 0;font-size:12px;color:#6b5a7c}
+.erp-invoice-summary strong{color:#3d3547;white-space:nowrap}
+.erp-invoice-summary .grand{border-top:2px solid #ded1ef;margin-top:8px;padding-top:11px;font-size:14px;font-weight:800}
+.erp-invoice-summary .grand strong{color:#7551aa}
+.erp-invoice-summary p{font-size:10px;color:#a295ae;margin-top:8px}
+.erp-invoice-disclaimer{border-top:1px solid #eee7f7;margin-top:20px;padding-top:12px;text-align:center;font-size:10px;color:#a295ae;line-height:1.7}
+:root[data-theme="dark"] .erp-invoice{background:#211b2f;border-color:#4a3868;color:#f0e8f7;box-shadow:none}
+:root[data-theme="dark"] .erp-invoice-header{border-bottom-color:#3a304d}
+:root[data-theme="dark"] .erp-invoice-brand,:root[data-theme="dark"] .erp-invoice-title{color:#c3a8e8}
+:root[data-theme="dark"] .erp-invoice-brand h3,:root[data-theme="dark"] .erp-invoice-meta dd,:root[data-theme="dark"] .erp-invoice-details dd,:root[data-theme="dark"] .erp-invoice-summary strong{color:#f7f2ff}
+:root[data-theme="dark"] .erp-invoice-seller p,:root[data-theme="dark"] .erp-invoice-billgrid p{color:#cbbddd}
+:root[data-theme="dark"] .erp-invoice-status.paid{background:#22392c;color:#a9d3b6;border-color:#31533e}
+:root[data-theme="dark"] .erp-invoice-status.unpaid{background:#3b2530;color:#eda9b6;border-color:#633747}
+:root[data-theme="dark"] .erp-invoice-status.void{background:#2a233b;color:#c3b2d4;border-color:#3d3156}
+:root[data-theme="dark"] .erp-invoice-table-wrap,:root[data-theme="dark"] .erp-invoice-summary{border-color:#3a304d}
+:root[data-theme="dark"] .erp-invoice-table td{color:#eee8f7}
+:root[data-theme="dark"] .erp-invoice-summary{background:#251f34}
+:root[data-theme="dark"] .erp-invoice-summary>div{color:#cbbddd}
+:root[data-theme="dark"] .erp-invoice-summary .grand{border-top-color:#5a477d}
+:root[data-theme="dark"] .erp-invoice-summary .grand strong{color:#d7c2f5}
+:root[data-theme="dark"] .erp-invoice-paycard{background:#22392c;border-color:#31533e}
+:root[data-theme="dark"] .erp-invoice-bank{color:#cfe5d5}
+:root[data-theme="dark"] .erp-invoice-qr span{color:#a9d3b6}
+:root[data-theme="dark"] .erp-invoice-warning{background:#3d3020;border-color:#5c4825;color:#f0d3a0}
+:root[data-theme="dark"] .erp-invoice-disclaimer{border-top-color:#3a304d;color:#aa99bd}
+@media(max-width:700px){
+  .erp-invoice{padding:18px 14px}
+  .erp-invoice-header,.erp-invoice-footer{grid-template-columns:1fr;display:grid}
+  .erp-invoice-meta{text-align:left;min-width:0}
+  .erp-invoice-meta dd{text-align:left}
+  .erp-invoice-billgrid{grid-template-columns:1fr;gap:16px}
+  .erp-invoice-table-wrap{overflow-x:hidden}
+  .erp-invoice-table{min-width:0;font-size:10.5px}
+  .erp-invoice-table th{font-size:8.5px;letter-spacing:.02em;padding:7px 5px;white-space:normal}
+  .erp-invoice-table td{padding:8px 5px;overflow-wrap:anywhere}
+  .erp-invoice-table td.num,.erp-invoice-table th.num{overflow-wrap:normal}
+  .erp-invoice-paycard{flex-direction:column;align-items:flex-start}
+  .erp-invoice-qr{align-self:center}
+}
 .auth-local{margin-top:22px;border-top:1px solid #f0e9f5;padding-top:18px;text-align:center}
 .auth-local p{font-size:11px;color:#ae9eb8;line-height:1.7;margin:9px 0 0}
 @media(max-width:650px){
@@ -85,10 +178,15 @@
  .erp-panel{padding:16px}
  .erp-form-actions .primary-button,.erp-form-actions .secondary-button{flex:1}
 }
+@page{size:A4;margin:12mm}
 @media print{
  body *{visibility:hidden}
- .erp-receipt,.erp-receipt *{visibility:visible}
+ .erp-receipt,.erp-receipt *,.erp-invoice,.erp-invoice *{visibility:visible}
  .erp-receipt{position:fixed;inset:20px auto auto 20px;right:20px}
+ .erp-invoice{position:absolute;left:0;right:0;top:0;width:100%;box-shadow:none;border-radius:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .erp-invoice-table-wrap{overflow:visible}
+ .erp-invoice-table{min-width:0}
+ .erp-no-print{display:none!important}
 }
 
 /* Dark theme for ERP screens (paired with src/lib/theme.js) */

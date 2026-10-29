@@ -150,3 +150,90 @@ test('signed-in Supabase mode saves offline, reports a version conflict, and syn
   await page.getByRole('button', {name: 'Students', exact: true}).click();
   await expect(page.getByRole('cell', {name: /Beatriz/})).toBeVisible();
 });
+
+test('payment setup saved offline stays local, warns before close, then auto-syncs', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+  const server = {...emptySnapshot(), billingSettings: []};
+  const pushed = [];
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split('/').pop();
+    const body = route.request().postDataJSON() || {};
+    const reply = value => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(value),
+    });
+    if (name === 'erp_get_context') {
+      return reply({
+        organizationId: ORG, organizationName: 'Yoga Studio', roles: ['owner'],
+        instructorId: null, studentId: null,
+      });
+    }
+    if (name === 'erp_get_snapshot') return reply(structuredClone(server));
+    if (name === 'erp_sync_push') {
+      const operations = body.p_payload?.operations || [];
+      pushed.push(...structuredClone(operations));
+      const results = operations.map(op => {
+        const list = server[op.entity];
+        const record = {...op.payload, syncVersion: op.baseVersion ? op.baseVersion + 1 : 1};
+        const index = list.findIndex(item => item.id === op.entityId);
+        if (index >= 0) list[index] = {...list[index], ...record};
+        else list.push(record);
+        return {
+          opId: op.opId, status: 'applied', entity: op.entity, entityId: op.entityId,
+          serverEntityId: op.entityId, serverVersion: record.syncVersion,
+        };
+      });
+      return reply({serverTime: new Date().toISOString(), results});
+    }
+    return route.fulfill({
+      status: 404, contentType: 'application/json',
+      body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'}),
+    });
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.locator('.connection-badge')).toContainText('Online · synced');
+
+  await page.context().setOffline(true);
+  await expect(page.locator('.connection-badge')).toContainText('Offline · local copy');
+  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await page.getByRole('tab', {name: 'Payment setup'}).click();
+  await page.getByLabel('UPI ID').fill('offline@okbank');
+  await page.getByLabel('UPI payee name').fill('Yoga Studio');
+  await page.getByRole('button', {name: 'Save payment setup'}).click();
+  await expect(page.locator('.connection-badge')).toContainText('Offline · 1 saved locally');
+  await expect(page.getByText('Saved on this device · waiting to sync')).toBeVisible();
+
+  // The browser-close guard is armed only while device-only work remains.
+  const closeWasBlocked = await page.evaluate(() => {
+    const event = new Event('beforeunload', {cancelable: true});
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(closeWasBlocked).toBeTruthy();
+
+  // Sensitivity check: the mirrored backup key exists alongside the primary
+  // sync-state key, but the browser test asserts only counts/fields—not the
+  // full local snapshot—in logs.
+  const backupQueueLength = await page.evaluate(userId => {
+    const key = Object.keys(localStorage).find(name => name.includes(`yoga-studio-erp-sync-v1:${userId}:`) && name.endsWith(':backup'));
+    return key ? JSON.parse(localStorage.getItem(key)).outbox.length : -1;
+  }, account.id);
+  expect(backupQueueLength).toBe(1);
+
+  await page.context().setOffline(false);
+  await expect(page.getByText('Supabase · Synced')).toBeVisible();
+  await expect(page.locator('.connection-badge')).toContainText('Online · synced');
+  expect(pushed.some(op => op.entity === 'billingSettings' && op.payload.upiId === 'offline@okbank')).toBeTruthy();
+  expect(server.billingSettings[0].upiId).toBe('offline@okbank');
+
+  const closeAllowedAfterSync = await page.evaluate(() => {
+    const event = new Event('beforeunload', {cancelable: true});
+    window.dispatchEvent(event);
+    return !event.defaultPrevented;
+  });
+  expect(closeAllowedAfterSync).toBeTruthy();
+});

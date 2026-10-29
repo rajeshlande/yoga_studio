@@ -1,6 +1,107 @@
 # Yoga Studio — Changelog
 
-Version numbers follow semantic versioning. `package.json` is the authoritative application version.
+All notable changes to Yoga Studio are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and version numbers follow [Semantic Versioning](https://semver.org/).
+`package.json` is the authoritative application version.
+
+## 1.4.0 — 2026-10-29
+
+### Added — Payment setup, GST/UPI invoices and no-forget autosync
+
+- **Always-visible Online/Offline badge** in the signed-in top bar and auth
+  header. In Supabase mode it distinguishes synced, syncing, waiting,
+  saved-locally and conflict-review states; in separate local-device mode it
+  is explicitly labelled **this device**.
+- **Automatic sync safety net:** pending signed-in work now also retries
+  every 30 seconds while the app is visible and uses bounded exponential
+  backoff (5–60 seconds) after transient failures. Sync is attempted after a
+  write, on reconnect, on visibility/focus and best-effort on page hide; a
+  fresh edit brings a delayed retry forward. Users no longer need to remember
+  **Sync now**.
+- **Browser-close protection:** while signed-in changes are pending,
+  conflicted or actively syncing, the app requests the browser's standard
+  close/refresh confirmation. The durable outbox is not erased by closing and
+  resumes on the next open for the same user/organization.
+- **Stronger device persistence:** the sync state is mirrored to a second
+  same-origin storage key and recovered if the primary copy is corrupt, and
+  the app requests persistent browser storage when work is queued. Settings
+  reports whether persistent storage is granted.
+- **Fees → Payment setup** for Owner/Admin users: billing identity/address,
+  invoice prefix and terms, optional GST, UPI receiving details, bank
+  transfer details, and Razorpay/Cashfree public configuration/readiness.
+- **Payment configuration validation/readiness:** GSTIN and seller-state
+  prefix, GST rate and SAC/HSN, PIN, complete-or-empty bank details, account
+  number, IFSC, UPI ID, Razorpay environment-specific public Key ID, and
+  HTTPS webhook URL when a trusted webhook is marked configured. Recording a
+  payment now warns when the selected UPI/bank/card route is not configured
+  for invoices or automatic confirmation and links managers to Payment setup.
+- **Themed invoice PDFs for dues and payments:** unpaid/partial invoices show
+  balance, due date, bank instructions and a dynamic UPI QR for the exact
+  payable total; paid receipts show receipt number/method/date/reference and
+  hide the QR/payment instructions; void receipts remain visibly void.
+  **Download PDF / Print** uses an A4 print stylesheet and the current
+  Light/Dark app theme, with the document title set to the invoice/receipt
+  reference for the browser's Save-as-PDF flow.
+- **Admin-configurable GST:** GST can be off (retail format) or on with
+  GSTIN, seller state, SAC/HSN, rate and GST-inclusive vs GST-added pricing.
+  Invoices calculate taxable value and use CGST + SGST for intra-state or
+  IGST for inter-state place of supply; a buyer GSTIN can be supplied for an
+  individual PDF.
+- **Synchronized billing profile:** one billing-settings record per
+  organization is included in local-device snapshots and the signed-in
+  offline snapshot/outbox, with the same idempotent push and manual
+  version-conflict protection as other ERP data.
+- Billing/sync/browser tests covering GST splits and rounding, UPI URI/QR
+  inputs, gateway validation, corrupt-primary storage recovery, offline
+  payment-setup sync, close warning, top Online/Offline states, invoice
+  unpaid/paid behaviour and generation of a real PDF through Chromium print.
+
+### Changed
+
+- Payment recording is labelled **Record verified payment** and asks for a
+  transaction reference where available. Manual UPI/bank/card entries must
+  be verified outside the browser before being recorded. Recorded amounts
+  are actual gross cash received; under GST-exclusive pricing, Fees/dashboard
+  dues and payment defaults use gross payable totals and paid-receipt tax
+  breakups are derived from the received amount.
+- The old simple payment receipt dialog is replaced by the full due/paid
+  invoice dialog. Membership rows expose **Invoice PDF** for outstanding
+  balances; payment rows expose **Invoice PDF** after a receipt exists.
+- If 1.4.0 reaches a database that has not yet been upgraded, an unsupported
+  billing-settings operation stays safely queued with a setup-needed message
+  instead of appearing as a data conflict; it can auto-sync after SQL v3 is
+  installed.
+- Project documentation was expanded to an industry-standard README and the
+  ERP/version guides were refreshed for the complete feature and release
+  history.
+
+### Security
+
+- Payment-gateway configuration stores **public identifiers only**. There is
+  no field for, and the app must never be given, a gateway secret key or
+  webhook secret. Version 1.4.0 does not launch gateway checkout or claim
+  webhook-verified automatic confirmation; that requires a future trusted
+  Supabase Edge Function/server phase.
+
+### Database migration — SQL v3
+
+- `supabase/erp_setup.sql` remains the single owner-run setup/upgrade file.
+  SQL v3 adds `erp_billing_settings` (one row per organization), sync
+  version/RLS/grant coverage, `billingSettings` in `erp_get_snapshot`, a
+  manager-authorized version-checked billing applier in `erp_sync_push`, and
+  the matching internal-function revoke.
+- Re-run the **complete** file in the Supabase SQL Editor to upgrade. The
+  migration is additive/idempotent and does not require deleting business
+  rows. Deploy/run SQL v3 and complete live UAT before relying on shared
+  billing settings in production.
+
+### Dependencies
+
+- Added the bundled `qrcode` package so dynamic UPI QR images are generated
+  locally in the browser, including while offline; no external QR service is
+  called.
 
 ## 1.3.0 — 2026-10-29
 

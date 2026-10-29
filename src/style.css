@@ -191,3 +191,24 @@ label,.password-label>button,.auth-switch,.auth-switch>button,.back-link,.nav-it
 
 /* Auth header theme action (ERP adaptation) */
 .auth-header-actions{display:flex;align-items:center;gap:10px}
+
+/* Always-visible internet + autosync state (top bar and auth header) */
+.connection-badge{
+  display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:7px 11px;
+  border-radius:999px;border:1px solid transparent;
+  font-size:10px;font-weight:700;letter-spacing:.02em;white-space:nowrap;
+}
+.connection-badge.online{background:#e9f3ed;border-color:#cfe3d5;color:#3f6f50}
+.connection-badge.offline{background:#fbecde;border-color:#f0dcc2;color:#8a5b24}
+.connection-badge.attention{background:#fdecec;border-color:#f2c9c9;color:#9a3d3d}
+.connection-badge svg{flex-shrink:0}
+:root[data-theme="dark"] .connection-badge.online{background:#22392c;border-color:#31533e;color:#a9d3b6}
+:root[data-theme="dark"] .connection-badge.offline{background:#3d3020;border-color:#5c4825;color:#f0d3a0}
+:root[data-theme="dark"] .connection-badge.attention{background:#3b2530;border-color:#633747;color:#eda9b6}
+@media(max-width:650px){
+  .connection-badge{font-size:9px;padding:6px 8px;gap:5px}
+  .auth-header .connection-badge span{display:none}
+}
+@media(max-width:420px){
+  .topbar .connection-badge span{max-width:118px;overflow:hidden;text-overflow:ellipsis}
+}

@@ -1,9 +1,9 @@
 # Yoga Studio — version and release management
 
-- Version: 0.1 of this guide
-- Updated: 2026-10-15
+- Version: 0.2 of this guide
+- Updated: 2026-10-29
 - Status: Implementation guide; formal release approval remains separate
-- Current application release: **1.1.1** (package.json is authoritative)
+- Current application release: **1.4.0** (package.json is authoritative)
 
 ## Identity and source of truth
 
@@ -17,7 +17,7 @@ The version appears on the auth footer, private footer and Settings → Applicat
 - **MINOR:** compatible feature/behavior additions or approved product changes.
 - **MAJOR:** incompatible behavior/data/API changes that require migration or coordination.
 
-Release 1.1.0 was introduced because it removes the previous preview access mode and adds app-version visibility and release management. Version assignment is a maintainer policy; it does not constitute UAT/security approval.
+Release 1.1.0 removed the previous preview access mode and added app-version visibility and release management. Subsequent minor releases are recorded in `CHANGELOG.md`: 1.2.0 (ERP core), 1.3.0 (offline-first Supabase sync/conflict review) and 1.4.0 (payment setup, GST/UPI invoices and stronger autosync/data-safety behaviour). Version assignment is a maintainer policy; it does not constitute UAT/security approval.
 
 ```sh
 npm run version:patch
@@ -30,9 +30,9 @@ The commands use `npm version <level> --no-git-tag-version`. They update the man
 
 1. Start from reviewed code and a clean working branch; increment the version once.
 2. Update `CHANGELOG.md` with changes, removals, migration impact and unresolved configuration/testing constraints.
-3. Run `npm ci`, `npm test`, `npm run build:pages`, `node scripts/check-pages.mjs` and the production Pages/offline smoke. The browser suite uses isolated mocked provider responses, not production credentials.
+3. Run `npm ci`, `npm test`, `npm run build`, `npm run build:pages`, `node scripts/check-pages.mjs`, `npm run security:check`, the built-artifact security scan and the production Pages/offline smoke. If `supabase/erp_setup.sql` changed, also parse it with a PostgreSQL parser and execute it twice in an ephemeral Postgres/PGlite harness. The browser suite uses isolated mocked provider responses, not production credentials.
 4. Review the build for unwanted sample accounts/data and verify display/PWA identity. Do not put fixture code into `src/` or `public/`.
-5. Commit the package/lockfile, code and release notes together. Push to `main` after review; the Pages workflow deploys only after checks pass.
+5. Commit the package/lockfile, code, SQL and release notes together. Keep feature work on its reviewed branch; merge/push to `main` only with authorization and after the owner has the matching one-file SQL ready to run. The Pages workflow deploys from `main` only after its checks pass.
 6. Verify the workflow and public URL, visible version, login gate, PWA and real provider flows using an approved account when configured.
 7. Optionally create an annotated Git tag `v<version>` on the approved deployment commit. Tags/releases are not created automatically by the current workflow; avoid tagging unapproved failures.
 
@@ -50,4 +50,4 @@ For rollback, restore the entire reviewed prior artifact or rebuild the intended
 
 ## Limits
 
-A missing public Supabase key now means no account access, not an alternate demo flow. Real authentication, email and metadata verification require the actual project and mailbox. Automated mock results and a static deployment are not security/UAT sign-off.
+A missing public Supabase key means no account access, not an alternate demo flow. Real authentication, email, SQL/RLS, payment-invoice and offline-sync verification require the actual project and approved test accounts/devices. Mocked browser tests, parser checks and ephemeral Postgres runs are not live-provider UAT or security sign-off.

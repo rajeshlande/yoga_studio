@@ -1,6 +1,7 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 2.
--- Matches app version 1.3.0 (offline-first sync with manual conflict review).
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 3.
+-- Matches app version 1.4.0 (safer autosync, GST/UPI invoicing and Admin
+-- payment configuration/readiness checks).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -30,6 +31,10 @@
 --     changed online after the device copied it, the server returns a
 --     conflict for manual review; it never overwrites silently. Payments
 --     are append-only and can be voided, never edited or deleted.
+--   * The one-row billing profile stores invoice/GST/UPI/bank details and
+--     gateway PUBLIC identifiers only. Gateway secret keys and webhook
+--     secrets must never be stored in this database or the browser; live
+--     gateway confirmation belongs in a trusted server/Edge Function.
 -- ============================================================================
 
 create extension if not exists pgcrypto;
@@ -178,6 +183,46 @@ create table if not exists public.erp_payments (
   unique (org_id, receipt_no)
 );
 
+-- One billing/payment profile per organization (SQL v3). It drives themed
+-- fee invoices/receipts, optional GST splits, UPI QR + bank instructions,
+-- and gateway readiness checks. Only public gateway identifiers are stored.
+create table if not exists public.erp_billing_settings (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null unique references public.erp_organizations(id) on delete cascade,
+  legal_name text not null default 'Yoga Studio',
+  email text not null default '',
+  phone text not null default '',
+  address text not null default '',
+  city text not null default '',
+  state_name text not null default 'Maharashtra',
+  state_code text not null default '27' check (state_code ~ '^[0-9]{2}$'),
+  pin_code text not null default '',
+  gst_enabled boolean not null default false,
+  gstin text not null default '',
+  gst_rate_percent numeric(5,2) not null default 18 check (gst_rate_percent between 0 and 28),
+  sac_code text not null default '',
+  price_includes_gst boolean not null default true,
+  invoice_prefix text not null default 'YS-INV',
+  due_days integer not null default 7 check (due_days between 0 and 60),
+  terms text not null default '',
+  upi_id text not null default '',
+  upi_payee_name text not null default '',
+  bank_name text not null default '',
+  bank_account_name text not null default '',
+  bank_account_number text not null default '',
+  bank_account_type text not null default 'Current',
+  ifsc text not null default '',
+  gateway_provider text not null default 'none' check (gateway_provider in ('none','razorpay','cashfree')),
+  gateway_environment text not null default 'test' check (gateway_environment in ('test','live')),
+  gateway_public_key_id text not null default '',
+  gateway_webhook_url text not null default '',
+  gateway_webhook_configured boolean not null default false,
+  status text not null default 'active' check (status in ('active','inactive')),
+  sync_version integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.erp_counters (
   org_id uuid primary key references public.erp_organizations(id) on delete cascade,
   receipt bigint not null default 0
@@ -241,7 +286,7 @@ declare t text;
 begin
   foreach t in array array[
     'erp_branches','erp_students','erp_instructors','erp_batches',
-    'erp_enrollments','erp_attendance','erp_plans','erp_memberships','erp_payments']
+    'erp_enrollments','erp_attendance','erp_plans','erp_memberships','erp_payments','erp_billing_settings']
   loop
     execute format('alter table public.%I add column if not exists sync_version integer not null default 1', t);
     execute format('alter table public.%I add column if not exists updated_at timestamptz not null default now()', t);
@@ -268,7 +313,7 @@ declare t text;
 begin
   foreach t in array array[
     'erp_branches','erp_students','erp_instructors','erp_batches',
-    'erp_enrollments','erp_attendance','erp_plans','erp_memberships','erp_payments']
+    'erp_enrollments','erp_attendance','erp_plans','erp_memberships','erp_payments','erp_billing_settings']
   loop
     execute format('drop trigger if exists %I on public.%I', t || '_sync_touch', t);
     execute format(
@@ -287,7 +332,7 @@ begin
   foreach t in array array[
     'erp_organizations','erp_org_members','erp_branches','erp_students',
     'erp_instructors','erp_branch_members','erp_batches','erp_enrollments',
-    'erp_attendance','erp_plans','erp_memberships','erp_payments',
+    'erp_attendance','erp_plans','erp_memberships','erp_payments','erp_billing_settings',
     'erp_counters','erp_audit_log','erp_sync_operations']
   loop
     execute format('alter table public.%I enable row level security', t);
@@ -509,7 +554,31 @@ begin
       from public.erp_payments p
      where p.org_id = v_org and (p.branch_id is null or p.branch_id = any(v_branches))
        and (v_org_mgr or 'admin' = any(v_roles)
-            or (v_student is not null and p.student_id = v_student)))
+            or (v_student is not null and p.student_id = v_student))),
+    'billingSettings', (select coalesce(jsonb_agg(jsonb_build_object(
+        'id', bs.id, 'legalName', bs.legal_name, 'email', bs.email, 'phone', bs.phone,
+        'address', bs.address, 'city', bs.city, 'state', bs.state_name,
+        'stateCode', bs.state_code, 'pinCode', bs.pin_code,
+        'gstEnabled', bs.gst_enabled, 'gstin', bs.gstin,
+        'gstRatePercent', bs.gst_rate_percent, 'sacCode', bs.sac_code,
+        'priceIncludesGst', bs.price_includes_gst,
+        'invoicePrefix', bs.invoice_prefix, 'dueDays', bs.due_days, 'terms', bs.terms,
+        'upiId', bs.upi_id, 'upiPayeeName', bs.upi_payee_name,
+        'bankName', bs.bank_name, 'bankAccountName', bs.bank_account_name,
+        'bankAccountNumber', bs.bank_account_number,
+        'bankAccountType', bs.bank_account_type, 'ifsc', bs.ifsc,
+        'gatewayProvider', bs.gateway_provider,
+        'gatewayEnvironment', bs.gateway_environment,
+        'gatewayPublicKeyId', bs.gateway_public_key_id,
+        'gatewayWebhookUrl', bs.gateway_webhook_url,
+        'gatewayWebhookConfigured', bs.gateway_webhook_configured,
+        'status', bs.status, 'createdAt', bs.created_at,
+        'updatedAt', bs.updated_at, 'syncVersion', bs.sync_version)), '[]')
+      from public.erp_billing_settings bs
+     where bs.org_id = v_org
+       -- Managers configure it; linked students may receive it so their own
+       -- due invoice/receipt can show the studio's payment instructions.
+       and (v_org_mgr or 'admin' = any(v_roles) or v_student is not null))
   );
 end $$;
 
@@ -1381,6 +1450,102 @@ begin
   return public.erp__sync_result(p_op, 'applied', v_id, v_version, null, null, v_receipt);
 end $$;
 
+
+create or replace function public.erp__sync_apply_billing_settings(p_org uuid, p_op jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_payload jsonb := coalesce(p_op->'payload', '{}'::jsonb);
+  v_id uuid := coalesce(nullif(v_payload->>'id', '')::uuid, p_org);
+  v_base integer := coalesce(nullif(p_op->>'baseVersion', '')::integer, 0);
+  v_provider text := coalesce(nullif(v_payload->>'gatewayProvider', ''), 'none');
+  v_environment text := coalesce(nullif(v_payload->>'gatewayEnvironment', ''), 'test');
+  v_rate numeric := coalesce(nullif(v_payload->>'gstRatePercent', '')::numeric, 18);
+  v_due_days integer := coalesce(nullif(v_payload->>'dueDays', '')::integer, 7);
+  v_gst_enabled boolean := coalesce(nullif(v_payload->>'gstEnabled', '')::boolean, false);
+  v_price_includes boolean := coalesce(nullif(v_payload->>'priceIncludesGst', '')::boolean, true);
+  v_webhook_configured boolean := coalesce(nullif(v_payload->>'gatewayWebhookConfigured', '')::boolean, false);
+  v_state_code text := coalesce(nullif(v_payload->>'stateCode', ''), '27');
+  v_gstin text := upper(coalesce(v_payload->>'gstin', ''));
+  v_current public.erp_billing_settings%rowtype;
+  v_version integer;
+begin
+  if nullif(trim(v_payload->>'legalName'), '') is null then
+    raise exception 'VALIDATION_FAILED: billing legalName';
+  end if;
+  if v_provider not in ('none','razorpay','cashfree')
+     or v_environment not in ('test','live') then
+    raise exception 'VALIDATION_FAILED: gateway provider/environment';
+  end if;
+  if v_rate < 0 or v_rate > 28 or v_due_days < 0 or v_due_days > 60 then
+    raise exception 'VALIDATION_FAILED: billing gstRatePercent/dueDays';
+  end if;
+  if v_state_code !~ '^[0-9]{2}$' then
+    raise exception 'VALIDATION_FAILED: billing stateCode';
+  end if;
+  if v_gst_enabled and v_gstin !~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$' then
+    raise exception 'VALIDATION_FAILED: billing gstin';
+  end if;
+
+  select * into v_current from public.erp_billing_settings where org_id = p_org for update;
+  if v_current.id is not null then
+    if v_base <> v_current.sync_version then
+      return public.erp__sync_result(p_op, 'conflict', v_current.id, v_current.sync_version,
+        'VERSION_CONFLICT', 'Payment/invoice settings changed in Supabase after they were copied to this device.');
+    end if;
+    update public.erp_billing_settings set
+      legal_name = trim(v_payload->>'legalName'),
+      email = coalesce(v_payload->>'email', ''), phone = coalesce(v_payload->>'phone', ''),
+      address = coalesce(v_payload->>'address', ''), city = coalesce(v_payload->>'city', ''),
+      state_name = coalesce(nullif(v_payload->>'state', ''), 'Maharashtra'),
+      state_code = v_state_code, pin_code = coalesce(v_payload->>'pinCode', ''),
+      gst_enabled = v_gst_enabled, gstin = v_gstin, gst_rate_percent = v_rate,
+      sac_code = coalesce(v_payload->>'sacCode', ''), price_includes_gst = v_price_includes,
+      invoice_prefix = coalesce(nullif(upper(v_payload->>'invoicePrefix'), ''), 'YS-INV'),
+      due_days = v_due_days, terms = coalesce(v_payload->>'terms', ''),
+      upi_id = coalesce(v_payload->>'upiId', ''),
+      upi_payee_name = coalesce(v_payload->>'upiPayeeName', ''),
+      bank_name = coalesce(v_payload->>'bankName', ''),
+      bank_account_name = coalesce(v_payload->>'bankAccountName', ''),
+      bank_account_number = coalesce(v_payload->>'bankAccountNumber', ''),
+      bank_account_type = coalesce(nullif(v_payload->>'bankAccountType', ''), 'Current'),
+      ifsc = upper(coalesce(v_payload->>'ifsc', '')),
+      gateway_provider = v_provider, gateway_environment = v_environment,
+      gateway_public_key_id = coalesce(v_payload->>'gatewayPublicKeyId', ''),
+      gateway_webhook_url = coalesce(v_payload->>'gatewayWebhookUrl', ''),
+      gateway_webhook_configured = v_webhook_configured,
+      status = 'active'
+     where org_id = p_org returning id, sync_version into v_id, v_version;
+  else
+    if v_base > 0 then
+      return public.erp__sync_result(p_op, 'conflict', null, null,
+        'RECORD_MISSING', 'Payment/invoice settings no longer exist in Supabase.');
+    end if;
+    insert into public.erp_billing_settings(
+      id, org_id, legal_name, email, phone, address, city, state_name, state_code,
+      pin_code, gst_enabled, gstin, gst_rate_percent, sac_code, price_includes_gst,
+      invoice_prefix, due_days, terms, upi_id, upi_payee_name, bank_name,
+      bank_account_name, bank_account_number, bank_account_type, ifsc,
+      gateway_provider, gateway_environment, gateway_public_key_id,
+      gateway_webhook_url, gateway_webhook_configured, status)
+    values (
+      v_id, p_org, trim(v_payload->>'legalName'), coalesce(v_payload->>'email', ''),
+      coalesce(v_payload->>'phone', ''), coalesce(v_payload->>'address', ''),
+      coalesce(v_payload->>'city', ''), coalesce(nullif(v_payload->>'state', ''), 'Maharashtra'),
+      v_state_code, coalesce(v_payload->>'pinCode', ''), v_gst_enabled, v_gstin,
+      v_rate, coalesce(v_payload->>'sacCode', ''), v_price_includes,
+      coalesce(nullif(upper(v_payload->>'invoicePrefix'), ''), 'YS-INV'), v_due_days,
+      coalesce(v_payload->>'terms', ''), coalesce(v_payload->>'upiId', ''),
+      coalesce(v_payload->>'upiPayeeName', ''), coalesce(v_payload->>'bankName', ''),
+      coalesce(v_payload->>'bankAccountName', ''), coalesce(v_payload->>'bankAccountNumber', ''),
+      coalesce(nullif(v_payload->>'bankAccountType', ''), 'Current'),
+      upper(coalesce(v_payload->>'ifsc', '')), v_provider, v_environment,
+      coalesce(v_payload->>'gatewayPublicKeyId', ''),
+      coalesce(v_payload->>'gatewayWebhookUrl', ''), v_webhook_configured, 'active')
+    returning sync_version into v_version;
+  end if;
+  return public.erp__sync_result(p_op, 'applied', v_id, v_version);
+end $$;
+
 create or replace function public.erp_sync_push(p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -1446,7 +1611,7 @@ begin
               select 1 from public.erp_batches
                where id = v_batch and org_id = v_org
                  and instructor_id = public.erp_my_instructor_id()));
-        elsif v_entity in ('branches','students','instructors','batches','enrollments','plans','memberships')
+        elsif v_entity in ('branches','students','instructors','batches','enrollments','plans','memberships','billingSettings')
               and v_type = 'upsert' then
           v_authorized := public.erp_can_manage();
         elsif v_entity = 'payments' and v_type in ('payment_create','payment_void') then
@@ -1472,6 +1637,8 @@ begin
           v_result := public.erp__sync_apply_plan(v_org, v_op);
         elsif v_entity = 'memberships' then
           v_result := public.erp__sync_apply_membership(v_org, v_op);
+        elsif v_entity = 'billingSettings' then
+          v_result := public.erp__sync_apply_billing_settings(v_org, v_op);
         elsif v_entity = 'payments' then
           v_result := public.erp__sync_apply_payment(v_org, v_op);
         else
@@ -1538,6 +1705,7 @@ revoke all on function public.erp__sync_apply_attendance(uuid, jsonb) from publi
 revoke all on function public.erp__sync_apply_plan(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.erp__sync_apply_membership(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.erp__sync_apply_payment(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.erp__sync_apply_billing_settings(uuid, jsonb) from public, anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- Function permissions: signed-in users only; never anonymous.
