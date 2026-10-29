@@ -1,7 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AlertCircle, Building2, CalendarCheck, Check, Clock, Download, IndianRupee, Leaf,
-  Pencil, Plus, Printer, Search, Users, Wallet, WifiOff, X,
+  Pencil, Plus, Printer, RefreshCw, Search, Users, Wallet, WifiOff, X,
 } from 'lucide-react';
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
 import {
@@ -13,13 +13,25 @@ import './erp.css';
 
 /* ---------------- data hook: one snapshot load, one call per action ---------------- */
 
-export function useErpData(mode, notify, enabled, onRemoteContext) {
+const defaultSyncState = mode => ({
+  enabled: mode === 'supabase', mode, online: typeof navigator === 'undefined' || navigator.onLine,
+  syncing: false, setupNeeded: false, hasCache: false, pendingCount: 0, conflictCount: 0,
+  conflicts: [], lastPulledAt: null, lastSyncedAt: null, error: '',
+});
+
+export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') {
   const [data, setData] = useState(emptySnapshot);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [remoteContext, setRemoteContext] = useState(null);
-  const client = useMemo(() => createErpClient(mode), [mode]);
+  const [syncState, setSyncState] = useState(() => defaultSyncState(mode));
+  const client = useMemo(
+    () => createErpClient(mode, {userId, onSyncState: setSyncState, onSnapshot: setData}),
+    [mode, userId],
+  );
   const contextSent = useRef(false);
+  const lastFocusSync = useRef(0);
+  const previousConflictCount = useRef(0);
 
   const load = useCallback(async () => {
     if (!enabled) return;
@@ -33,17 +45,75 @@ export function useErpData(mode, notify, enabled, onRemoteContext) {
         } catch { setRemoteContext(null); }
       }
       setData(await client.getSnapshot());
+      if (client.getSyncState) setSyncState(client.getSyncState());
     } catch (err) { setError(err); }
     finally { setLoading(false); }
   }, [client, enabled, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { contextSent.current = false; load(); }, [load]);
 
+  const syncNow = useCallback(async () => {
+    if (!enabled || mode !== 'supabase' || !client.syncNow) return false;
+    try {
+      const next = await client.syncNow();
+      if (next) setData(next);
+      if (client.getSyncState) setSyncState(client.getSyncState());
+      const current = client.getSyncState?.();
+      if (current?.conflictCount) notify(`${current.conflictCount} sync conflict(s) need review.`);
+      else if (current?.pendingCount) notify(`${current.pendingCount} change(s) are still waiting to sync.`);
+      else if (current?.online) notify('Studio data is synced.');
+      return true;
+    } catch (err) {
+      notify(err?.message || 'Sync could not be completed.');
+      return false;
+    }
+  }, [client, enabled, mode, notify]);
+
+  useEffect(() => {
+    if (!enabled || mode !== 'supabase') return undefined;
+    const refreshState = () => { if (client.getSyncState) setSyncState(client.getSyncState()); };
+    const onOnline = () => { refreshState(); client.syncNow?.().then(next => { if (next) setData(next); }).catch(() => {}); };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine) return;
+      if (Date.now() - lastFocusSync.current < 15_000) return;
+      lastFocusSync.current = Date.now();
+      client.syncNow?.().then(next => { if (next) setData(next); }).catch(() => {});
+    };
+    const onStorage = event => {
+      if (event.key?.startsWith('yoga-studio-erp-sync-v1:')) client.refreshFromStorage?.();
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', refreshState);
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', refreshState);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [client, enabled, mode]);
+
+  useEffect(() => {
+    if (syncState.conflictCount > previousConflictCount.current) {
+      notify(`${syncState.conflictCount} sync conflict(s) need review. No change was overwritten.`);
+    }
+    previousConflictCount.current = syncState.conflictCount;
+  }, [notify, syncState.conflictCount]);
+
   const act = useCallback(async (action, successMessage) => {
     try {
       const next = await action(client);
       if (next) setData(next);
-      if (successMessage) notify(successMessage);
+      const current = client.getSyncState?.();
+      if (current) setSyncState(current);
+      if (successMessage) {
+        notify(mode === 'supabase' && current?.pendingCount
+          ? `${successMessage} Saved on this device and queued for sync.`
+          : successMessage);
+      }
       return true;
     } catch (err) {
       notify(isMissingRpcError(err)
@@ -51,9 +121,33 @@ export function useErpData(mode, notify, enabled, onRemoteContext) {
         : (err?.message || 'Could not save. Please try again.'));
       return false;
     }
+  }, [client, mode, notify]);
+
+  const resolveConflict = useCallback(async (conflictId, choice) => {
+    try {
+      const next = await client.resolveConflict?.(conflictId, choice);
+      if (next) setData(next);
+      if (client.getSyncState) setSyncState(client.getSyncState());
+      notify(choice === 'mine' ? 'Your version was queued to sync.' : 'The Supabase version was kept.');
+      return true;
+    } catch (err) {
+      notify(err?.message || 'That conflict could not be resolved.');
+      return false;
+    }
   }, [client, notify]);
 
-  return {data, setData, loading, error, load, act, client, remoteContext, setupNeeded: isMissingRpcError(error)};
+  const clearSyncCache = useCallback(async (options = {}) => {
+    const next = await client.clearSyncCache?.(options);
+    if (next) setData(next);
+    if (client.getSyncState) setSyncState(client.getSyncState());
+    return next;
+  }, [client]);
+
+  return {
+    data, setData, loading, error, load, act, client, remoteContext,
+    setupNeeded: isMissingRpcError(error) || syncState.setupNeeded,
+    syncState, syncNow, resolveConflict, clearSyncCache,
+  };
 }
 
 /* ---------------- shared helpers ---------------- */
@@ -122,8 +216,129 @@ export function ErpBlockingState({erp, mode, setMode}) {
   </div>;
 }
 
-export function ErpToolbar({data, ctx, setCtx, mode, remoteContext}) {
+const SYNC_ENTITY_LABELS = {
+  branches: 'Branch', students: 'Student', instructors: 'Instructor', batches: 'Batch',
+  enrollments: 'Enrollment', attendance: 'Attendance', plans: 'Plan',
+  memberships: 'Membership', payments: 'Payment',
+};
+const SYNC_FIELD_LABELS = {
+  name: 'Name', fullName: 'Full name', branchId: 'Branch', studentId: 'Student',
+  instructorId: 'Instructor', batchId: 'Batch', planId: 'Plan', membershipId: 'Membership',
+  city: 'City', address: 'Address', phone: 'Phone', email: 'Email', gender: 'Gender',
+  dob: 'Date of birth', joiningDate: 'Joining date', joinedOn: 'Joined on', status: 'Status',
+  notes: 'Notes', days: 'Days', startTime: 'Start time', durationMins: 'Duration (mins)',
+  capacity: 'Capacity', classDate: 'Class date', amountPaise: 'Amount', durationMonths: 'Duration (months)',
+  startDate: 'Start date', endDate: 'End date', billingCycle: 'Billing cycle', method: 'Method',
+  paidOn: 'Paid on', note: 'Note', receiptNo: 'Receipt', voidReason: 'Void reason',
+};
+
+function syncValue(field, value, data) {
+  if (value === null || value === undefined || value === '') return '—';
+  if (field === 'amountPaise') return formatINR(value);
+  if (field === 'days' && Array.isArray(value)) return value.map(day => DAY_LABELS[day] || day).join(', ');
+  if (field === 'branchId') return branchName(data, value);
+  if (field === 'studentId') return studentName(data, value);
+  if (field === 'instructorId') return instructorName(data, value);
+  if (field === 'batchId') return data.batches.find(batch => batch.id === value)?.name || '—';
+  if (field === 'planId') return planName(data, value);
+  if (field === 'membershipId') {
+    const membership = data.memberships.find(item => item.id === value);
+    return membership ? `${studentName(data, membership.studentId)} · ${formatDate(membership.startDate)}` : '—';
+  }
+  if (/Date$|dob|joinedOn|paidOn/.test(field) && typeof value === 'string') return formatDate(value);
+  if (Array.isArray(value)) return value.join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function conflictTitle(data, conflict) {
+  const record = conflict.op.proposedRecord || conflict.serverRecord || {};
+  const fallback = SYNC_ENTITY_LABELS[conflict.op.entity] || 'Record';
+  if (record.name || record.fullName) return `${fallback}: ${record.name || record.fullName}`;
+  if (conflict.op.entity === 'attendance') {
+    return `Attendance: ${studentName(data, record.studentId)} · ${formatDate(record.classDate)}`;
+  }
+  if (conflict.op.entity === 'payments') {
+    return `Payment: ${studentName(data, record.studentId)} · ${formatINR(record.amountPaise)}`;
+  }
+  if (conflict.op.entity === 'enrollments') return `Enrollment: ${studentName(data, record.studentId)}`;
+  if (conflict.op.entity === 'memberships') return `Membership: ${studentName(data, record.studentId)}`;
+  return fallback;
+}
+
+function SyncConflictsDialog({data, conflicts, onClose, onResolve}) {
+  const [busyId, setBusyId] = useState('');
+  const resolve = async (conflict, choice) => {
+    setBusyId(conflict.id);
+    try { await onResolve(conflict.id, choice); }
+    finally { setBusyId(''); }
+  };
+  return <Dialog title="Review sync conflicts" sub="These changes were not overwritten. Compare this device with Supabase and choose what to keep. “Keep mine” reapplies only the fields changed on this device." onClose={onClose}>
+    {conflicts.length === 0 ? <p style={{fontSize: 13}}>All conflicts are resolved.</p> : conflicts.map(conflict => {
+      const mine = conflict.op.proposedRecord || conflict.op.payload || {};
+      const server = conflict.serverRecord || {};
+      const fields = [...new Set([...Object.keys(mine), ...Object.keys(server)])]
+        .filter(field => !['id', 'createdAt', 'updatedAt', 'syncVersion', 'syncPending'].includes(field))
+        .filter(field => JSON.stringify(mine[field]) !== JSON.stringify(server[field]));
+      return <section className="erp-conflict-card" key={conflict.id} aria-label={conflictTitle(data, conflict)}>
+        <div className="erp-panel-head" style={{marginBottom: 8}}>
+          <div><h3>{conflictTitle(data, conflict)}</h3>
+            <p>{conflict.kind === 'blocked' ? 'Supabase could not accept this change.' : 'Changed on this device and in Supabase.'}</p></div>
+          <span className={`erp-badge ${conflict.kind === 'blocked' ? 'red' : 'amber'}`}>{conflict.kind === 'blocked' ? 'Needs attention' : 'Conflict'}</span>
+        </div>
+        {conflict.message && <p className="erp-conflict-message">{conflict.message}</p>}
+        {fields.length > 0 && <div className="erp-table-wrap"><table className="erp-table erp-conflict-table">
+          <thead><tr><th>Field</th><th>This device</th><th>Supabase now</th></tr></thead>
+          <tbody>{fields.map(field => <tr key={field}><td>{SYNC_FIELD_LABELS[field] || field}</td><td>{syncValue(field, mine[field], data)}</td><td>{syncValue(field, server[field], data)}</td></tr>)}</tbody>
+        </table></div>}
+        <div className="erp-form-actions">
+          <button className="secondary-button" disabled={busyId === conflict.id} onClick={() => resolve(conflict, 'server')}>
+            {conflict.kind === 'blocked' ? 'Discard my change' : 'Keep Supabase'}
+          </button>
+          {conflict.kind !== 'blocked' && <button className="primary-button" disabled={busyId === conflict.id} onClick={() => resolve(conflict, 'mine')}>Keep mine</button>}
+        </div>
+      </section>;
+    })}
+    <div className="erp-form-actions"><button className="secondary-button" onClick={onClose}>Close</button></div>
+  </Dialog>;
+}
+
+function SyncControls({data, erp, mode}) {
   const online = useOnline();
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const sync = erp?.syncState || defaultSyncState('supabase');
+  useEffect(() => {
+    if (reviewOpen && sync.conflictCount === 0) setReviewOpen(false);
+  }, [reviewOpen, sync.conflictCount]);
+  if (mode === 'local') {
+    return <span className={`erp-mode-badge ${online ? '' : 'offline'}`} style={{marginLeft: 'auto'}}>
+      {online ? <Check size={13}/> : <WifiOff size={13}/>} On this device{online ? '' : ' · Offline'}
+    </span>;
+  }
+  const label = sync.setupNeeded ? 'Sync setup needed'
+    : sync.syncing ? 'Syncing…'
+    : sync.conflictCount ? `${sync.conflictCount} conflict(s)`
+    : sync.pendingCount ? `${sync.pendingCount} waiting`
+    : online ? 'Synced' : 'Offline copy';
+  const needsAttention = !online || sync.pendingCount > 0 || sync.conflictCount > 0 || sync.setupNeeded;
+  const detail = sync.setupNeeded
+    ? 'Run the updated supabase/erp_setup.sql to enable offline sync.'
+    : sync.error || (sync.lastSyncedAt ? `Last synced ${new Date(sync.lastSyncedAt).toLocaleString('en-IN')}` : 'Supabase offline sync');
+  return <div className="erp-sync-actions">
+    <span className={`erp-mode-badge ${needsAttention ? 'offline' : ''}`} title={detail} role="status">
+      {sync.conflictCount ? <AlertCircle size={13}/> : online ? <Check size={13}/> : <WifiOff size={13}/>} Supabase · {label}
+    </span>
+    <button type="button" className="erp-sync-btn" onClick={() => erp.syncNow?.()} disabled={!online || sync.syncing}>
+      <RefreshCw size={14} className={sync.syncing ? 'erp-spinning' : ''}/> Sync now
+    </button>
+    {sync.conflictCount > 0 && <button type="button" className="erp-sync-btn erp-sync-review" onClick={() => setReviewOpen(true)}>
+      <AlertCircle size={14}/> Review conflicts ({sync.conflictCount})
+    </button>}
+    {reviewOpen && <SyncConflictsDialog data={data} conflicts={sync.conflicts} onClose={() => setReviewOpen(false)} onResolve={erp.resolveConflict}/>}
+  </div>;
+}
+
+export function ErpToolbar({data, ctx, setCtx, mode, remoteContext, erp}) {
   const roles = mode === 'supabase' && remoteContext?.roles?.length
     ? ROLES.filter(r => remoteContext.roles.includes(r.id))
     : ROLES;
@@ -152,9 +367,7 @@ export function ErpToolbar({data, ctx, setCtx, mode, remoteContext}) {
         {data.students.filter(s => s.status === 'active').map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
       </select>
     </label>}
-    <span className={`erp-mode-badge ${online ? '' : 'offline'}`} style={{marginLeft: 'auto'}}>
-      {online ? <Check size={13}/> : <WifiOff size={13}/>} {mode === 'local' ? 'On this device' : 'Supabase'}{online ? '' : ' · Offline'}
-    </span>
+    <SyncControls data={data} erp={erp} mode={mode}/>
   </div>;
 }
 
@@ -172,7 +385,7 @@ export function ErpDashboardSection(props) {
     && (ctx.role !== 'instructor' || b.instructorId === ctx.instructorId)
     && (ctx.role !== 'student' || data.enrollments.some(e => e.batchId === b.id && e.studentId === ctx.studentId && e.status === 'active')));
   const todayBatches = myBatches.filter(b => isBatchOnDate(b, today));
-  const monthPayments = data.payments.filter(p => p.paidOn?.startsWith(month) && inBranch(ctx, p.branchId));
+  const monthPayments = data.payments.filter(p => p.status !== 'void' && p.paidOn?.startsWith(month) && inBranch(ctx, p.branchId));
   const collected = monthPayments.reduce((s, p) => s + (p.amountPaise || 0), 0);
   const dues = data.memberships.filter(m => m.status === 'active')
     .map(m => ({m, bal: membershipBalance(m, data.payments, today)}))
@@ -195,7 +408,7 @@ export function ErpDashboardSection(props) {
 
   return <>
     <ErpBlockingState {...props}/>
-    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext}/>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     {erp.loading && <p style={{color: '#9b92a4', fontSize: 13}}>Loading studio data…</p>}
     <div className="erp-grid">
       {ctx.role === 'student' ? <>
@@ -237,6 +450,7 @@ export function BranchesPage(props) {
   return <>
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Branches <span className="flower">✳</span></h1><p>Every location of your studio, in one place.</p></div>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <section className="erp-panel"><div className="erp-panel-head"><div><h2>All branches</h2><p>{data.branches.length} branch(es)</p></div>
       {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', city: '', address: '', phone: ''})}><Plus size={16}/> Add branch</button>}</div>
       {data.branches.length === 0 ? <Empty icon={Building2} title="No branch yet" text="Add your first studio location to start adding students and batches."/> :
@@ -272,7 +486,7 @@ export function StudentsPage(props) {
   return <>
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Students <span className="flower">✳</span></h1><p>Everyone who practices at your studio.</p></div>
-    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext}/>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <section className="erp-panel"><div className="erp-panel-head">
       <span className="erp-search"><Search size={16}/><input aria-label="Search students" placeholder="Search name, phone or email…" value={query} onChange={e => setQuery(e.target.value)}/></span>
       <div className="erp-actions">
@@ -324,7 +538,7 @@ export function BatchesPage(props) {
   return <>
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Batches <span className="flower">✳</span></h1><p>Recurring class groups, instructors and rosters.</p></div>
-    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext}/>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     {canManage(ctx) && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Instructors</h2><p>{data.instructors.length} instructor(s)</p></div>
       <button className="secondary-button" onClick={() => setNewInstructor({fullName: '', phone: '', email: '', branchId: data.branches[0]?.id || ''})}><Plus size={15}/> Add instructor</button></div>
       {data.instructors.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No instructors yet. Add one before creating a batch.</p> :
@@ -402,7 +616,7 @@ export function AttendancePage(props) {
   return <>
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Attendance <span className="flower">✳</span></h1><p>{ctx.role === 'student' ? 'Your class history.' : 'Mark today’s class in under a minute.'}</p></div>
-    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext}/>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     {ctx.role === 'student' ? <section className="erp-panel"><div className="erp-panel-head"><div><h2>My attendance</h2><p>{myRecords.length} class(es) · {attendanceSummary(myRecords).rate ?? '—'}% attended</p></div></div>
       {!ctx.studentId ? <Empty icon={Users} title="Choose a student above" text="In Supabase mode this is linked automatically to the signed-in student."/> :
       myRecords.length === 0 ? <Empty icon={CalendarCheck} title="No attendance yet" text="Your marked classes will appear here."/> :
@@ -452,7 +666,7 @@ export function FeesPage(props) {
   return <>
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Fees & payments <span className="flower">✳</span></h1><p>Plans, memberships, dues and receipts in ₹.</p></div>
-    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext}/>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <div className="erp-seg" role="tablist" aria-label="Fees sections" style={{marginBottom: 16}}>
       {[['memberships', 'Memberships & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : [])].map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
@@ -471,13 +685,16 @@ export function FeesPage(props) {
           <button className="erp-link-btn erp-danger" onClick={() => erp.act(c => c.cancelMembership(m.id), 'Membership cancelled.')}>Cancel</button></>}</td></tr>; })}
       </tbody></table></div>}</section>}
 
-    {tab === 'payments' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Payments</h2><p>{payments.length} payment(s) · {formatINR(payments.reduce((s, p) => s + (p.amountPaise || 0), 0))} total shown</p></div>
-      <div className="erp-actions"><button className="secondary-button" onClick={() => exportCSV('payments.csv', payments, [{label: 'Receipt', value: p => p.receiptNo}, {label: 'Date', value: p => p.paidOn}, {label: 'Student', value: p => studentName(data, p.studentId)}, {label: 'Method', value: p => p.method}, {label: 'Amount (INR)', value: p => paiseToRupees(p.amountPaise)}])}><Download size={15}/> CSV</button>
+    {tab === 'payments' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Payments</h2><p>{payments.length} payment(s) · {formatINR(payments.filter(p => p.status !== 'void').reduce((s, p) => s + (p.amountPaise || 0), 0))} collected shown</p></div>
+      <div className="erp-actions"><button className="secondary-button" onClick={() => exportCSV('payments.csv', payments, [{label: 'Receipt', value: p => p.receiptNo || 'Pending sync'}, {label: 'Date', value: p => p.paidOn}, {label: 'Student', value: p => studentName(data, p.studentId)}, {label: 'Method', value: p => p.method}, {label: 'Amount (INR)', value: p => paiseToRupees(p.amountPaise)}, {label: 'Status', value: p => p.status || 'recorded'}])}><Download size={15}/> CSV</button>
       {canManage(ctx) && <button className="primary-button" onClick={() => openPayment(null)}><Plus size={16}/> Record payment</button>}</div></div>
       {payments.length === 0 ? <Empty icon={IndianRupee} title="No payments recorded" text="Record cash, UPI, card or bank payments and a receipt number is generated automatically."/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Receipt</th><th>Date</th><th>Student</th><th>Method</th><th>Amount</th><th>Actions</th></tr></thead><tbody>
-        {payments.map(p => <tr key={p.id}><td><strong>{p.receiptNo}</strong></td><td>{formatDate(p.paidOn)}</td><td>{studentName(data, p.studentId)}</td><td style={{textTransform: 'capitalize'}}>{PAYMENT_METHODS.find(m => m.id === p.method)?.label || p.method}</td><td><strong>{formatINR(p.amountPaise)}</strong></td>
-        <td><button className="erp-link-btn" onClick={() => setReceipt(p)}><Printer size={13}/> Receipt</button></td></tr>)}
+        {payments.map(p => <tr key={p.id}><td><strong>{p.receiptNo || 'Pending sync'}</strong>{p.syncPending && <><br/><span className="erp-badge amber">On this device</span></>}{p.status === 'void' && <><br/><span className="erp-badge red">VOID</span></>}</td><td>{formatDate(p.paidOn)}</td><td>{studentName(data, p.studentId)}</td><td style={{textTransform: 'capitalize'}}>{PAYMENT_METHODS.find(m => m.id === p.method)?.label || p.method}</td><td><strong style={p.status === 'void' ? {textDecoration: 'line-through'} : undefined}>{formatINR(p.amountPaise)}</strong></td>
+        <td>{p.receiptNo && <button className="erp-link-btn" onClick={() => setReceipt(p)}><Printer size={13}/> Receipt</button>}
+        {canManage(ctx) && p.status !== 'void' && (p.syncPending && !p.receiptNo
+          ? <button className="erp-link-btn erp-danger" disabled={erp.syncState?.syncing} onClick={async () => { if (window.confirm('Discard this payment before it syncs? It has not received a Supabase receipt yet.')) await erp.act(c => c.voidPayment({id: p.id}), 'Pending payment discarded.'); }}>Discard pending</button>
+          : <button className="erp-link-btn erp-danger" onClick={async () => { const reason = window.prompt('Reason for voiding this payment (required for audit):', ''); if (reason === null) return; if (!reason.trim()) return props.notify('Enter a reason to void this payment.'); await erp.act(c => c.voidPayment({id: p.id, reason: reason.trim()}), 'Payment voided. The original receipt remains in history.'); }}>Void</button>)}</td></tr>)}
       </tbody></table></div>}</section>}
 
     {tab === 'plans' && !isStudent && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Plans</h2><p>{data.plans.length} plan(s)</p></div>
@@ -506,7 +723,7 @@ export function FeesPage(props) {
         <span className="erp-field">Ends on<span style={{fontSize: 14, color: '#3d3547'}}>{formatDate(membershipEnd(membershipForm.startDate, data.plans.find(p => p.id === membershipForm.planId)?.durationMonths || 1, membershipForm.billingCycle))}</span></span>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setMembershipForm(null)}>Cancel</button><button className="primary-button">Create membership</button></div></form></Dialog>}
 
-    {paymentForm && <Dialog title="Record payment" sub="A receipt number is generated automatically. Verify the amount before saving." onClose={() => setPaymentForm(null)}>
+    {paymentForm && <Dialog title="Record payment" sub="A final receipt number is assigned by Supabase. If you are offline, the payment is saved on this device first and the receipt appears after sync." onClose={() => setPaymentForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); const m = data.memberships.find(x => x.id === paymentForm.membershipId); if (!m) return;
         if (await erp.act(c => c.recordPayment({membershipId: m.id, studentId: m.studentId, branchId: m.branchId, amountPaise: rupeesToPaise(paymentForm.amountRupees), method: paymentForm.method, paidOn: paymentForm.paidOn, note: paymentForm.note}), 'Payment recorded. Receipt is in the Payments tab.')) { setPaymentForm(null); setTab('payments'); } }}>
         <label className="erp-field full">Membership<select required value={paymentForm.membershipId} onChange={e => { const m = data.memberships.find(x => x.id === e.target.value); setPaymentForm({...paymentForm, membershipId: e.target.value, amountRupees: m ? paiseToRupees(membershipBalance(m, data.payments, today).due) : ''}); }}>
@@ -525,6 +742,7 @@ export function FeesPage(props) {
         <dt>Date</dt><dd>{formatDate(receipt.paidOn)}</dd>
         <dt>Method</dt><dd>{PAYMENT_METHODS.find(m => m.id === receipt.method)?.label || receipt.method}</dd>
         <dt>Amount</dt><dd>{formatINR(receipt.amountPaise)}</dd>
+        {receipt.status === 'void' ? <><dt>Status</dt><dd>VOID</dd>{receipt.voidReason ? <><dt>Void reason</dt><dd>{receipt.voidReason}</dd></> : null}</> : null}
         {receipt.note ? <><dt>Note</dt><dd>{receipt.note}</dd></> : null}
       </dl></div>
       <div className="erp-form-actions"><button className="secondary-button" onClick={() => setReceipt(null)}>Close</button><button className="primary-button" onClick={() => window.print()}><Printer size={15}/> Print receipt</button></div>

@@ -5,6 +5,16 @@
 .erp-toolbar select{min-width:160px;width:auto}
 .erp-mode-badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:6px 10px;border-radius:999px;background:#e9f3ed;color:#4d7a5e}
 .erp-mode-badge.offline{background:#fbecde;color:#9a6b31}
+.erp-sync-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+.erp-sync-btn{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:8px 11px;border:1px solid #e7e0ed;border-radius:999px;background:#fdfcfe;color:#6f568f;font-size:12px;font-weight:700}
+.erp-sync-btn:disabled{opacity:.55;cursor:not-allowed}
+.erp-sync-review{background:#fbecde;border-color:#f3dcbd;color:#8a5b24}
+.erp-spinning{animation:erp-spin 1s linear infinite}
+@keyframes erp-spin{to{transform:rotate(360deg)}}
+.erp-conflict-card{border:1px solid #f0e2c8;background:#fffaf2;border-radius:12px;padding:16px;margin:14px 0}
+.erp-conflict-card h3{font-size:15px;color:#3d3547}
+.erp-conflict-message{font-size:12px;color:#8a5b24;line-height:1.6;margin:6px 0 10px}
+.erp-conflict-table{min-width:520px}
 .erp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:18px 0}
 .erp-kpi{background:#fff;border:1px solid var(--border);border-radius:14px;padding:18px}
 .erp-kpi small{display:block;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#a295ae;margin-bottom:8px}
@@ -90,6 +100,11 @@
 :root[data-theme="dark"] .erp-field input::placeholder,:root[data-theme="dark"] .erp-field textarea::placeholder{color:#847399}
 :root[data-theme="dark"] .erp-mode-badge{background:#22392c;color:#a9d3b6}
 :root[data-theme="dark"] .erp-mode-badge.offline{background:#3d3020;color:#ecc98d}
+:root[data-theme="dark"] .erp-sync-btn{background:#251f34;border-color:#3a304d;color:#cdb1eb}
+:root[data-theme="dark"] .erp-sync-review{background:#3d3020;border-color:#5c4825;color:#f0d3a0}
+:root[data-theme="dark"] .erp-conflict-card{background:#2b2119;border-color:#5c4825}
+:root[data-theme="dark"] .erp-conflict-card h3{color:#f5e7c8}
+:root[data-theme="dark"] .erp-conflict-message{color:#ecc98d}
 :root[data-theme="dark"] .erp-kpi strong,:root[data-theme="dark"] .erp-panel-head h2,:root[data-theme="dark"] .erp-dialog h2,:root[data-theme="dark"] .erp-empty h3,:root[data-theme="dark"] .erp-check strong{color:#f0e8f7}
 :root[data-theme="dark"] .erp-kpi p,:root[data-theme="dark"] .erp-panel-head p,:root[data-theme="dark"] .erp-empty,:root[data-theme="dark"] .erp-dialog .dialog-sub,:root[data-theme="dark"] .erp-person small,:root[data-theme="dark"] .erp-check small{color:#aa99bd}
 :root[data-theme="dark"] .erp-table th{border-bottom-color:#342a49}

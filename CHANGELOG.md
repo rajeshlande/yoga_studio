@@ -2,6 +2,20 @@
 
 Version numbers follow semantic versioning. `package.json` is the authoritative application version.
 
+## 1.3.0 — 2026-10-29
+
+### Added — Offline-first Supabase sync, owner-authorized
+- Signed-in Supabase ERP mode now keeps a per-user/per-organization device copy plus a durable operation outbox. Branches, students, instructors, batches, enrollments, attendance, plans, memberships and payments can be created or changed offline after one successful online sign-in and initial download.
+- Changes sync automatically when the browser comes back online, regains focus, or the user chooses **Sync now**. Offline creates use client UUIDs and are pushed in dependency order (for example, branch → student → enrollment → attendance).
+- SQL v2 in the single `supabase/erp_setup.sql` adds row `sync_version`s, an update trigger, an idempotent `erp_sync_operations` ledger, typed `erp_sync_push(jsonb)`, audit detail, and append-only payment status/void fields. Re-run the whole file in the Supabase SQL Editor to upgrade.
+- Concurrent edits are never last-write-wins: stale device operations return as sync conflicts. The ERP toolbar shows pending/conflict counts and a review dialog; **Keep Supabase** discards the device change, while **Keep mine** reapplies only the fields changed on that device onto the current server record.
+- Payments remain append-only. An offline payment shows **Pending sync** and receives its final `YS-YYYY-NNNN` receipt only from Supabase; a still-queued payment can be discarded, and a synced payment can be voided with a required audit reason instead of being edited/deleted.
+- Sync unit tests, a mocked-Supabase Playwright offline→conflict→resolution test, and ephemeral-Postgres SQL checks cover coalescing, dependencies, idempotency, version conflicts, payment voids and snapshot versions.
+
+### Notes
+- The separate local-device ERP mode remains available and still does not sync. New sign-ins/password actions require internet; the signed-in offline copy is tied to the device browser storage and sign out on shared devices (a fully synced copy is removed on sign-out).
+- Live Supabase UAT is still required after running SQL v2: one online download, one offline attendance + payment cycle, and a two-account concurrent-edit conflict check.
+
 ## 1.2.0 — 2026-10-29
 
 ### Added — Yoga Studio ERP (Core), owner-authorized

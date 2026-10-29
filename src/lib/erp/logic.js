@@ -101,7 +101,7 @@ export function formatINR(paise) {
 
 export function paymentTotalsForMembership(membershipId, payments) {
   const paid = (payments || [])
-    .filter(p => p.membershipId === membershipId)
+    .filter(p => p.membershipId === membershipId && p.status !== 'void')
     .reduce((sum, p) => sum + (Number(p.amountPaise) || 0), 0);
   return paid;
 }

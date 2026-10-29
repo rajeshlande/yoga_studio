@@ -6,6 +6,7 @@ export default defineConfig({
   workers:1,
   projects:[
     {name:'auth-ui',testMatch:'app.spec.js',use:{baseURL:'http://127.0.0.1:5175'}},
+    {name:'erp-sync',testMatch:'erp-sync.spec.js',use:{baseURL:'http://127.0.0.1:5175'}},
     {name:'unconfigured',testMatch:'unconfigured.spec.js',use:{baseURL:'http://127.0.0.1:5176'}},
     {name:'erp-local',testMatch:'erp-local.spec.js',use:{baseURL:'http://127.0.0.1:5176'}}
   ],

@@ -179,12 +179,26 @@ export const localStore = {
     const paidOn = payload.paidOn || toISODate();
     const year = String(paidOn).slice(0, 4);
     db.payments.push({
-      id: uid(), studentId: payload.studentId, membershipId: payload.membershipId || '',
+      id: payload.id || uid(), studentId: payload.studentId, membershipId: payload.membershipId || '',
       branchId: payload.branchId || '', amountPaise: Number(payload.amountPaise) || 0,
       method: payload.method || 'cash', paidOn, note: payload.note || '',
       receiptNo: `YS-${year}-${String(db.counters.receipt).padStart(4, '0')}`,
+      status: 'recorded', voidReason: '', syncVersion: 1,
       createdAt: nowISO(),
     });
+    return saveDb(db);
+  },
+
+  async voidPayment(input) {
+    const db = loadDb();
+    const id = typeof input === 'string' ? input : input?.id;
+    const reason = typeof input === 'string' ? '' : (input?.reason || '');
+    const payment = db.payments.find(p => p.id === id);
+    if (payment) {
+      payment.status = 'void';
+      payment.voidReason = reason;
+      payment.syncVersion = (payment.syncVersion || 1) + 1;
+    }
     return saveDb(db);
   },
 };
