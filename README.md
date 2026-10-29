@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, memberships,
 INR fees, payment setup and themed invoice PDFs.
 
-> **Current source release:** 1.4.1 · **Database setup:** SQL v3 in
+> **Current source release:** 1.4.2 · **Database setup:** SQL v3 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -383,11 +383,12 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.4.1:
+Recommended go-live order for 1.4.2:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` (SQL v3).
-3. Deploy the 1.4.1 web build with the two public Actions secrets.
+2. If SQL v3 has not already been installed, run the complete current
+   `supabase/erp_setup.sql`. Release 1.4.2 itself has no database change.
+3. Deploy the 1.4.2 web build with the two public Actions secrets.
 4. Sign in online, wait for **Online · synced**, and complete the UAT checks.
 5. Configure and verify Payment setup before issuing unpaid invoices.
 

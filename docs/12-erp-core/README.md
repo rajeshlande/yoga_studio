@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.4.1)
+# Yoga Studio ERP — Core (v1.4.2)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Fees/Payments**, with **multi-branch**
@@ -9,6 +9,9 @@ Version 1.4.0 adds a synchronized payment/billing profile, GST/UPI invoice
 PDFs, an always-visible Online/Offline state and stronger no-forget autosync.
 Patch 1.4.1 fixes complete A4 Print/Save-as-PDF output and standardizes
 form/control alignment across the app; it has no database change.
+Patch 1.4.2 is dependency/runtime/build-tool maintenance only (Node 26 LTS,
+Vite 8, current Supabase JS and lucide-react) with no database or
+product-behavior change.
 
 ## What works today
 

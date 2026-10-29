@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.4.2 — 2026-10-30
+
+### Changed — Dependency, runtime and build-tool modernization
+
+- **Runtime dependencies:** updated `@supabase/supabase-js`
+  `2.109.0 → 2.118.0` and `lucide-react` `1.57.0 → 1.64.0`. React/React DOM
+  19.3.1, `qrcode` 1.5.4 and Playwright 1.64.1 were already current and are
+  unchanged.
+- **Node runtime:** Node **26 LTS** is now the canonical local and CI
+  runtime. The GitHub Pages workflow uses Node 26, `.nvmrc` selects Node 26,
+  and package engines allow `>=22 <27`.
+- **Build tooling:** upgraded Vite `6.4.4 → 8.3.5` and
+  `@vitejs/plugin-react` `4.3.4 → 6.1.2`, and renamed the ESM build config
+  to `vite.config.mjs`. The service-worker content stamp, GitHub Pages
+  `/yoga_studio/` base path, offline shell, invoice QR generation and A4
+  PDF output were re-verified against production builds.
+- **Transitive refresh/audit:** the locked transitive tree was rechecked;
+  no within-range updates remained and no unsupported npm overrides were
+  introduced. `npm audit` reports zero vulnerabilities for both the full
+  and production-only trees.
+
+### Performance
+
+- Compared with a clean 1.4.1 production build, the main JavaScript asset
+  decreased from about **647 kB** to **632 kB** (about **2.3% smaller**),
+  with a correspondingly smaller gzip payload. This is a maintenance
+  release: no product feature or ERP behavior change is intended.
+
+### Database migration
+
+- No database change. SQL v3 from 1.4.0 remains current; do not re-run the
+  setup file solely for this patch if SQL v3 is already installed. If SQL
+  v3 has not been installed yet, run the complete
+  `supabase/erp_setup.sql` file before relying on synchronized billing
+  settings and complete live sign-in/UAT.
+
 ## 1.4.1 — 2026-10-29
 
 ### Fixed — Invoice PDF printing and app-wide form alignment
