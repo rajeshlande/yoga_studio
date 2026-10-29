@@ -40,7 +40,7 @@ Read [the function-only access policy](docs/11-management-plan/README.md#databas
 
 ## Commands and verification
 
-Use **Node 22** (see `package.json` engines). If the environment defaults to Node 20, run commands with an available Node 22 installation or, when package downloads are permitted, `npx --yes --package=node@22 -c '<command>'`.
+Use **Node 26 LTS** (see `package.json` engines). If the environment defaults to Node 20, run commands with an available Node 26 installation or, when package downloads are permitted, `npx --yes --package=node@26 -c '<command>'`.
 
 ```sh
 npm ci

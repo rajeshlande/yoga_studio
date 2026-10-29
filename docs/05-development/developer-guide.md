@@ -10,7 +10,7 @@
 
 ## 1. Read first and setup
 
-Read [CLAUDE.md](../../CLAUDE.md) before codebase work and after context resets. Use **Node 22**; package.json declares the engines policy. Keep the repository/base path yoga_studio and display name Yoga Studio.
+Read [CLAUDE.md](../../CLAUDE.md) before codebase work and after context resets. Use **Node 26 LTS**; package.json declares the engines policy. Keep the repository/base path yoga_studio and display name Yoga Studio.
 
 ```sh
 npm ci

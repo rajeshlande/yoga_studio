@@ -36,7 +36,7 @@ No demo accounts, seeded data or missing-config bypass. Auth metadata and browse
 | NFR-01 | Responsive 320px–desktop | Automated coverage exists; target device matrix pending |
 | NFR-02 | WCAG 2.2 AA target, keyboard/focus/reflow | Independent conformance review pending |
 | NFR-03 | HTTPS/public browser keys only; no secrets in source/logs | Pattern checks exist, not a full security audit |
-| NFR-04 | Lockfile reproducibility, Node 22, build/tests/Pages checks | CI and scripts exist; report actual run evidence separately |
+| NFR-04 | Lockfile reproducibility, Node 26 LTS, build/tests/Pages checks | CI and scripts exist; report actual run evidence separately |
 | NFR-05 | Scoped offline shell; network failure does not fake a save | Static shell smoke exists; no private queue |
 | NFR-06 | Measurable performance targets | Use workload/protocol in consolidated governance; targets unmeasured for management |
 | NFR-07 | Explicit approved SLA/RTO/RPO/retention, not invented promises | Production decisions and drills pending |

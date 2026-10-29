@@ -252,7 +252,7 @@ Important design rules:
 
 ### Prerequisites
 
-- Node.js **22** (see `package.json` engines).
+- Node.js **26 LTS** (see `package.json` engines; Node 22–26 is supported).
 - npm.
 - A Supabase project if using shared/signed-in mode.
 - Chromium for the complete browser test suite.
@@ -321,7 +321,7 @@ them. `.env.local` is ignored by Git.
 Install the browser once in a fresh environment, then run the full suite:
 
 ```sh
-export PATH=/opt/node-v22.22.1-linux-x64/bin:$PATH # only if Node 22 is not the default
+export PATH=/opt/node-v26.13.0-linux-x64/bin:$PATH # only if Node 26 is not the default
 npx playwright install chromium
 npm test
 ```

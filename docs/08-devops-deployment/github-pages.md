@@ -28,7 +28,7 @@ Without the public key, the website can publish the authentication shell, but re
 
 ## Workflow
 
-`.github/workflows/pages.yml` uses Node 22, a locked install, 5 account browser tests with isolated provider responses and no production credentials, the repository-path build, static artifact checks, and a production subpath/offline smoke. Only a successful build is uploaded and deployed. Deployment has `pages:write` and `id-token:write`; other permissions are restricted. GitHub supplies the workflow token; no personal access token is embedded.
+`.github/workflows/pages.yml` uses Node 26, a locked install, 5 account browser tests with isolated provider responses and no production credentials, the repository-path build, static artifact checks, and a production subpath/offline smoke. Only a successful build is uploaded and deployed. Deployment has `pages:write` and `id-token:write`; other permissions are restricted. GitHub supplies the workflow token; no personal access token is embedded.
 
 ```sh
 npm ci

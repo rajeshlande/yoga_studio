@@ -12,7 +12,7 @@
 
 Yoga Studio is an auth-first, responsive React/Vite PWA: signup/login, confirmation/recovery paths, minimal dashboard, editable name/bio, read-only email, settings, install help and logout. Private pages require a Supabase session. There is **no demo access, sample-data mode, seeded account or authentication bypass**. Missing public configuration disables real account actions; it does not unlock a preview identity.
 
-GitHub Pages is the selected static host at `/yoga_studio/`; an Actions build/test/deploy workflow exists. Node 22 is the supported project runtime. Public configuration is supplied outside tracked source. Actual mailbox/provider UAT, independent reviews and release approvals remain distinct from mocked tests.
+GitHub Pages is the selected static host at `/yoga_studio/`; an Actions build/test/deploy workflow exists. Node 26 LTS is the canonical project runtime (package engines allow Node 22–26). Public configuration is supplied outside tracked source. Actual mailbox/provider UAT, independent reviews and release approvals remain distinct from mocked tests.
 
 ## 2. Planned management expansion
 
