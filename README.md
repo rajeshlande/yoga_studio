@@ -1,6 +1,6 @@
 # Yoga Studio
 
-A minimal, mobile/desktop-friendly PWA built with React, Vite and Supabase Authentication. **Current release: 1.1.1.**
+A minimal, mobile/desktop-friendly PWA built with React, Vite and Supabase Authentication. **Current release: 1.2.0.**
 
 Live application: https://rajeshlande.github.io/yoga_studio/
 
@@ -11,11 +11,12 @@ Read [CLAUDE.md](CLAUDE.md) before any codebase work, including exploration, pla
 ## Scope
 
 - Login, sign-up, forgot-password email and recovery-link password update.
-- After authentication: simple dashboard, editable name/bio profile, read-only account email, settings, installation and logout.
+- **Yoga Studio ERP (Core)** — multi-branch students, instructors, batches/rosters, attendance and INR fees/payments with Owner/Admin/Instructor/Student portals. See [the ERP guide](docs/12-erp-core/README.md).
+- After authentication: ERP dashboard, editable name/bio profile, read-only account email, settings, installation and logout.
 - Responsive sidebar/mobile drawer, keyboard-focus handling and offline app shell.
 - Visible application version, sourced from `package.json` (authentication footer, private footer and Settings).
 
-**There is no demo account, demo sign-in, seeded user profile, local sample-data mode or authentication bypass.** The dashboard requires a Supabase session. Without a configured public key, account forms display a setup message and no private pages are accessible. Test fixtures are isolated under `tests/`, mocked at the network boundary, and are not bundled in the app.
+**There is no demo account, demo sign-in, seeded user profile, local sample-data mode or authentication bypass.** Account pages require a Supabase session; without a configured public key, account forms display a setup message. The one deliberate addition is an explicitly-labelled **offline local-device mode** for the ERP: it starts empty, stores only owner-entered studio data in that browser (Settings can export/clear it) and never grants access to account data. Supabase ERP tables/functions come from the single file `supabase/erp_setup.sql`, which the owner pastes into their Supabase SQL Editor. Test fixtures are isolated under `tests/`, mocked at the network boundary, and are not bundled in the app.
 
 The product display/PWA name is **Yoga Studio**. The repository, npm package identifier and Pages deployment directory remain `yoga_studio`, preserving the live URL.
 
@@ -75,11 +76,11 @@ npm test
 node scripts/test-pages.mjs
 ```
 
-Five browser tests run on isolated development ports. Configured-flow tests use a test-only provider URL/key and intercepted responses; no test account is present in application code or deployed assets. The unconfigured test checks that legacy sample storage is removed and cannot authorize access. Mocked API tests are not proof of real Supabase email delivery or production authentication.
+Six browser tests run on isolated development ports (the sixth drives the offline ERP flow), plus unit tests for ERP billing/money helpers. Configured-flow tests use a test-only provider URL/key and intercepted responses; no test account is present in application code or deployed assets. The unconfigured test checks that legacy sample storage is removed and cannot authorize access. Mocked API tests are not proof of real Supabase email delivery or production authentication.
 
-## Management expansion — planning only
+## Management expansion
 
-The [single consolidated management plan v0.4](docs/11-management-plan/README.md) defines operational Co-Owner, P0/P1 contracts, supporting schema, attendance, RPC policy and phase readiness. These management features are not implemented in the current app.
+The owner authorized the ERP **core** (Students, Batches, Attendance, Fees) on 2026-10-29; it shipped in 1.2.0 — see [docs/12-erp-core/README.md](docs/12-erp-core/README.md). The [consolidated management plan v0.4](docs/11-management-plan/README.md) still governs anything beyond that scope (gateways, reminders, payroll, advanced approvals), which remains unimplemented.
 
 ## Documentation
 

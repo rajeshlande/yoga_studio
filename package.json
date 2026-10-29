@@ -1,9 +1,9 @@
 {
   "name": "yoga_studio",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/security-config.test.mjs && playwright test",
+    "test": "node --test tests/security-config.test.mjs tests/erp-logic.test.mjs && playwright test",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
