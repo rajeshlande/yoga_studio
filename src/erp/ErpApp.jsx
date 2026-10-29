@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {
   AlertCircle, Building2, CalendarCheck, Check, Clock, Download, IndianRupee, Leaf,
   Pencil, Plus, Printer, RefreshCw, Search, Users, Wallet, WifiOff, X,
@@ -670,7 +671,7 @@ export function AttendancePage(props) {
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Date</th><th>Batch</th><th>Status</th></tr></thead><tbody>
         {myRecords.map(a => <tr key={a.id}><td>{formatDate(a.classDate)}</td><td>{data.batches.find(b => b.id === a.batchId)?.name || '—'}</td><td><span className={`erp-badge ${a.status === 'present' ? 'green' : a.status === 'late' ? 'amber' : 'red'}`}>{a.status}</span></td></tr>)}
       </tbody></table></div>}</section> : <>
-    <section className="erp-panel"><div className="erp-panel-head">
+    <section className="erp-panel"><div className="erp-panel-head align-end">
       <div className="erp-actions">
         <label className="erp-field">Class date<input type="date" value={date} onChange={e => setDate(e.target.value)}/></label>
         <label className="erp-field">Batch<select aria-label="Attendance batch" value={batchId} onChange={e => setBatchId(e.target.value)}>{batches.map(b => <option key={b.id} value={b.id}>{b.name} · {batchTimeLabel(b)}</option>)}</select></label>
@@ -879,6 +880,11 @@ function InvoiceDialog({data, invoice, onClose}) {
   }, [reference]);
 
   useEffect(() => {
+    document.body.classList.add('erp-invoice-open');
+    return () => document.body.classList.remove('erp-invoice-open');
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     if (!upiUri) { setQrDataUrl(''); return undefined; }
     QRCode.toDataURL(upiUri, {width: 240, margin: 1, errorCorrectionLevel: 'M'})
@@ -887,21 +893,25 @@ function InvoiceDialog({data, invoice, onClose}) {
     return () => { cancelled = true; };
   }, [upiUri]);
 
-  const printInvoice = () => window.print();
+  const printInvoice = async () => {
+    if (upiUri && !qrDataUrl) {
+      try {
+        const url = await QRCode.toDataURL(upiUri, {width: 240, margin: 1, errorCorrectionLevel: 'M'});
+        const image = new Image();
+        image.src = url;
+        await image.decode().catch(() => {});
+        setQrDataUrl(url);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      } catch {
+        // The printed invoice still includes the UPI ID and bank/reference
+        // instructions if QR generation is unavailable.
+      }
+    }
+    window.print();
+  };
   const sellerAddress = [settings.address, [settings.city, settings.state, settings.pinCode].filter(Boolean).join(', ')].filter(Boolean);
 
-  return <Dialog title="Payment invoice" sub="Preview follows the app theme. Choose “Download PDF / Print”, then Save as PDF in the browser dialog." onClose={onClose} className="erp-dialog-wide">
-    {settings.gstEnabled && <div className="erp-form erp-no-print" style={{marginBottom: 14}}>
-      <label className="erp-field">Place of supply<select value={placeCode} onChange={e => setPlaceCode(e.target.value)}>
-        {INDIA_STATE_CODES.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
-      </select></label>
-      <label className="erp-field">Customer GSTIN (optional for this PDF)<input value={buyerGstin} onChange={e => {
-        const value = e.target.value.toUpperCase();
-        setBuyerGstin(value);
-        if (/^[0-9]{2}/.test(value)) setPlaceCode(value.slice(0, 2));
-      }} placeholder="Only if the buyer is GST-registered" autoComplete="off" spellCheck={false}/></label>
-    </div>}
-
+  const invoiceDocument = (
     <article className="erp-invoice" aria-label={`${documentTitle} ${reference}`}>
       <header className="erp-invoice-header">
         <div className="erp-invoice-seller">
@@ -1019,11 +1029,30 @@ function InvoiceDialog({data, invoice, onClose}) {
           : 'This is a fee invoice/payment request, not a final payment receipt. A receipt is issued after payment is verified and recorded.'}
       </footer>
     </article>
+  );
+
+  return <Dialog title="Payment invoice" sub="Preview follows the app theme. Choose “Print / Save as PDF”, then select Save as PDF as the destination to download the file." onClose={onClose} className="erp-dialog-wide">
+    {settings.gstEnabled && <div className="erp-form erp-no-print" style={{marginBottom: 14}}>
+      <label className="erp-field">Place of supply<select value={placeCode} onChange={e => setPlaceCode(e.target.value)}>
+        {INDIA_STATE_CODES.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+      </select></label>
+      <label className="erp-field">Customer GSTIN (optional for this PDF)<input value={buyerGstin} onChange={e => {
+        const value = e.target.value.toUpperCase();
+        setBuyerGstin(value);
+        if (/^[0-9]{2}/.test(value)) setPlaceCode(value.slice(0, 2));
+      }} placeholder="Only if the buyer is GST-registered" autoComplete="off" spellCheck={false}/></label>
+    </div>}
+
+    {invoiceDocument}
 
     <div className="erp-form-actions erp-no-print">
       <button className="secondary-button" onClick={onClose}>Close</button>
-      <button className="primary-button" onClick={printInvoice}><Printer size={15}/> Download PDF / Print</button>
+      <button className="primary-button" onClick={printInvoice}><Printer size={15}/> Print / Save as PDF</button>
     </div>
+    {createPortal(
+      <div className="erp-print-root" aria-hidden="true">{invoiceDocument}</div>,
+      document.body,
+    )}
   </Dialog>;
 }
 

@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.4.1 — 2026-10-29
+
+### Fixed — Invoice PDF printing and app-wide form alignment
+
+- **Complete A4 invoice PDFs:** the invoice is now rendered again in an
+  isolated, body-level print root instead of being absolutely positioned
+  inside the scrollable dialog. Browser **Print / Save as PDF** therefore
+  includes the complete header, line items, payment/QR section, totals and
+  footer for both due invoices and paid receipts, rather than a clipped
+  central strip. QR generation is completed before printing when possible;
+  Dark-theme PDFs keep the dark invoice on a clean white A4 page canvas.
+- **Consistent ERP field alignment:** an auth-only stacked-label margin no
+  longer leaks into ERP two-column grids. In Add batch, **Branch** now aligns
+  exactly with **Batch name**; the same fix applies to branch, student,
+  instructor, batch, plan, membership, payment, Payment setup and invoice
+  option forms. ERP inputs/selects use a shared 44px height, wrapping labels
+  bottom-align their controls, and paired primary/secondary buttons share a
+  44px height.
+- **Attendance and mobile polish:** date/batch controls bottom-align with the
+  attendance actions on desktop, stack full-width on phones, and the Fees
+  segmented tabs scroll internally instead of widening the page.
+- Added browser regression checks that measure first-row label/control
+  geometry across representative forms and verify that the printable due and
+  paid invoices fit the A4 printable area and generate one-page PDFs.
+
+### Database migration
+
+- No database change. SQL v3 from 1.4.0 remains current; do not re-run the
+  setup file solely for this patch if SQL v3 is already installed.
+
 ## 1.4.0 — 2026-10-29
 
 ### Added — Payment setup, GST/UPI invoices and no-forget autosync

@@ -1,5 +1,92 @@
 import {test, expect} from '@playwright/test';
 
+async function fieldBoxes(page, selector, count = 2) {
+  return page.evaluate(({selector, count}) => [...document.querySelectorAll(selector)].slice(0, count).map(field => {
+    const control = field.querySelector('input,select,textarea');
+    const fieldRect = field.getBoundingClientRect();
+    const controlRect = control?.getBoundingClientRect();
+    return {
+      labelTop: Math.round(fieldRect.top),
+      controlTop: controlRect ? Math.round(controlRect.top) : null,
+      controlBottom: controlRect ? Math.round(controlRect.bottom) : null,
+      controlHeight: controlRect ? Math.round(controlRect.height) : null,
+      marginTop: getComputedStyle(field).marginTop,
+    };
+  }), {selector, count});
+}
+
+function expectAlignedPair(boxes) {
+  expect(boxes).toHaveLength(2);
+  expect(Math.abs(boxes[0].labelTop - boxes[1].labelTop)).toBeLessThanOrEqual(1);
+  expect(Math.abs(boxes[0].controlTop - boxes[1].controlTop)).toBeLessThanOrEqual(1);
+  expect(boxes.map(box => box.controlHeight)).toEqual([44, 44]);
+  expect(boxes.map(box => box.marginTop)).toEqual(['0px', '0px']);
+}
+
+async function expectPrintableInvoice(page, {paid}) {
+  const originalViewport = page.viewportSize();
+  // 703 x 1032 CSS px is the printable area of A4 with the invoice's
+  // 12 mm page margins. This catches the old failure where the invoice was
+  // positioned inside the scrolling dialog and only a central strip printed.
+  await page.setViewportSize({width: 703, height: 1032});
+  await page.emulateMedia({media: 'print'});
+  const layout = await page.evaluate(() => {
+    const appRoot = document.querySelector('#root');
+    const printRoot = document.querySelector('body > .erp-print-root');
+    const invoice = printRoot?.querySelector('.erp-invoice');
+    const header = invoice?.querySelector('.erp-invoice-seller');
+    const footer = invoice?.querySelector('.erp-invoice-disclaimer');
+    const rect = element => {
+      const box = element?.getBoundingClientRect();
+      return box ? {top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height} : null;
+    };
+    const qr = invoice?.querySelector('.erp-invoice-qr img');
+    return {
+      bodyClass: document.body.classList.contains('erp-invoice-open'),
+      appDisplay: appRoot ? getComputedStyle(appRoot).display : '',
+      printDisplay: printRoot ? getComputedStyle(printRoot).display : '',
+      invoice: rect(invoice),
+      header: rect(header),
+      footer: rect(footer),
+      invoiceScrollHeight: invoice?.scrollHeight || 0,
+      invoiceClientHeight: invoice?.clientHeight || 0,
+      text: invoice?.innerText || '',
+      qrCount: invoice?.querySelectorAll('.erp-invoice-qr img').length || 0,
+      qrNaturalWidth: qr?.naturalWidth || 0,
+    };
+  });
+  expect(layout.bodyClass).toBeTruthy();
+  expect(layout.appDisplay).toBe('none');
+  expect(layout.printDisplay).toBe('block');
+  expect(layout.invoice).not.toBeNull();
+  expect(layout.invoice.left).toBeGreaterThanOrEqual(0);
+  expect(layout.invoice.top).toBeGreaterThanOrEqual(0);
+  expect(layout.invoice.right).toBeLessThanOrEqual(704);
+  expect(layout.invoice.height).toBeLessThanOrEqual(1032);
+  expect(layout.header.top).toBeGreaterThanOrEqual(layout.invoice.top);
+  expect(layout.footer.bottom).toBeLessThanOrEqual(layout.invoice.bottom + 1);
+  expect(layout.invoiceScrollHeight).toBeLessThanOrEqual(layout.invoiceClientHeight + 1);
+  expect(layout.text).toContain('Example Yoga LLP');
+  expect(layout.text).toContain('Computer-generated from Yoga Studio ERP records.');
+  if (paid) {
+    expect(layout.text).toContain('PAID');
+    expect(layout.text).not.toContain('Scan to pay');
+    expect(layout.qrCount).toBe(0);
+  } else {
+    expect(layout.text).toContain('Account no.: 123456789012');
+    expect(layout.text).toContain('Scan to pay');
+    expect(layout.qrCount).toBe(1);
+    expect(layout.qrNaturalWidth).toBeGreaterThan(0);
+  }
+
+  const pdf = await page.pdf({format: 'A4', printBackground: true, preferCSSPageSize: true});
+  expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+  expect((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) || []).length).toBe(1);
+  await page.emulateMedia({media: 'screen'});
+  if (originalViewport) await page.setViewportSize(originalViewport);
+  return pdf;
+}
+
 // Runs against the unconfigured build (no Supabase keys): the explicit
 // offline device mode is the only way in, and it must start empty.
 test('offline device mode runs the core ERP flow end to end', async ({page}) => {
@@ -28,6 +115,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // Branch
   await page.getByRole('button', {name: 'Branches', exact: true}).click();
   await page.getByRole('button', {name: 'Add branch'}).click();
+  expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Branch name').fill('Panvel');
   await page.getByLabel('City').fill('Panvel');
   await page.getByRole('button', {name: 'Save branch'}).click();
@@ -36,6 +124,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // Student
   await page.getByRole('button', {name: 'Students', exact: true}).click();
   await page.getByRole('button', {name: 'Add student'}).click();
+  expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Full name').fill('Asha Patil');
   await page.getByRole('dialog').getByLabel('Student branch').selectOption({label: 'Panvel'});
   await page.getByRole('button', {name: 'Save student'}).click();
@@ -44,9 +133,13 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // Instructor + batch + enrollment
   await page.getByRole('button', {name: 'Batches', exact: true}).click();
   await page.getByRole('button', {name: 'Add instructor'}).click();
+  expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Instructor name').fill('Meera Joshi');
   await page.getByRole('button', {name: 'Save instructor'}).click();
   await page.getByRole('button', {name: 'Add batch'}).click();
+  // Regression: Branch used to sit 21px below Batch name because an
+  // auth-only stacked-label margin leaked into ERP's two-column grids.
+  expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Batch name').fill('Morning Hatha');
   await page.getByRole('dialog').getByLabel('Batch branch').selectOption({label: 'Panvel'});
   await page.getByRole('dialog').getByLabel('Batch instructor').selectOption({label: 'Meera Joshi'});
@@ -60,6 +153,20 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
 
   // Attendance
   await page.getByRole('button', {name: 'Attendance', exact: true}).click();
+  expectAlignedPair(await fieldBoxes(page, '.erp-panel-head.align-end .erp-field'));
+  const attendanceControls = await page.evaluate(() => {
+    const input = document.querySelector('.erp-panel-head.align-end .erp-field input')?.getBoundingClientRect();
+    const buttons = [...document.querySelectorAll('.erp-panel-head.align-end button')];
+    const button = buttons
+      .find(element => element.textContent.includes('Save attendance'))?.getBoundingClientRect();
+    return {
+      inputBottom: input?.bottom || 0,
+      buttonBottom: button?.bottom || 0,
+      buttonHeights: buttons.map(element => Math.round(element.getBoundingClientRect().height)),
+    };
+  });
+  expect(Math.abs(attendanceControls.inputBottom - attendanceControls.buttonBottom)).toBeLessThanOrEqual(1);
+  expect(attendanceControls.buttonHeights).toEqual([44, 44]);
   await page.getByRole('group', {name: 'Attendance for Asha Patil'}).getByRole('button', {name: 'Present'}).click();
   await page.getByRole('button', {name: 'Save attendance'}).click();
   await expect(page.locator('.toast')).toContainText('Attendance saved');
@@ -89,6 +196,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // No gateway secret field exists; auto-confirmation remains not ready until
   // a trusted webhook is configured outside the browser.
   await page.getByRole('tab', {name: 'Payment setup'}).click();
+  expectAlignedPair(await fieldBoxes(page, '.erp-panel .erp-form > .erp-field'));
   await page.getByLabel('Billing legal/business name').fill('Example Yoga LLP');
   await page.getByLabel('City').fill('Panvel');
   await page.getByLabel('PIN code').fill('410206');
@@ -109,8 +217,8 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await expect(page.locator('.toast')).toContainText('Payment & invoice settings saved.');
 
   // The same unpaid invoice now carries GST breakup, bank details and an
-  // offline-generated dynamic UPI QR. Generating the browser PDF proves the
-  // print stylesheet emits a real PDF document.
+  // offline-generated dynamic UPI QR. The print regression helper proves the
+  // complete invoice fits one A4 page outside the scrolling dialog.
   await page.getByRole('tab', {name: 'Memberships & dues'}).click();
   await page.getByRole('button', {name: /Invoice PDF/}).click();
   invoiceDialog = page.getByRole('dialog', {name: 'Payment invoice'});
@@ -120,8 +228,8 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await expect(invoiceDialog.getByText('₹1,271.19').first()).toBeVisible();
   await expect(invoiceDialog.getByText(/Account no\.: 123456789012/)).toBeVisible();
   await expect(invoiceDialog.getByRole('img', {name: /UPI QR code/})).toBeVisible();
-  const duePdf = await page.pdf({format: 'A4', printBackground: true});
-  expect(duePdf.subarray(0, 4).toString()).toBe('%PDF');
+  expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
+  await expectPrintableInvoice(page, {paid: false});
   await invoiceDialog.getByRole('button', {name: 'Close', exact: true}).click();
 
   await page.getByRole('button', {name: /Collect/}).click();
@@ -135,6 +243,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await expect(invoiceDialog.getByRole('img', {name: /UPI QR code/})).toHaveCount(0);
   await expect(invoiceDialog.getByText('₹1,500.00').first()).toBeVisible();
   await expect(invoiceDialog.getByText('UPI-TEST-REF-001')).toBeVisible();
+  await expectPrintableInvoice(page, {paid: true});
   await invoiceDialog.getByRole('button', {name: 'Close', exact: true}).click();
 
   // Data survives a reload (offline persistence) and fits a phone screen.

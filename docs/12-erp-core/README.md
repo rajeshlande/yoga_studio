@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.4.0)
+# Yoga Studio ERP — Core (v1.4.1)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Fees/Payments**, with **multi-branch**
@@ -7,6 +7,8 @@ support, **Owner / Admin / Instructor / Student portals**, monthly fees in
 signed-in Supabase mode to **offline-first sync with manual conflict review**.
 Version 1.4.0 adds a synchronized payment/billing profile, GST/UPI invoice
 PDFs, an always-visible Online/Offline state and stronger no-forget autosync.
+Patch 1.4.1 fixes complete A4 Print/Save-as-PDF output and standardizes
+form/control alignment across the app; it has no database change.
 
 ## What works today
 
@@ -25,7 +27,7 @@ PDFs, an always-visible Online/Offline state and stronger no-forget autosync.
 | Appearance | Light/Dark/System theme from `feature_development`, adapted to every ERP screen, dialog, table and form; persisted as `ys-theme`, with pre-paint bootstrap and OS-preference sync |
 
 Deferred: **live** online-gateway checkout and webhook-verified automatic
-confirmation (1.4.0 stores public gateway configuration/readiness only),
+confirmation (the current release stores public gateway configuration/readiness only),
 automated reminders/messaging, payroll, QR/self check-in, expenses and
 advanced reports. A gateway secret must never be placed in the browser app.
 
@@ -137,7 +139,7 @@ the last successful pull; the sync RPC re-checks current permission on push.
 - The readiness panel separates invoice profile, UPI QR, bank transfer,
   gateway public configuration and automatic confirmation. Recording a
   payment warns if the chosen route is not configured. Even a marked-ready
-  gateway is not a live integration in 1.4.0: no checkout is launched and no
+  gateway is not a live integration in the current release: no checkout is launched and no
   browser callback marks dues paid. Record only externally verified funds.
   Gateway and webhook secrets have no field and must stay on a future trusted
   Edge Function/server.
@@ -179,7 +181,7 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.4.0 this upgrades the database to **SQL v3**: the v1.3.0 sync
+   For v1.4.x this upgrades the database to **SQL v3**: the v1.3.0 sync
    versions/ledger/push RPC and payment void fields, plus the one-row-per-org
    `erp_billing_settings` table and its snapshot/sync handling. It is
    additive and does not delete business rows. Deploy/run SQL v3 before

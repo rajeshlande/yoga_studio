@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, memberships,
 INR fees, payment setup and themed invoice PDFs.
 
-> **Current source release:** 1.4.0 · **Database setup:** SQL v3 in
+> **Current source release:** 1.4.1 · **Database setup:** SQL v3 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -172,7 +172,7 @@ UPI ID exists, or if a card gateway is not ready for automatic confirmation.
 ### Gateway safety boundary
 
 > **Never enter a Razorpay Key Secret, Cashfree Secret Key, webhook secret or
-> any other provider/API secret into this app.** Version 1.4.0 stores public
+> any other provider/API secret into this app.** The current release stores public
 > identifiers and readiness only.
 
 This release does **not** launch gateway checkout and does **not** mark a
@@ -196,8 +196,8 @@ payment. The same themed document supports both cases:
 - **VOID:** preserves the receipt history and void reason and cannot be used
   to request payment.
 
-**Download PDF / Print** uses the browser print dialog; choose **Save as PDF**
-there. The A4 layout, colors and dark/light appearance follow the current app
+**Print / Save as PDF** uses the browser print dialog; choose **Save as PDF**
+as the destination there to download the complete document. The A4 layout, colors and dark/light appearance follow the current app
 theme. The in-app filename/title uses the invoice/receipt reference.
 
 ### GST behaviour
@@ -383,11 +383,11 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.4.0:
+Recommended go-live order for 1.4.1:
 
 1. Back up/verify the Supabase project according to your operational policy.
 2. Run the complete current `supabase/erp_setup.sql` (SQL v3).
-3. Deploy the 1.4.0 web build with the two public Actions secrets.
+3. Deploy the 1.4.1 web build with the two public Actions secrets.
 4. Sign in online, wait for **Online · synced**, and complete the UAT checks.
 5. Configure and verify Payment setup before issuing unpaid invoices.
 
@@ -490,7 +490,7 @@ configured. Paid and void invoices intentionally hide the QR.
 
 ### A configured gateway does not auto-confirm a payment
 
-That is the correct 1.4.0 behaviour. Public gateway configuration is a
+That is the correct current behaviour. Public gateway configuration is a
 readiness record only; verify the external payment and record it manually.
 Live checkout/webhook confirmation requires the future trusted-backend phase.
 
@@ -528,4 +528,4 @@ granted, but browser eviction protection is weaker.
 
 Historical documents/evidence may describe earlier baselines. Current code,
 `package.json`, this README, the ERP guide and the latest changelog entry take
-precedence for the 1.4.0 release.
+precedence for the current release.

@@ -1,6 +1,6 @@
 {
   "name": "yoga_studio",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "main": "index.js",
   "scripts": {
     "test": "node --test tests/security-config.test.mjs tests/erp-logic.test.mjs tests/erp-sync.test.mjs tests/erp-billing.test.mjs tests/theme.test.mjs && playwright test",
