@@ -7,7 +7,7 @@
 
 ## Identity and source of truth
 
-The visible product name is **Yoga Studio**. The repository/package/directory stays `yoga_studio` to preserve deployment paths. `package.json.version` is the only source of the app's semantic version. `package-lock.json` must agree. `vite.config.js` injects that value as `__APP_VERSION__`; `src/lib/version.js` exports it alongside `APP_NAME`. Neither needs manual version edits.
+The visible product name is **Yoga Studio**. The repository/package/directory stays `yoga_studio` to preserve deployment paths. `package.json.version` is the only source of the app's semantic version. `package-lock.json` must agree. `vite.config.mjs` injects that value as `__APP_VERSION__`; `src/lib/version.js` exports it alongside `APP_NAME`. Neither needs manual version edits.
 
 The version appears on the auth footer, private footer and Settings → Application version. It changes only when rebuilding a release with an updated package version. PWA name/title/icon labels use the product name. No updater screen, admin release dashboard, auto-refresh interruption or new product feature is introduced.
 

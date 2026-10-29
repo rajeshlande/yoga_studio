@@ -27,7 +27,7 @@ The implemented app has no custom business database schema/RPCs, management port
 - `src/lib/auth.js`: public-configured Supabase client, repository-path confirmation/recovery URL and safe error mapping.
 - `src/lib/public-config.mjs`: endpoint/public-key validation; privileged or malformed credentials cannot enable the client.
 - `src/lib/version.js`: package-derived display version; package manifest/lockfile remain the release source of truth.
-- `public/sw.js` and `vite.config.js`: scoped static caching and content-based cache versioning; preserve unrelated same-origin project caches.
+- `public/sw.js` and `vite.config.mjs`: scoped static caching and content-based cache versioning; preserve unrelated same-origin project caches.
 
 React/Vite/Supabase dependencies are defined by package.json and locked by package-lock.json; use Node 26 LTS, not historical workspace Node 20 observations. Pages CI exists in `.github/workflows/pages.yml`; branch protections and independent approvals are not presumed enabled.
 
