@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, memberships,
 INR fees, payment setup and themed invoice PDFs.
 
-> **Current source release:** 1.4.2 · **Database setup:** SQL v3 in
+> **Current source release:** 1.5.0 · **Database setup:** SQL v4 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -73,6 +73,10 @@ into the application.
   - **Instructor:** view assigned batches and manage/view attendance in scope.
   - **Student:** view their own batches, attendance, membership, dues,
     payments and invoices.
+- **In-app Student portal access:** after a student creates and confirms a
+  Supabase account, an Owner or Admin of the student's branch opens
+  **Students → Portal access**, enters the exact sign-in email, and can later
+  replace or remove the link. No manual SQL is needed for student access.
 
 ### Experience and platform
 
@@ -274,14 +278,17 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v3 without deleting business rows.
+   earlier ERP installs to SQL v4 without deleting business rows.
 3. Configure the production Site URL and allowed redirect URL for
    `https://rajeshlande.github.io/yoga_studio/`; add your local development
    origin separately.
 4. Sign up/sign in through the app, select **Settings → Data mode:
    Supabase**, create the organization once and wait for **Online · synced**.
-5. Grant additional Admin/Instructor/Student access using the reviewed
-   examples at the bottom of the SQL file after those users have accounts.
+5. For a student, have the student create and confirm their own account
+   first (they must not create an organization), then use **Students →
+   Portal access** in the app to link that exact sign-in email. Co-owner,
+   branch Admin and Instructor account links still use the reviewed examples
+   at the bottom of the SQL file.
 
 ## Configuration
 
@@ -315,6 +322,10 @@ them. `.env.local` is ignored by Git.
    confirm the QR/payment instructions are hidden.
 8. Before relying on offline work, open every ERP area once while online so
    the initial role-scoped snapshot is downloaded.
+9. With a separate student test account, grant access from **Students →
+   Portal access**, sign in as the student, verify only that student's data
+   is visible, then remove access and verify the studio no longer loads on
+   the next online Retry/Sync.
 
 ## Testing and quality gates
 
@@ -334,6 +345,9 @@ The suite includes:
 - Playwright tests for authenticated UI flows, the separate local-device ERP
   flow (including GST invoice, dynamic QR and real PDF generation), and a
   mocked-Supabase offline → conflict → resolution flow;
+- mocked-Supabase student-access tests proving Owner grant/remove by
+  registered email, a waiting student's Retry flow, the student's view-only
+  portal, and cleared studio display after online revocation;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
   browser-close guard and automatic sync after reconnect.
 
@@ -361,9 +375,10 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v3 in the real Supabase project, test a real sign-in, an offline
-attendance/payment cycle, a billing-settings sync, and a two-account conflict
-resolution before operational sign-off.
+running SQL v4 in the real Supabase project, test a real sign-in, a separate
+student account confirmation + **Students → Portal access** grant/revoke,
+an offline attendance/payment cycle, a billing-settings sync, and a
+two-account conflict resolution before operational sign-off.
 
 ## Build and deployment
 
@@ -383,18 +398,21 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.4.2:
+Recommended go-live order for 1.5.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. If SQL v3 has not already been installed, run the complete current
-   `supabase/erp_setup.sql`. Release 1.4.2 itself has no database change.
-3. Deploy the 1.4.2 web build with the two public Actions secrets.
-4. Sign in online, wait for **Online · synced**, and complete the UAT checks.
+2. Run the complete current `supabase/erp_setup.sql` to install **SQL v4**.
+   This is required for in-app Student portal access and is additive/
+   idempotent for existing ERP data.
+3. Deploy the 1.5.0 web build with the two public Actions secrets.
+4. Sign in online, wait for **Online · synced**, and complete the UAT checks,
+   including a separate confirmed student account.
 5. Configure and verify Payment setup before issuing unpaid invoices.
 
 If the new app reaches an older database, a billing-settings change remains
-queued with a setup-needed message rather than becoming a false conflict;
-run SQL v3 and reopen/focus the app to resume sync.
+queued with a setup-needed message rather than becoming a false conflict,
+and **Students → Portal access** reports that SQL v4 is required; run the
+complete current SQL file and reopen/focus the app to resume.
 
 ## Versioning and releases
 

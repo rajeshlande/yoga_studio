@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.5.0 — 2026-10-30
+
+### Added — In-app Student portal access
+
+- **Students → Portal access:** an Owner, organization manager or Admin of
+  the student's branch can now link a student record to the student's
+  registered Supabase sign-in email directly in the app. The student first
+  creates and confirms a dedicated account; they are explicitly told not to
+  create their own organization. The Students table shows **No portal
+  access**, **Portal active** or **Portal suspended** plus the linked
+  sign-in email.
+- **Grant, replace and remove:** entering a different confirmed email
+  intentionally replaces the old student sign-in, and **Remove access**
+  suspends the link without deleting the Auth account, student record or
+  payment history. Access changes are online-only, require the student
+  record to be synced first, and are never placed in the offline outbox.
+- **Student onboarding/revocation polish:** signup and no-organization
+  screens now separate the studio-owner path from the waiting-student path.
+  **Retry/Sync** rechecks a no-organization account immediately after an
+  admin grants access, adopts the server-assigned Student role and signed-in
+  student record, and stops presenting the downloaded studio snapshot after
+  online revocation is detected.
+- The signed-in Student portal remains **view-only** for ERP data: own
+  dashboard summary, batches/classes, attendance, membership, dues, payment
+  history, due-invoice PDFs and paid receipt PDFs. Students cannot record
+  payments or edit studio records.
+
+### Security and behavior
+
+- New typed RPCs resolve the registered email only on the server, require a
+  confirmed usable Auth account, and prevent one account from being actively
+  linked to two students or used across organizations in the current
+  one-organization-per-account context model. Organization owner/manager
+  accounts cannot be reused as dedicated student sign-ins.
+- Portal status/email is returned only to an organization manager or an
+  Admin of that student's branch. It is display metadata and is excluded
+  from offline student upserts and conflict comparisons.
+- Moving a student to another branch now moves the active portal link with
+  the student. Deactivating a student blocks effective portal access while
+  preserving the link; reactivating the student restores it.
+- Browser and sync-store coverage now includes Owner grant/remove, a
+  waiting student's Retry flow, the Student view-only portal and online
+  revocation. Live Supabase Auth/email/RLS UAT with a real student account
+  is still required after deployment.
+
+### Database migration — SQL v4
+
+- Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
+  Editor. SQL v4 adds `erp_grant_student_access(uuid, text)` and
+  `erp_revoke_student_access(uuid)`, manager-only portal fields in the
+  snapshot, branch-member lookup indexes, an audited access trail and the
+  branch-move trigger. The file remains the single idempotent setup file
+  and does not delete business rows. Deploy/run SQL v4 before using
+  **Students → Portal access**; on an older database the app reports that
+  the latest setup is required.
+
 ## 1.4.2 — 2026-10-30
 
 ### Changed — Dependency, runtime and build-tool modernization

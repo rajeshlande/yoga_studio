@@ -3,7 +3,7 @@
 - Version: 0.3 of this guide
 - Updated: 2026-10-30
 - Status: Implementation guide; formal release approval remains separate
-- Current application release: **1.4.2** (package.json is authoritative)
+- Current application release: **1.5.0** (package.json is authoritative)
 
 ## Identity and source of truth
 
@@ -17,7 +17,7 @@ The version appears on the auth footer, private footer and Settings → Applicat
 - **MINOR:** compatible feature/behavior additions or approved product changes.
 - **MAJOR:** incompatible behavior/data/API changes that require migration or coordination.
 
-Release 1.1.0 removed the previous preview access mode and added app-version visibility and release management. Subsequent minor releases are recorded in `CHANGELOG.md`: 1.2.0 (ERP core), 1.3.0 (offline-first Supabase sync/conflict review) and 1.4.0 (payment setup, GST/UPI invoices and stronger autosync/data-safety behaviour); patch 1.4.1 fixes invoice PDF printing and app-wide form alignment without a database change, and patch 1.4.2 modernizes Node/Vite/runtime dependencies without a database or product-behavior change. Version assignment is a maintainer policy; it does not constitute UAT/security approval.
+Release 1.1.0 removed the previous preview access mode and added app-version visibility and release management. Subsequent minor releases are recorded in `CHANGELOG.md`: 1.2.0 (ERP core), 1.3.0 (offline-first Supabase sync/conflict review) and 1.4.0 (payment setup, GST/UPI invoices and stronger autosync/data-safety behaviour); patch 1.4.1 fixes invoice PDF printing and app-wide form alignment without a database change, patch 1.4.2 modernizes Node/Vite/runtime dependencies without a database or product-behavior change, and minor 1.5.0 adds in-app Student portal provisioning with the SQL v4 grant/revoke RPCs. Version assignment is a maintainer policy; it does not constitute UAT/security approval.
 
 ```sh
 npm run version:patch

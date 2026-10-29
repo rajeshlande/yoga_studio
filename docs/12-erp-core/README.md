@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.4.2)
+# Yoga Studio ERP — Core (v1.5.0)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Fees/Payments**, with **multi-branch**
@@ -11,7 +11,11 @@ Patch 1.4.1 fixes complete A4 Print/Save-as-PDF output and standardizes
 form/control alignment across the app; it has no database change.
 Patch 1.4.2 is dependency/runtime/build-tool maintenance only (Node 26 LTS,
 Vite 8, current Supabase JS and lucide-react) with no database or
-product-behavior change.
+product-behavior change. Version 1.5.0 completes the signed-in **Student
+portal access** workflow: a student creates/confirms a dedicated account,
+then an Owner/Admin links that registered email to the student record from
+**Students → Portal access**. SQL v4 adds the server-enforced grant/revoke
+RPCs; the student portal itself remains view-only.
 
 ## What works today
 
@@ -19,14 +23,14 @@ product-behavior change.
 |---|---|
 | Dashboard | KPIs (active students, today's classes, collected this month, pending dues), today's class list, memberships expiring in 7 days, first-run setup checklist; role-specific cards for Instructor/Student |
 | Branches | Add/edit/archive branches; per-branch student & batch counts; branch filter everywhere |
-| Students | Add/edit/deactivate, search, branch, contact, joining date, batches, attendance %, CSV export |
+| Students | Add/edit/deactivate, search, branch, contact, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email |
 | Batches | Instructors, recurring days + start time (60 min default), capacity, roster enroll/remove with capacity guard |
 | Attendance | Date + batch picker (today's batch auto-selected), Present/Absent/Late per student, mark-all-present, history + CSV; students see only their own |
 | Fees | Plans (₹, months), memberships with **calendar-month or joining-date** billing and price snapshot, dues (paid/partial/unpaid/expired), verified manual payments (cash/UPI/card/bank), server receipt numbers `YS-YYYY-NNNN`, CSV export; synced payments are append-only and corrected by audited void, never edit/delete |
 | Payment setup & invoices | Owner/Admin billing profile with optional GST, UPI/bank instructions and public gateway readiness; themed A4 browser-generated PDFs for unpaid/partial invoices and paid receipts, with dynamic UPI QR only while payment is outstanding |
 | Offline sync | Signed-in Supabase mode downloads a per-user device copy, applies ERP changes locally while offline, queues them in a durable mirrored outbox, requests persistent storage, and pushes in dependency order when internet returns; the global top bar plus ERP toolbar/Settings show Online/Offline, synced, waiting, syncing, setup-needed and conflict states |
 | Conflicts | Server row versions detect concurrent edits. Sync never uses last-write-wins: a review dialog compares **This device** with **Supabase now**; Keep Supabase discards the local proposal, while Keep mine reapplies only the fields changed on that device |
-| Portals | Owner/Admin manage everything in scope; Instructor sees own batches + attendance; Student sees own batches, attendance, dues and payments |
+| Portals | Owner/Admin manage everything in scope; Instructor sees own batches + attendance; Student has a view-only portal for own dashboard, batches, attendance, membership, dues, payments and invoice/receipt PDFs |
 | Appearance | Light/Dark/System theme from `feature_development`, adapted to every ERP screen, dialog, table and form; persisted as `ys-theme`, with pre-paint bootstrap and OS-preference sync |
 
 Deferred: **live** online-gateway checkout and webhook-verified automatic
@@ -77,6 +81,64 @@ Local-mode role switching is presentation-only. In Supabase mode the server
 scopes every snapshot and sync operation by the signed-in user's role
 assignments. A cached snapshot is only what that user was allowed to see at
 the last successful pull; the sync RPC re-checks current permission on push.
+
+### Student portal access
+
+Student sign-in provisioning is intentionally a two-person, server-checked
+flow:
+
+1. The student creates a normal Yoga Studio account with the email they will
+   use to sign in and opens Supabase's email-confirmation link. The student
+   must **not** create their own organization.
+2. In Supabase mode, an organization Owner/manager—or an Admin assigned to
+   that student's branch—opens **Students → Portal access**, enters the
+   exact confirmed sign-in email and grants access. The student can then use
+   **Retry** or **Sync now** if the app was already open on the
+   no-organization screen.
+3. **Students → Portal access** can replace the sign-in email or remove
+   access. Replacement suspends the previous link; removal suspends the
+   active link without deleting the Auth account, student record or payment
+   history.
+
+The browser never queries `auth.users` or writes membership tables. It calls
+only the typed `erp_grant_student_access(uuid, text)` and
+`erp_revoke_student_access(uuid)` RPCs while online. The student record must
+already be synced and free of a student-record conflict before either call.
+On the server, the RPC rechecks the caller's organization and branch
+authorization, locks/serializes the access change, resolves the email to a
+confirmed usable Auth account, and writes an audit row. It rejects an
+inactive student or archived branch, an account already actively linked to
+a different student, an organization owner/manager account, and an account
+with active access in another organization (the current context model is
+one organization per account).
+
+The student's **contact email** on the student record and the **sign-in
+email** are separate. Editing contact details does not move the login; use
+Portal access to replace it. Moving the student record to another branch
+moves the active portal link to that branch. Deactivating the student makes
+the existing link ineffective until the student is reactivated.
+
+`erp_get_snapshot` returns `portalAccessStatus` and `portalAccessEmail`
+only to an organization manager or an Admin of that student's branch; other
+roles receive `hidden`/empty values. Those fields are display metadata:
+`syncStore.js` excludes them from student business-record comparisons and
+outbox payloads, so a grant/revoke never creates a false version conflict.
+
+For a dedicated Student account, `erp_get_context` returns role `student`
+and the linked `studentId`; the snapshot contains only that student's own
+record/classes/attendance/membership/payments plus the plans and billing
+profile needed to label dues and generate PDFs. The UI fixes the signed-in
+student selector in Supabase mode and exposes no ERP edit/payment actions.
+Local-device mode's Student role remains only a presentation preview and
+has no **Portal access** control.
+
+Access removal is effective on the server immediately. When the student's
+already-open app next performs an online Retry/Sync, it stops presenting the
+downloaded studio snapshot. As with any offline-first app, revocation while
+the device is offline cannot remotely erase a copy already downloaded to
+that browser, but the account receives no further server refresh and cannot
+push ERP changes; the Student role has no ERP write operations in the first
+place.
 
 ### Sync and conflict protocol
 
@@ -184,53 +246,66 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.4.x this upgrades the database to **SQL v3**: the v1.3.0 sync
-   versions/ledger/push RPC and payment void fields, plus the one-row-per-org
-   `erp_billing_settings` table and its snapshot/sync handling. It is
-   additive and does not delete business rows. Deploy/run SQL v3 before
-   relying on shared billing settings; if the new app reaches an old
-   database, supported changes and the queued billing profile stay safely on
-   the device and the toolbar says **Sync setup needed**.
+   For v1.5.0 this upgrades the database to **SQL v4**: all SQL v3 sync and
+   billing objects, plus student-access RPCs, manager-only portal snapshot
+   fields, branch-member lookup indexes and the branch-move trigger. It is
+   additive and does not delete business rows. Deploy/run SQL v4 before
+   relying on shared billing settings or in-app student provisioning; if
+   the new app reaches an older database, supported sync changes and the
+   queued billing profile stay safely on the device, the toolbar can say
+   **Sync setup needed**, and Portal access reports that SQL v4 is required.
 2. Ensure the app is built with `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_ANON_KEY` (publishable/anon key only).
 3. Sign in while online → **Settings → Data mode: Supabase**. On the
    dashboard, create your organization once (this account becomes Owner),
    wait for **Supabase · Synced**, and only then test offline work.
-4. Grant Admin/Instructor/Student access with the commented examples at the
-   bottom of the SQL file (the person signs up in the app first).
+4. For students, the student signs up and confirms their email first, then
+   an Owner/Admin uses **Students → Portal access** in the app. Co-owner,
+   branch Admin and Instructor account links still use the commented
+   examples at the bottom of the SQL file.
 
 **All future table/function changes go into that one SQL file** (owner's
 rule), keeping it idempotent and non-destructive.
 
 ## Verification
 
-- The Node suite in `npm test` includes 31 checks: security configuration,
+- The Node suite in `npm test` includes 32 checks: security configuration,
   billing dates/money, attendance, sync coalescing/dependency waves,
   natural-key attendance, equality reconciliation, field-level conflict
   rebasing, per-user persistence, pending receipts/void balances, GST
   inclusive/exclusive and CGST/SGST/IGST calculations, UPI URI construction,
-  payment-setup validation and corrupt-primary sync-state recovery.
-- `npm test` also runs eight Playwright tests: the existing auth suite,
+  payment-setup validation, corrupt-primary sync-state recovery, and proof
+  that student portal metadata never enters an offline student upsert.
+- `npm test` also runs eleven Playwright tests: the existing auth suite,
   `tests/erp-local.spec.js` for separate local mode (including GST Payment
   setup, dynamic UPI QR, unpaid vs paid invoice behaviour and generation of a
   real `%PDF` through Chromium), and `tests/erp-sync.spec.js`, which mocks
   Supabase at the network boundary and drives offline edit → concurrent
-  change → conflict review → resolution → dependency-ordered creates, plus
-  offline Payment setup → mirrored queue/close guard → automatic sync.
+  change → conflict review → resolution → dependency-ordered creates,
+  offline Payment setup → mirrored queue/close guard → automatic sync,
+  Owner student-access grant/remove by email, a waiting student's Retry
+  after grant, and the signed-in student's view-only portal plus online
+  revocation display clearing.
 - During development the full SQL file was also parsed with the PostgreSQL
   parser and executed twice (idempotent rerun) in an ephemeral PGlite
   Postgres with a stub `auth.uid()`: bootstrap, create/duplicate/conflict,
   trigger-incremented versions, instructor/batch/enrollment/attendance
-  natural-key conflict,
-  payment idempotency, void conflict/apply and billing-settings
-  create/duplicate/conflict/update passed. That harness is not
-  shipped and is not live Supabase UAT.
-- Production UAT still required after running SQL v3 in the real project:
+  natural-key conflict, payment idempotency, void conflict/apply and
+  billing-settings create/duplicate/conflict/update passed. The SQL v4
+  harness additionally covered confirmed/unconfirmed/missing student
+  accounts, manager-account and duplicate-link rejection, branch-Admin
+  scope, student-only context/snapshot scoping, revoke/regrant, branch-move
+  link transfer, inactive-student blocking and a rerun preserving access.
+  That harness is not shipped and is not live Supabase UAT.
+- Production UAT still required after running SQL v4 in the real project:
   sign in and wait for **Online · synced**; save Payment setup; go offline
   and mark attendance + record a payment; verify the close warning, reconnect
   and verify automatic sync and one receipt only; generate unpaid and paid
-  invoice PDFs and scan the unpaid UPI QR; then use two accounts to edit the
-  same student concurrently and resolve the conflict both ways.
+  invoice PDFs and scan the unpaid UPI QR; use two accounts to edit the
+  same student concurrently and resolve the conflict both ways; then create
+  and confirm a separate student account, grant it from **Students → Portal
+  access**, verify only that student's data is visible, remove access, and
+  verify the student app stops loading the studio on online Retry/Sync.
   Mocked tests are not proof of live Auth, RLS, email delivery or role
   revocation behaviour.
 
@@ -253,6 +328,12 @@ rule), keeping it idempotent and non-destructive.
 - Sync is push/pull on change, reconnect, focus/visibility and pending-only
   retries—not realtime. Another user's online change appears after Sync now,
   focus, navigation load or a local change triggers the next pull.
+- A signed-in account currently resolves to one organization. A student who
+  also needs access to a different Yoga Studio organization, or who already
+  owns/manages an organization in the same Supabase project, needs a
+  separate dedicated student account. In-app provisioning in this release
+  is students-only; Co-owner/Admin/Instructor account links remain reviewed
+  SQL examples.
 - Fees use a single amount per membership period; proration, discounts and
   refunds follow the accounting approvals still open in
   `docs/11-management-plan/`. GST is invoice calculation/display only. A void

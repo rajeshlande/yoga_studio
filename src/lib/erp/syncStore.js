@@ -21,7 +21,13 @@ export const SYNC_COLLECTIONS = [
 ];
 export const SYNC_KEY_PREFIX = 'yoga-studio-erp-sync-v1';
 const DEVICE_KEY = 'yoga-studio-device-id-v1';
-const META_FIELDS = new Set(['syncVersion', 'syncPending', 'updatedAt']);
+const META_FIELDS = new Set([
+  'syncVersion', 'syncPending', 'updatedAt',
+  // Student portal fields are server-managed access metadata returned with
+  // the snapshot for Owner/Admin display. They are not editable student
+  // fields and must never be sent back as an offline student upsert.
+  'portalAccessStatus', 'portalAccessEmail',
+]);
 const NATURAL_KEYS = {
   enrollments: ['batchId', 'studentId'],
   attendance: ['batchId', 'studentId', 'classDate'],

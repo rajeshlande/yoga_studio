@@ -151,6 +151,276 @@ test('signed-in Supabase mode saves offline, reports a version conflict, and syn
   await expect(page.getByRole('cell', {name: /Beatriz/})).toBeVisible();
 });
 
+test('owner grants and removes student portal access by registered email', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+
+  const server = emptySnapshot();
+  server.branches.push({
+    id: BRANCH, name: 'Main Branch', city: 'Panvel', address: '', phone: '',
+    status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+  });
+  server.students.push({
+    id: STUDENT, branchId: BRANCH, fullName: 'Asha Patil', phone: '1111111111',
+    email: 'contact@example.test', gender: '', dob: '', joiningDate: '2026-01-01',
+    status: 'active', notes: '', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+    portalAccessStatus: 'none', portalAccessEmail: '',
+  });
+  const grantCalls = [];
+  const revokeCalls = [];
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split('/').pop();
+    const body = route.request().postDataJSON() || {};
+    const reply = (value, status = 200) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(value),
+    });
+    if (name === 'erp_get_context') {
+      return reply({
+        organizationId: ORG, organizationName: 'Yoga Studio', roles: ['owner'],
+        instructorId: null, studentId: null,
+      });
+    }
+    if (name === 'erp_get_snapshot') return reply(structuredClone(server));
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    if (name === 'erp_grant_student_access') {
+      grantCalls.push(structuredClone(body));
+      if (body.p_email === 'missing@example.test') {
+        return reply({code: 'P0001', message: 'STUDENT_ACCOUNT_NOT_FOUND'}, 400);
+      }
+      server.students[0].portalAccessStatus = 'active';
+      server.students[0].portalAccessEmail = body.p_email;
+      return reply({
+        studentId: body.p_student_id,
+        email: body.p_email,
+        portalAccessStatus: 'active',
+      });
+    }
+    if (name === 'erp_revoke_student_access') {
+      revokeCalls.push(structuredClone(body));
+      server.students[0].portalAccessStatus = 'suspended';
+      return reply({
+        studentId: body.p_student_id,
+        email: server.students[0].portalAccessEmail,
+        portalAccessStatus: 'suspended',
+        linksSuspended: 1,
+      });
+    }
+    return reply({code: 'PGRST202', message: 'Function not mocked'}, 404);
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await page.getByRole('button', {name: 'Students', exact: true}).click();
+  const row = page.getByRole('row', {name: /Asha Patil/});
+  await expect(row.getByText('No portal access')).toBeVisible();
+
+  await row.getByRole('button', {name: /Portal access/}).click();
+  const dialog = page.getByRole('dialog', {name: 'Student portal access'});
+  await expect(dialog.getByText('The student must not create their own organization.')).toBeVisible();
+  await dialog.getByLabel('Student sign-in email').fill('missing@example.test');
+  await dialog.getByRole('button', {name: 'Grant access'}).click();
+  await expect(page.locator('.toast')).toContainText('No usable Yoga Studio account uses that email yet');
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByLabel('Student sign-in email').fill('asha-login@example.test');
+  await dialog.getByRole('button', {name: 'Grant access'}).click();
+  await expect(row.getByText('Portal active')).toBeVisible();
+  await expect(row.getByText('asha-login@example.test')).toBeVisible();
+  expect(grantCalls.at(-1)).toEqual({
+    p_student_id: STUDENT,
+    p_email: 'asha-login@example.test',
+  });
+
+  await row.getByRole('button', {name: /Portal access/}).click();
+  await dialog.getByRole('button', {name: 'Remove access'}).click();
+  await dialog.getByRole('button', {name: 'Yes, remove access'}).click();
+  await expect(row.getByText('Portal suspended')).toBeVisible();
+  expect(revokeCalls).toEqual([{p_student_id: STUDENT}]);
+});
+
+test('signed-in student sees a view-only portal for their own records', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+
+  const BATCH = '33333333-3333-4333-8333-333333333333';
+  const ENROLLMENT = '44444444-4444-4444-8444-444444444444';
+  const PLAN = '55555555-5555-4555-8555-555555555555';
+  const MEMBERSHIP = '66666666-6666-4666-8666-666666666666';
+  const server = {
+    ...emptySnapshot(),
+    branches: [{
+      id: BRANCH, name: 'Main Branch', city: 'Panvel', address: '', phone: '',
+      status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+    }],
+    students: [{
+      id: STUDENT, branchId: BRANCH, fullName: 'Asha Patil', phone: '1111111111',
+      email: 'asha-login@example.test', gender: '', dob: '', joiningDate: '2026-01-01',
+      status: 'active', notes: '', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+      portalAccessStatus: 'hidden', portalAccessEmail: '',
+    }],
+    batches: [{
+      id: BATCH, branchId: BRANCH, name: 'Morning Yoga', instructorId: '', days: [1, 3, 5],
+      startTime: '07:00', durationMins: 60, capacity: 20, status: 'active',
+      createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+    }],
+    enrollments: [{
+      id: ENROLLMENT, batchId: BATCH, studentId: STUDENT, joinedOn: '2026-01-01',
+      status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+    }],
+    attendance: [{
+      id: '77777777-7777-4777-8777-777777777777', batchId: BATCH, studentId: STUDENT,
+      classDate: '2026-10-28', status: 'present', updatedAt: '2026-10-28T00:00:00Z', syncVersion: 1,
+    }],
+    plans: [{
+      id: PLAN, name: 'Monthly', amountPaise: 150000, durationMonths: 1, status: 'active',
+      createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+    }],
+    memberships: [{
+      id: MEMBERSHIP, studentId: STUDENT, planId: PLAN, branchId: BRANCH,
+      startDate: '2026-10-01', endDate: '2026-12-31', billingCycle: 'joining',
+      durationMonths: 1, amountPaise: 150000, status: 'active',
+      createdAt: '2026-10-01T00:00:00Z', syncVersion: 1,
+    }],
+    payments: [{
+      id: '88888888-8888-4888-8888-888888888888', studentId: STUDENT,
+      membershipId: MEMBERSHIP, branchId: BRANCH, amountPaise: 50000,
+      method: 'upi', paidOn: '2026-10-02', note: '', receiptNo: 'YS-2026-0001',
+      status: 'recorded', voidReason: '', createdAt: '2026-10-02T00:00:00Z', syncVersion: 1,
+    }],
+    billingSettings: [],
+  };
+
+  let accessGranted = true;
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split('/').pop();
+    const reply = value => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(value),
+    });
+    if (name === 'erp_get_context') {
+      return reply(accessGranted ? {
+        organizationId: ORG, organizationName: 'Yoga Studio', roles: ['student'],
+        instructorId: null, studentId: STUDENT,
+      } : {
+        organizationId: null, organizationName: '', roles: [],
+        instructorId: null, studentId: null,
+      });
+    }
+    if (name === 'erp_get_snapshot') {
+      if (!accessGranted) {
+        return route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({code: 'P0001', message: 'NO_ORGANIZATION: create or join an organization first'}),
+        });
+      }
+      return reply(structuredClone(server));
+    }
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    return route.fulfill({
+      status: 404, contentType: 'application/json',
+      body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'}),
+    });
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.getByText('Supabase · Synced')).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Branches', exact: true})).toHaveCount(0);
+  await expect(page.getByLabel('Signed-in student')).toBeDisabled();
+  await expect(page.getByLabel('Signed-in student')).toHaveValue(STUDENT);
+  await expect(page.getByText('My dues')).toBeVisible();
+
+  await page.getByRole('button', {name: 'Batches', exact: true}).click();
+  await expect(page.getByRole('cell', {name: /Morning Yoga/})).toBeVisible();
+  await expect(page.getByRole('button', {name: /Add batch/})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: /Edit/})).toHaveCount(0);
+
+  await page.getByRole('button', {name: 'Attendance', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'My attendance'})).toBeVisible();
+  await expect(page.getByRole('cell', {name: 'Morning Yoga'})).toBeVisible();
+
+  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: /Record payment/})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: /Invoice PDF/})).toBeVisible();
+  await page.getByRole('tab', {name: 'Payments'}).click();
+  await expect(page.getByText('YS-2026-0001')).toBeVisible();
+  await expect(page.getByRole('button', {name: /Invoice PDF/})).toBeVisible();
+
+  // Simulate an admin removing access while this student tab is open. The
+  // next online sync must stop presenting the downloaded studio snapshot.
+  accessGranted = false;
+  await page.getByRole('button', {name: 'Sync now'}).click();
+  await expect(page.getByText('This account is not connected to a studio yet.')).toBeVisible();
+  await expect(page.getByText('YS-2026-0001')).toHaveCount(0);
+});
+
+test('waiting student can retry after an admin grants portal access', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+  let granted = false;
+  const server = {
+    ...emptySnapshot(),
+    branches: [{
+      id: BRANCH, name: 'Main Branch', city: 'Panvel', address: '', phone: '',
+      status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+    }],
+    students: [{
+      id: STUDENT, branchId: BRANCH, fullName: 'Asha Patil', phone: '', email: 'qa@example.test',
+      gender: '', dob: '', joiningDate: '2026-01-01', status: 'active', notes: '',
+      createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+      portalAccessStatus: 'hidden', portalAccessEmail: '',
+    }],
+    billingSettings: [],
+  };
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split('/').pop();
+    const reply = value => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(value),
+    });
+    if (name === 'erp_get_context') {
+      return reply(granted ? {
+        organizationId: ORG, organizationName: 'Yoga Studio', roles: ['student'],
+        instructorId: null, studentId: STUDENT,
+      } : {
+        organizationId: null, organizationName: '', roles: [],
+        instructorId: null, studentId: null,
+      });
+    }
+    if (name === 'erp_get_snapshot') {
+      if (!granted) {
+        return route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({code: 'P0001', message: 'NO_ORGANIZATION: create or join an organization first'}),
+        });
+      }
+      return reply(structuredClone(server));
+    }
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    return route.fulfill({
+      status: 404, contentType: 'application/json',
+      body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'}),
+    });
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.getByText('This account is not connected to a studio yet.')).toBeVisible();
+  await expect(page.getByText(/Student\? Do not create an organization/)).toBeVisible();
+
+  granted = true;
+  await page.getByRole('button', {name: 'Retry'}).click();
+  await expect(page.getByLabel('Signed-in student')).toBeDisabled();
+  await expect(page.getByLabel('Signed-in student')).toHaveValue(STUDENT);
+  await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);
+  await expect(page.getByText('My dues')).toBeVisible();
+});
+
 test('payment setup saved offline stays local, warns before close, then auto-syncs', async ({page}) => {
   page.on('pageerror', error => console.error('Browser page error:', error.message));
   await mockAuth(page);

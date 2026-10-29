@@ -1,7 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {
-  AlertCircle, Building2, CalendarCheck, Check, Clock, Download, IndianRupee, Leaf,
+  AlertCircle, Building2, CalendarCheck, Check, Clock, Download, IndianRupee, KeyRound, Leaf,
   Pencil, Plus, Printer, RefreshCw, Search, Users, Wallet, WifiOff, X,
 } from 'lucide-react';
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
@@ -41,17 +41,30 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
   const load = useCallback(async () => {
     if (!enabled) return;
     setLoading(true); setError(null);
+    let remoteNoOrganization = false;
     try {
       if (mode === 'supabase' && client.getContext) {
         try {
           const ctx = await client.getContext();
           setRemoteContext(ctx);
-          if (ctx && !contextSent.current) { contextSent.current = true; onRemoteContext?.(ctx); }
+          remoteNoOrganization = Boolean(ctx && !ctx.organizationId);
+          // If Supabase authoritatively says access was removed, stop
+          // displaying the previously downloaded snapshot behind the banner.
+          // The per-account device copy remains untouched in storage in case
+          // access is restored, but this screen no longer presents it.
+          if (remoteNoOrganization) setData(emptySnapshot());
+          // Notify on every load, not only the first: a student may be
+          // waiting on the no-organization screen while an admin grants
+          // access, and Retry must immediately adopt the student role/link.
+          if (ctx) { contextSent.current = true; onRemoteContext?.(ctx); }
         } catch { setRemoteContext(null); }
       }
       setData(await client.getSnapshot());
       if (client.getSyncState) setSyncState(client.getSyncState());
-    } catch (err) { setError(err); }
+    } catch (err) {
+      if (remoteNoOrganization) setData(emptySnapshot());
+      setError(err);
+    }
     finally { setLoading(false); }
   }, [client, enabled, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -62,6 +75,12 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
     try {
       const next = await client.syncNow();
       if (next) setData(next);
+      if (client.getContext) {
+        try {
+          const ctx = await client.getContext();
+          if (ctx) { setRemoteContext(ctx); onRemoteContext?.(ctx); }
+        } catch { /* The last known context remains displayed. */ }
+      }
       if (client.getSyncState) setSyncState(client.getSyncState());
       const current = client.getSyncState?.();
       if (current?.conflictCount) notify(`${current.conflictCount} sync conflict(s) need review.`);
@@ -69,6 +88,20 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
       else if (current?.online) notify('Studio data is synced.');
       return true;
     } catch (err) {
+      if (client.getContext) {
+        try {
+          const ctx = await client.getContext();
+          if (ctx) {
+            setRemoteContext(ctx);
+            onRemoteContext?.(ctx);
+            if (!ctx.organizationId) {
+              setData(emptySnapshot());
+              setError(err);
+            }
+          }
+        } catch { /* Keep the sync error message below. */ }
+      }
+      if (client.getSyncState) setSyncState(client.getSyncState());
       notify(err?.message || 'Sync could not be completed.');
       return false;
     }
@@ -241,8 +274,9 @@ export function ErpBlockingState({erp, mode, setMode}) {
         <strong>Supabase ERP setup is not installed yet.</strong><br/>
         Open your Supabase project → <b>SQL Editor</b> → paste the full contents of <b>supabase/erp_setup.sql</b> from this repository → <b>Run</b>. Then retry. Your existing login keeps working either way.
       </> : noOrg ? <>
-        <strong>Create your organization to begin.</strong><br/>
-        This one step makes your signed-in account the Owner. You can add branches right after.
+        <strong>This account is not connected to a studio yet.</strong><br/>
+        <b>Studio owner?</b> Create your organization below; this one step makes your signed-in account the Owner, and you can add branches right after.<br/>
+        <b>Student?</b> Do not create an organization. Ask the studio Owner/Admin to open <b>Students → Portal access</b> and link the exact email you used to sign in. Then press <b>Retry</b>.
         <div className="erp-actions" style={{marginTop: 10}}>
           <span className="erp-search"><Building2 size={15}/><input aria-label="Organization name" value={orgName} onChange={e => setOrgName(e.target.value)}/></span>
           <button className="primary-button" onClick={async () => { if (await erp.act(c => c.bootstrapOrganization(orgName.trim() || 'Yoga Studio'), 'Organization created. Add your first branch.')) erp.load(); }}>Create organization</button>
@@ -325,7 +359,7 @@ function SyncConflictsDialog({data, conflicts, onClose, onResolve}) {
       const mine = conflict.op.proposedRecord || conflict.op.payload || {};
       const server = conflict.serverRecord || {};
       const fields = [...new Set([...Object.keys(mine), ...Object.keys(server)])]
-        .filter(field => !['id', 'createdAt', 'updatedAt', 'syncVersion', 'syncPending'].includes(field))
+        .filter(field => !['id', 'createdAt', 'updatedAt', 'syncVersion', 'syncPending', 'portalAccessStatus', 'portalAccessEmail'].includes(field))
         .filter(field => JSON.stringify(mine[field]) !== JSON.stringify(server[field]));
       return <section className="erp-conflict-card" key={conflict.id} aria-label={conflictTitle(data, conflict)}>
         <div className="erp-panel-head" style={{marginBottom: 8}}>
@@ -408,12 +442,20 @@ export function ErpToolbar({data, ctx, setCtx, mode, remoteContext, erp}) {
         {data.instructors.filter(i => i.status !== 'inactive').map(i => <option key={i.id} value={i.id}>{i.fullName}</option>)}
       </select>
     </label>}
-    {ctx.role === 'student' && <label>Acting student
+    {ctx.role === 'student' && (mode === 'supabase' ? <label>Signed-in student
+      <select aria-label="Signed-in student" value={remoteContext?.studentId || ctx.studentId || ''} disabled>
+        <option value={remoteContext?.studentId || ctx.studentId || ''}>
+          {(remoteContext?.studentId || ctx.studentId)
+            ? (data.students.find(s => s.id === (remoteContext?.studentId || ctx.studentId))?.fullName || 'Your student record')
+            : 'Waiting for the studio to link your account'}
+        </option>
+      </select>
+    </label> : <label>Acting student
       <select aria-label="Acting student" value={ctx.studentId || ''} onChange={e => set({studentId: e.target.value})}>
         <option value="">Choose student…</option>
         {data.students.filter(s => s.status === 'active').map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
       </select>
-    </label>}
+    </label>)}
     <SyncControls data={data} erp={erp} mode={mode}/>
   </div>;
 }
@@ -524,11 +566,114 @@ export function BranchesPage(props) {
 
 /* ---------------- students ---------------- */
 
+function portalAccessMeta(student) {
+  const status = student?.portalAccessStatus || 'unknown';
+  if (status === 'active' && student?.status !== 'active') {
+    return {status, label: 'Portal linked · student inactive', className: 'amber'};
+  }
+  if (status === 'active') return {status, label: 'Portal active', className: 'green'};
+  if (status === 'suspended') return {status, label: 'Portal suspended', className: 'amber'};
+  if (status === 'none') return {status, label: 'No portal access', className: 'grey'};
+  return {status, label: 'Access status unavailable', className: 'amber'};
+}
+
+function StudentAccessDialog({student, erp, notify, onClose}) {
+  const meta = portalAccessMeta(student);
+  const [email, setEmail] = useState(student.portalAccessEmail || student.email || '');
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const grantBlocked = busy || student.status !== 'active' || Boolean(student.syncPending);
+  const revokeBlocked = busy || Boolean(student.syncPending);
+
+  const run = async (action, successMessage) => {
+    setBusy(true);
+    try {
+      const next = await action(erp.client);
+      if (next) erp.setData(next);
+      notify(successMessage);
+      onClose();
+      return true;
+    } catch (err) {
+      notify(err?.message || 'Student portal access could not be updated.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const grant = e => {
+    e.preventDefault();
+    return run(
+      c => c.grantStudentAccess({studentId: student.id, email}),
+      `Student portal access granted for ${student.fullName}. They can sign in now and press Retry/Sync if the app is already open.`,
+    );
+  };
+  const revoke = () => run(
+    c => c.revokeStudentAccess(student.id),
+    `Student portal access removed for ${student.fullName}.`,
+  );
+
+  return <Dialog title="Student portal access" sub={`${student.fullName} will see only their own batches, attendance, membership, dues, payments and invoices.`} onClose={onClose}>
+    <div style={{display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16}}>
+      <span className={`erp-badge ${meta.className}`}>{meta.label}</span>
+      {student.portalAccessEmail && <span style={{fontSize: 13}}>Linked sign-in: <b>{student.portalAccessEmail}</b></span>}
+    </div>
+
+    <form className="erp-form" onSubmit={grant}>
+      <label className="erp-field full">Student sign-in email
+        <input type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="student@example.com"/>
+      </label>
+      <div className="erp-banner blue" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+        <KeyRound size={18}/>
+        <div><b>Before granting access</b>
+          <ol style={{margin: '6px 0 0 18px', padding: 0}}>
+            <li>The student creates a Yoga Studio account with this exact email.</li>
+            <li>The student opens the confirmation link sent to that email.</li>
+            <li>The student must <b>not</b> create their own organization.</li>
+          </ol>
+          <span>Changing the email here replaces the previously linked sign-in. This access change requires internet and is not saved in the offline queue.</span>
+        </div>
+      </div>
+      {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v4) and try again.</span>
+      </div>}
+      {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+        <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
+      </div>}
+      {student.status !== 'active' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+        <AlertCircle size={18}/><span>This student is inactive, so portal sign-in is blocked. Reactivate the student record before granting access; an existing link becomes usable again when the record is reactivated.</span>
+      </div>}
+      <div className="erp-form-actions">
+        <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
+        <button className="primary-button" disabled={grantBlocked}>{busy ? 'Saving…' : meta.status === 'active' ? 'Update access' : 'Grant access'}</button>
+      </div>
+    </form>
+
+    {meta.status === 'active' && <div style={{borderTop: '1px solid var(--border, #e7dff0)', marginTop: 20, paddingTop: 16}}>
+      {!confirmRemove ? <div style={{display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap'}}>
+        <span style={{fontSize: 13}}>Remove this student’s sign-in link without deleting their account or student record.</span>
+        <button type="button" className="secondary-button erp-danger" disabled={revokeBlocked} onClick={() => setConfirmRemove(true)}>Remove access</button>
+      </div> : <div className="erp-banner" role="alert" style={{margin: 0}}>
+        <AlertCircle size={18}/>
+        <div style={{flex: 1}}><b>Remove portal access for {student.fullName}?</b><br/>
+          Their account will stop loading this studio on the next online Retry/Sync. Studio records and payment history are not deleted.
+          <div className="erp-actions" style={{marginTop: 10}}>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => setConfirmRemove(false)}>Keep access</button>
+            <button type="button" className="primary-button" disabled={revokeBlocked} onClick={revoke}>{busy ? 'Removing…' : 'Yes, remove access'}</button>
+          </div>
+        </div>
+      </div>}
+    </div>}
+  </Dialog>;
+}
+
 export function StudentsPage(props) {
   const {erp, ctx, go} = props; const {data} = erp;
   const [query, setQuery] = useState(''); const [editing, setEditing] = useState(null);
+  const [accessStudent, setAccessStudent] = useState(null);
+  const showAccess = props.mode === 'supabase' && canManage(ctx);
+  const canShowAccess = student => showAccess && student.portalAccessStatus !== 'hidden';
   const list = data.students.filter(s => inBranch(ctx, s.branchId)
-    && (`${s.fullName} ${s.phone} ${s.email}`.toLowerCase().includes(query.toLowerCase())));
+    && (`${s.fullName} ${s.phone} ${s.email} ${s.portalAccessEmail || ''}`.toLowerCase().includes(query.toLowerCase())));
   const save = async e => { e.preventDefault(); if (await erp.act(c => c.saveStudent(editing), 'Student saved.')) setEditing(null); };
   const empty = {fullName: '', phone: '', email: '', gender: '', dob: '', joiningDate: toISODate(), branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), notes: ''};
   return <>
@@ -543,14 +688,17 @@ export function StudentsPage(props) {
       </div></div>
       {data.branches.length === 0 ? <Empty icon={Building2} title="Add a branch first" text="Students belong to a branch. Create your studio location, then add students." action={<button className="primary-button" onClick={() => go('branches')}>Go to Branches</button>}/> :
       list.length === 0 ? <Empty icon={Users} title="No students found" text="Add your first student, or try a different search."/> :
-      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Branch</th><th>Batches</th><th>Attendance</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-        {list.map(s => { const rate = attendanceSummary(data.attendance.filter(a => a.studentId === s.id)).rate; return <tr key={s.id}>
+      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Branch</th><th>Batches</th><th>Attendance</th><th>{showAccess ? 'Status / portal' : 'Status'}</th><th>Actions</th></tr></thead><tbody>
+        {list.map(s => { const rate = attendanceSummary(data.attendance.filter(a => a.studentId === s.id)).rate; const access = portalAccessMeta(s); return <tr key={s.id}>
           <td><span className="erp-person"><span className="avatar">{initials(s.fullName)}</span><span><strong>{s.fullName}</strong><small>{s.phone || s.email || '—'}</small></span></span></td>
           <td>{branchName(data, s.branchId)}</td>
           <td>{data.enrollments.filter(e => e.studentId === s.id && e.status === 'active').map(e => data.batches.find(b => b.id === e.batchId)?.name).filter(Boolean).join(', ') || '—'}</td>
           <td>{rate === null ? '—' : `${rate}%`}</td>
-          <td><span className={`erp-badge ${s.status === 'active' ? 'green' : 'grey'}`}>{s.status}</span></td>
+          <td><span className={`erp-badge ${s.status === 'active' ? 'green' : 'grey'}`}>{s.status}</span>
+            {canShowAccess(s) && <><br/><span className={`erp-badge ${access.className}`} style={{marginTop: 5}}>{access.label}</span>
+            {s.portalAccessEmail && <><br/><small>{s.portalAccessEmail}</small></>}</>}</td>
           <td>{canManage(ctx) && <><button className="erp-link-btn" onClick={() => setEditing({...s})}><Pencil size={13}/> Edit</button>
+          {canShowAccess(s) && <button className="erp-link-btn" onClick={() => setAccessStudent({...s})}><KeyRound size={13}/> Portal access</button>}
           <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveStudent(s.id), s.status === 'active' ? 'Student deactivated.' : 'Student reactivated.')}>{s.status === 'active' ? 'Deactivate' : 'Activate'}</button></>}</td></tr>; })}
       </tbody></table></div>}
     </section>
@@ -564,8 +712,12 @@ export function StudentsPage(props) {
         <label className="erp-field">Date of birth<input type="date" value={editing.dob || ''} onChange={e => setEditing({...editing, dob: e.target.value})}/></label>
         <label className="erp-field">Joining date<input type="date" required value={editing.joiningDate} onChange={e => setEditing({...editing, joiningDate: e.target.value})}/></label>
         <label className="erp-field full">Notes<textarea rows={2} value={editing.notes || ''} onChange={e => setEditing({...editing, notes: e.target.value})} placeholder="Optional studio note (avoid medical details)"/></label>
+        {showAccess && editing.id && <div className="erp-banner blue" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+          <KeyRound size={18}/><span>The contact email above does not change the student’s sign-in. Use <b>Portal access</b> in the student row to link or replace their login email.</span>
+        </div>}
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button">Save student</button></div>
       </form></Dialog>}
+    {accessStudent && <StudentAccessDialog student={accessStudent} erp={erp} notify={props.notify} onClose={() => setAccessStudent(null)}/>}
   </>;
 }
 

@@ -14,6 +14,7 @@ import {
   removeOperations,
   resolveConflict,
   saveSyncState,
+  serializeOperation,
 } from '../src/lib/erp/syncStore.js';
 import {emptySnapshot, membershipBalance} from '../src/lib/erp/logic.js';
 
@@ -61,6 +62,39 @@ test('reverting an offline edit back to the server value removes the operation',
   assert.equal(state.outbox.length, 1);
   state = enqueueUpsert(state, 'students', {...serverStudent});
   assert.equal(state.outbox.length, 0);
+});
+
+test('student portal metadata is display-only and never enters the sync payload', () => {
+  let state = newState();
+  const serverStudent = {
+    id: STUDENT, branchId: BRANCH, fullName: 'Asha', phone: '111', email: '', gender: '',
+    dob: '', joiningDate: '2026-01-01', status: 'active', notes: '', syncVersion: 2,
+    portalAccessStatus: 'none', portalAccessEmail: '',
+  };
+  state.baseSnapshot.students.push(serverStudent);
+
+  // A portal grant changes server-managed metadata only; by itself it is not
+  // a student-record edit and must not create/version a sync operation.
+  state = enqueueUpsert(state, 'students', {
+    ...serverStudent,
+    portalAccessStatus: 'active',
+    portalAccessEmail: 'student@example.test',
+  });
+  assert.equal(state.outbox.length, 0);
+
+  // When an actual student field changes, the operation still carries only
+  // business fields to Supabase.
+  state = enqueueUpsert(state, 'students', {
+    ...serverStudent,
+    phone: '222',
+    portalAccessStatus: 'active',
+    portalAccessEmail: 'student@example.test',
+  });
+  assert.equal(state.outbox.length, 1);
+  const payload = serializeOperation(state.outbox[0]).payload;
+  assert.equal(payload.phone, '222');
+  assert.equal('portalAccessStatus' in payload, false);
+  assert.equal('portalAccessEmail' in payload, false);
 });
 
 test('dependent offline creates are not ready until their parent is acknowledged', () => {

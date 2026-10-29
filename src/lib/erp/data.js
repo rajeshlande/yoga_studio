@@ -67,6 +67,44 @@ function isOfflineError(error) {
   return error?.code === 'OFFLINE' || /failed to fetch|networkerror|load failed|network request failed/i.test(text);
 }
 
+function studentAccessError(error) {
+  if (isMissingRpcError(error)) {
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v4) in Supabase, then try again.');
+  }
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
+  if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
+    return new Error('No usable Yoga Studio account uses that email yet. Ask the student to create an account with this exact email, confirm it, and then try again. They should not create an organization.');
+  }
+  if (/STUDENT_ACCOUNT_UNCONFIRMED/.test(text)) {
+    return new Error('That student account exists, but its email has not been confirmed yet. Ask the student to open the confirmation link, then grant access again.');
+  }
+  if (/STUDENT_ACCOUNT_ALREADY_LINKED/.test(text)) {
+    return new Error('That sign-in email is already linked to a different student in this studio. Remove that student’s portal access first, or use a different student account.');
+  }
+  if (/STUDENT_ACCOUNT_IS_MANAGER/.test(text)) {
+    return new Error('That account already owns or manages an organization, so it cannot also be used as a dedicated student sign-in. Ask the student to use a separate student-only account.');
+  }
+  if (/STUDENT_ACCOUNT_OTHER_ORG/.test(text)) {
+    return new Error('That account already has access to a different studio organization. Use a separate student-only account for this studio.');
+  }
+  if (/STUDENT_INACTIVE/.test(text)) {
+    return new Error('This student is inactive. Reactivate the student record before granting portal access.');
+  }
+  if (/STUDENT_BRANCH_ARCHIVED/.test(text)) {
+    return new Error('This student’s branch is archived. Restore the branch before granting portal access.');
+  }
+  if (/FORBIDDEN/.test(text)) {
+    return new Error('Only the Owner or an Admin of this student’s branch can change student portal access.');
+  }
+  if (/VALIDATION_FAILED/.test(text)) {
+    return new Error('Enter the student’s valid sign-in email.');
+  }
+  if (isOfflineError(error)) {
+    return new Error('Student portal access can be changed only while online. Reconnect and try again.');
+  }
+  return error instanceof Error ? error : new Error(error?.message || 'Student portal access could not be updated.');
+}
+
 const emptySyncSummary = (mode, overrides = {}) => ({
   enabled: mode === 'supabase',
   mode,
@@ -94,6 +132,12 @@ export function createErpClient(mode, options = {}) {
       async syncNow() { return localStore.getSnapshot(); },
       async resolveConflict() { return localStore.getSnapshot(); },
       async clearSyncCache() { return localStore.getSnapshot(); },
+      async grantStudentAccess() {
+        throw new Error('Student sign-in access is available only in Supabase mode.');
+      },
+      async revokeStudentAccess() {
+        throw new Error('Student sign-in access is available only in Supabase mode.');
+      },
       refreshFromStorage() { return null; },
     };
   }
@@ -257,7 +301,11 @@ export function createErpClient(mode, options = {}) {
 
   async function getContext() {
     await ensureState();
-    if (browserOnline() && Date.now() - contextCheckedAt > 60_000) {
+    // An account with no organization may have just been granted Student (or
+    // another branch) access by an admin. Recheck that state immediately on
+    // Retry instead of making the student wait for the normal one-minute
+    // context cache to expire.
+    if (browserOnline() && (!state.organizationId || Date.now() - contextCheckedAt > 60_000)) {
       try {
         const remote = await fetchRemoteContext();
         if (remote && !remote.organizationId && state.organizationId) {
@@ -412,6 +460,14 @@ export function createErpClient(mode, options = {}) {
         } catch (error) {
           pullError = error;
           if (isMissingRpcError(error)) setupNeeded = true;
+          if (browserOnline() && /NO_ORGANIZATION/i.test(error?.message || '')) {
+            // The snapshot RPC is authoritative: access may have just been
+            // revoked while this tab still holds a recent context cache.
+            // Force one context recheck so the UI stops presenting the old
+            // snapshot immediately instead of waiting for the cache to age.
+            contextCheckedAt = 0;
+            try { await getContext(); } catch { /* Preserve pullError. */ }
+          }
           if (!state.lastPulledAt) throw error;
           lastError = isOfflineError(error)
             ? 'Connection lost. Showing the synced copy on this device.'
@@ -497,6 +553,63 @@ export function createErpClient(mode, options = {}) {
       createdAt: old?.createdAt || payload?.createdAt || nowISO(),
       syncVersion: old?.syncVersion || 0,
     };
+  }
+
+  function applyStudentAccessLocally(studentId, status, email) {
+    if (!state?.organizationId || !studentId || !status) return;
+    reloadFromStorage();
+    const patch = record => {
+      if (!record || record.id !== studentId) return;
+      record.portalAccessStatus = status;
+      if (email) record.portalAccessEmail = email;
+    };
+    patch(state.baseSnapshot?.students?.find(student => student.id === studentId));
+    for (const op of state.outbox || []) {
+      if (op.entity === 'students' && op.entityId === studentId) patch(op.proposedRecord);
+    }
+    for (const conflict of state.conflicts || []) {
+      if (conflict.op?.entity === 'students' && conflict.op?.entityId === studentId) {
+        patch(conflict.op.proposedRecord);
+      }
+    }
+    persist({optional: true});
+    emit({snapshot: true});
+  }
+
+  async function requireSyncedStudent(studentId) {
+    if (!studentId) throw new Error('VALIDATION_FAILED: student');
+    if (!browserOnline()) {
+      const error = new Error('Offline');
+      error.code = 'OFFLINE';
+      throw error;
+    }
+    await ensureState();
+    if (!state.organizationId) throw new Error('NO_ORGANIZATION: create or join an organization first');
+    await syncNow();
+    reloadFromStorage();
+    const waiting = (state.outbox || []).some(
+      op => op.entity === 'students' && op.entityId === studentId,
+    );
+    const conflicted = (state.conflicts || []).some(
+      conflict => conflict.op?.entity === 'students' && conflict.op?.entityId === studentId,
+    );
+    const onServer = (state.baseSnapshot?.students || []).some(student => student.id === studentId);
+    if (waiting || conflicted || !onServer) {
+      throw new Error('Sync this student record before changing portal access. Resolve any sync conflict for the student, then try again.');
+    }
+  }
+
+  async function refreshAfterStudentAccess(studentId, status, email) {
+    // The RPC has already committed. Reflect its result immediately, then
+    // pull the authoritative snapshot; a refresh hiccup must not make the
+    // completed access change look like a failure.
+    applyStudentAccessLocally(studentId, status, email);
+    try {
+      return await syncNow();
+    } catch {
+      scheduleSync();
+      return derived();
+    }
   }
 
   return {
@@ -587,6 +700,44 @@ export function createErpClient(mode, options = {}) {
       if (!old) throw new Error('That student is no longer available.');
       return enqueueUpsert(state, 'students', {...old, status: old.status === 'inactive' ? 'active' : 'inactive'});
     }),
+
+    async grantStudentAccess({studentId, email} = {}) {
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      if (!studentId || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
+        throw studentAccessError(new Error('VALIDATION_FAILED: student sign-in email'));
+      }
+      try {
+        await requireSyncedStudent(studentId);
+        const result = await rpc('erp_grant_student_access', {
+          p_student_id: studentId,
+          p_email: cleanEmail,
+        });
+        return refreshAfterStudentAccess(
+          studentId,
+          result?.portalAccessStatus || 'active',
+          result?.email || cleanEmail,
+        );
+      } catch (error) {
+        throw studentAccessError(error);
+      }
+    },
+
+    async revokeStudentAccess(input) {
+      const studentId = typeof input === 'string' ? input : input?.studentId;
+      if (!studentId) throw studentAccessError(new Error('VALIDATION_FAILED: student'));
+      try {
+        await requireSyncedStudent(studentId);
+        const result = await rpc('erp_revoke_student_access', {p_student_id: studentId});
+        const status = result?.portalAccessStatus || 'suspended';
+        return refreshAfterStudentAccess(
+          studentId,
+          status === 'none' ? '' : status,
+          result?.email || '',
+        );
+      } catch (error) {
+        throw studentAccessError(error);
+      }
+    },
 
     saveInstructor: payload => queue((state, snapshot) => {
       if (!payload?.fullName?.trim()) throw new Error('Instructor name is required.');

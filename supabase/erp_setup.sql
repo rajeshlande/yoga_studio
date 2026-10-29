@@ -1,7 +1,7 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 3.
--- Matches app version 1.4.0 (safer autosync, GST/UPI invoicing and Admin
--- payment configuration/readiness checks).
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 4.
+-- Matches app version 1.5.0 (safer autosync, GST/UPI invoicing, Admin
+-- payment configuration/readiness checks and in-app Student portal access).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -14,8 +14,12 @@
 --   3. In the app: sign in -> Settings -> Data mode: Supabase.
 --      The dashboard will ask you to create your organization (one click);
 --      that makes the signed-in account the Owner.
---   4. Giving other people access: they sign up in the app first, then run
---      one of the commented examples at the very bottom of this file.
+--   4. Giving a student portal access: the student signs up in the app and
+--      confirms their email first. An Owner/Admin then opens Students ->
+--      Portal access in the app and enters that exact sign-in email. The
+--      student must NOT create their own organization. Co-owner, branch
+--      Admin and Instructor account links still use the commented examples
+--      at the very bottom of this file.
 --
 -- SECURITY MODEL
 --   * Tables have Row Level Security enabled with NO direct-access policies
@@ -273,6 +277,9 @@ create index if not exists erp_payments_membership_idx on public.erp_payments(me
 create index if not exists erp_payments_org_date_idx on public.erp_payments(org_id, paid_on);
 create index if not exists erp_audit_org_idx on public.erp_audit_log(org_id, created_at);
 create index if not exists erp_sync_operations_actor_idx on public.erp_sync_operations(org_id, actor, created_at);
+create index if not exists erp_branch_members_user_status_idx on public.erp_branch_members(user_id, status);
+create index if not exists erp_branch_members_student_idx on public.erp_branch_members(student_id)
+  where student_id is not null;
 
 -- ----------------------------------------------------------------------------
 -- Offline-sync columns (SQL v2). Added with ALTER so re-running this file on
@@ -322,6 +329,72 @@ begin
   end loop;
 end $$;
 
+-- A Student portal link is stored as a branch-member row. If a manager moves
+-- the student record to another branch, move the active sign-in link with it;
+-- otherwise the student would silently lose access after a routine branch
+-- correction. Suspended historical links are left alone and are repaired by
+-- the next explicit grant.
+create or replace function public.erp__move_student_access_branch()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_user_id uuid;
+  v_target_student uuid;
+  v_target_status text;
+begin
+  if new.branch_id is distinct from old.branch_id
+     and exists (select 1 from public.erp_branches b
+                  where b.id = new.branch_id and b.org_id = new.org_id) then
+    for v_user_id in
+      select bm.user_id
+        from public.erp_branch_members bm
+       where bm.student_id = new.id and bm.branch_id = old.branch_id
+         and bm.role = 'student' and bm.status = 'active'
+    loop
+      select student_id, status into v_target_student, v_target_status
+        from public.erp_branch_members
+       where branch_id = new.branch_id and user_id = v_user_id and role = 'student';
+
+      if found then
+        if v_target_status = 'active' and v_target_student is distinct from new.id then
+          -- A manually created duplicate already uses this account for a
+          -- different student in the target branch. Do not fail the student
+          -- branch move; suspend the moving link for an admin to resolve.
+          update public.erp_branch_members
+             set status = 'suspended'
+           where branch_id = old.branch_id and user_id = v_user_id and role = 'student';
+        else
+          -- Reuse the historical target-branch row for this same account
+          -- and remove the old-branch duplicate. This covers an account
+          -- that was previously linked/revoked in the target branch.
+          delete from public.erp_branch_members
+           where branch_id = old.branch_id and user_id = v_user_id and role = 'student';
+          update public.erp_branch_members
+             set student_id = new.id, status = 'active'
+           where branch_id = new.branch_id and user_id = v_user_id and role = 'student';
+        end if;
+      else
+        begin
+          update public.erp_branch_members
+             set branch_id = new.branch_id
+           where branch_id = old.branch_id and user_id = v_user_id and role = 'student';
+        exception when unique_violation then
+          -- A concurrent access change won the target-row race. Preserve
+          -- the student update and leave this link suspended for regrant.
+          update public.erp_branch_members
+             set status = 'suspended'
+           where branch_id = old.branch_id and user_id = v_user_id and role = 'student';
+        end;
+      end if;
+    end loop;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists erp_students_move_student_access on public.erp_students;
+create trigger erp_students_move_student_access
+  after update of branch_id on public.erp_students
+  for each row execute function public.erp__move_student_access_branch();
+
 -- ----------------------------------------------------------------------------
 -- Lock the tables: RLS on, no browser-role grants. Functions below are the
 -- only door, and they re-check identity, tenant and role on every call.
@@ -350,7 +423,12 @@ returns uuid language sql stable security definer set search_path = public as $$
       where user_id = auth.uid() and status = 'active' order by created_at limit 1),
     (select b.org_id from public.erp_branch_members bm
        join public.erp_branches b on b.id = bm.branch_id
-      where bm.user_id = auth.uid() and bm.status = 'active' limit 1))
+      where bm.user_id = auth.uid() and bm.status = 'active'
+        and (bm.role <> 'student' or exists (
+          select 1 from public.erp_students s
+           where s.id = bm.student_id and s.org_id = b.org_id
+             and s.branch_id = bm.branch_id and s.status = 'active'))
+      limit 1))
 $$;
 
 create or replace function public.erp_my_roles()
@@ -359,8 +437,13 @@ returns text[] language sql stable security definer set search_path = public as 
     select case role when 'owner' then 'owner' when 'co_owner' then 'admin' end as r
       from public.erp_org_members where user_id = auth.uid() and status = 'active'
     union all
-    select role from public.erp_branch_members
-      where user_id = auth.uid() and status = 'active'
+    select bm.role from public.erp_branch_members bm
+      join public.erp_branches b on b.id = bm.branch_id
+     where bm.user_id = auth.uid() and bm.status = 'active'
+       and (bm.role <> 'student' or exists (
+         select 1 from public.erp_students s
+          where s.id = bm.student_id and s.org_id = b.org_id
+            and s.branch_id = bm.branch_id and s.status = 'active'))
   ) s where r is not null
 $$;
 
@@ -381,9 +464,15 @@ $$;
 
 create or replace function public.erp_my_student_id()
 returns uuid language sql stable security definer set search_path = public as $$
-  select student_id from public.erp_branch_members
-   where user_id = auth.uid() and status = 'active' and role = 'student'
-     and student_id is not null limit 1
+  select bm.student_id
+    from public.erp_branch_members bm
+    join public.erp_branches b on b.id = bm.branch_id
+    join public.erp_students s on s.id = bm.student_id
+   where bm.user_id = auth.uid() and bm.status = 'active' and bm.role = 'student'
+     and b.org_id = public.erp_current_org()
+     and s.org_id = b.org_id and s.branch_id = bm.branch_id and s.status = 'active'
+   order by bm.created_at
+   limit 1
 $$;
 
 create or replace function public.erp__require_org()
@@ -460,7 +549,7 @@ create or replace function public.erp_get_snapshot()
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
   v_org uuid; v_roles text[]; v_org_mgr boolean; v_student uuid; v_instructor uuid;
-  v_branches uuid[];
+  v_branches uuid[]; v_admin_branches uuid[];
 begin
   v_org := public.erp__require_org();
   v_roles := public.erp_my_roles();
@@ -468,13 +557,18 @@ begin
                         where user_id = auth.uid() and status = 'active' and org_id = v_org);
   v_student := public.erp_my_student_id();
   v_instructor := public.erp_my_instructor_id();
+  select coalesce(array_agg(distinct bm.branch_id), '{}') into v_admin_branches
+    from public.erp_branch_members bm join public.erp_branches b on b.id = bm.branch_id
+   where bm.user_id = auth.uid() and bm.status = 'active' and bm.role = 'admin'
+     and b.org_id = v_org;
   if v_org_mgr then
     select coalesce(array_agg(id), '{}') into v_branches
       from public.erp_branches where org_id = v_org;
   else
     select coalesce(array_agg(distinct branch_id), '{}') into v_branches
       from public.erp_branch_members bm join public.erp_branches b on b.id = bm.branch_id
-     where bm.user_id = auth.uid() and bm.status = 'active' and b.org_id = v_org;
+     where bm.user_id = auth.uid() and bm.status = 'active' and b.org_id = v_org
+       and (bm.role <> 'student' or bm.student_id = v_student);
   end if;
 
   return jsonb_build_object(
@@ -486,8 +580,26 @@ begin
         'id', s.id, 'branchId', s.branch_id, 'fullName', s.full_name, 'phone', s.phone,
         'email', s.email, 'gender', s.gender, 'dob', coalesce(s.dob::text, ''),
         'joiningDate', s.joining_date::text, 'status', s.status, 'notes', s.notes,
+        -- Portal fields are manager-only metadata, never part of the student
+        -- record's offline-sync payload. Other roles receive "hidden".
+        'portalAccessStatus', case
+          when v_org_mgr or s.branch_id = any(v_admin_branches)
+            then coalesce(pa.portal_status, 'none') else 'hidden' end,
+        'portalAccessEmail', case
+          when v_org_mgr or s.branch_id = any(v_admin_branches)
+            then coalesce(pa.portal_email, '') else '' end,
         'createdAt', s.created_at, 'updatedAt', s.updated_at, 'syncVersion', s.sync_version) order by s.full_name), '[]')
       from public.erp_students s
+      left join lateral (
+        select bm.status as portal_status, coalesce(u.email::text, '') as portal_email
+          from public.erp_branch_members bm
+          join public.erp_branches pb on pb.id = bm.branch_id and pb.org_id = v_org
+          join auth.users u on u.id = bm.user_id
+         where bm.student_id = s.id and bm.role = 'student'
+           and (v_org_mgr or s.branch_id = any(v_admin_branches))
+         order by case bm.status when 'active' then 0 else 1 end, bm.created_at desc
+         limit 1
+      ) pa on true
      where s.org_id = v_org and s.branch_id = any(v_branches)
        and (v_org_mgr or 'admin' = any(v_roles)
             or (v_student is not null and s.id = v_student)
@@ -666,6 +778,194 @@ begin
   if not found then raise exception 'FORBIDDEN'; end if;
   perform public.erp__log(v_org, 'status_toggle', 'student', p_id);
   return jsonb_build_object('id', p_id);
+end $$;
+
+-- ----------------------------------------------------------------------------
+-- Student portal access (SQL v4)
+--
+-- The student first creates and confirms a normal Supabase account in the
+-- app. An Owner/organization manager, or an Admin of that student's branch,
+-- then calls this RPC with the exact sign-in email. The server—not the
+-- browser—resolves the email to auth.users, checks confirmation and creates
+-- the active branch-member student link. Access changes are deliberately
+-- online-only in the client and are never placed in the offline outbox.
+-- ----------------------------------------------------------------------------
+create or replace function public.erp_grant_student_access(p_student_id uuid, p_email text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_actor uuid := auth.uid();
+  v_org uuid;
+  v_student public.erp_students%rowtype;
+  v_branch_status text;
+  v_email text := lower(trim(coalesce(p_email, '')));
+  v_user_id uuid;
+  v_auth_email text;
+  v_confirmed_at timestamptz;
+  v_banned_until timestamptz;
+  v_deleted_at timestamptz;
+begin
+  if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
+  v_org := public.erp_current_org();
+  if v_org is null then raise exception 'NO_ORGANIZATION: create or join an organization first'; end if;
+  if p_student_id is null or length(v_email) > 254
+     or v_email !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then
+    raise exception 'VALIDATION_FAILED: student sign-in email';
+  end if;
+
+  -- Serialize access changes for this organization. Together with the row
+  -- lock below, this prevents two simultaneous grants from linking one
+  -- account to two students (or one student to two accounts).
+  perform pg_advisory_xact_lock(hashtextextended('erp-student-access:' || v_org::text, 0));
+
+  select * into v_student
+    from public.erp_students
+   where id = p_student_id and org_id = v_org
+   for update;
+  if v_student.id is null then raise exception 'FORBIDDEN'; end if;
+
+  if not (
+    exists (select 1 from public.erp_org_members
+             where org_id = v_org and user_id = v_actor and status = 'active')
+    or exists (select 1 from public.erp_branch_members
+                where branch_id = v_student.branch_id and user_id = v_actor
+                  and role = 'admin' and status = 'active')
+  ) then
+    raise exception 'FORBIDDEN';
+  end if;
+
+  if v_student.status <> 'active' then raise exception 'STUDENT_INACTIVE'; end if;
+  select status into v_branch_status
+    from public.erp_branches
+   where id = v_student.branch_id and org_id = v_org;
+  if v_branch_status is null then raise exception 'FORBIDDEN'; end if;
+  if v_branch_status <> 'active' then raise exception 'STUDENT_BRANCH_ARCHIVED'; end if;
+
+  select id, email::text, coalesce(email_confirmed_at, confirmed_at), banned_until, deleted_at
+    into v_user_id, v_auth_email, v_confirmed_at, v_banned_until, v_deleted_at
+    from auth.users
+   where lower(email::text) = v_email
+   order by coalesce(email_confirmed_at, confirmed_at) desc nulls last, created_at
+   limit 1;
+  if v_user_id is null or v_deleted_at is not null
+     or (v_banned_until is not null and v_banned_until > now()) then
+    raise exception 'STUDENT_ACCOUNT_NOT_FOUND';
+  end if;
+  if v_confirmed_at is null then raise exception 'STUDENT_ACCOUNT_UNCONFIRMED'; end if;
+
+  -- A student sign-in must be a dedicated account. The current product
+  -- resolves one organization per account, with organization membership
+  -- taking precedence over branch membership; linking an owner/manager of
+  -- another organization would therefore look successful but open the wrong
+  -- workspace.
+  if exists (select 1 from public.erp_org_members
+              where user_id = v_user_id and status = 'active') then
+    raise exception 'STUDENT_ACCOUNT_IS_MANAGER';
+  end if;
+  if exists (select 1 from public.erp_branch_members bm
+               join public.erp_branches b on b.id = bm.branch_id
+              where bm.user_id = v_user_id and bm.status = 'active' and b.org_id <> v_org) then
+    raise exception 'STUDENT_ACCOUNT_OTHER_ORG';
+  end if;
+  if exists (select 1 from public.erp_branch_members bm
+               join public.erp_branches b on b.id = bm.branch_id
+              where bm.user_id = v_user_id and bm.role = 'student' and bm.status = 'active'
+                and b.org_id = v_org and bm.student_id is distinct from p_student_id) then
+    raise exception 'STUDENT_ACCOUNT_ALREADY_LINKED';
+  end if;
+
+  -- Granting a different email intentionally replaces this student's old
+  -- sign-in. Suspend (do not delete) the previous link for audit/history.
+  update public.erp_branch_members bm
+     set status = 'suspended'
+   where bm.student_id = p_student_id and bm.role = 'student' and bm.status = 'active'
+     and bm.user_id <> v_user_id
+     and exists (select 1 from public.erp_branches b
+                  where b.id = bm.branch_id and b.org_id = v_org);
+
+  -- Repair any manually-created duplicate for this same student/account in
+  -- another branch before upserting the one correct branch link.
+  update public.erp_branch_members bm
+     set status = 'suspended'
+   where bm.student_id = p_student_id and bm.user_id = v_user_id
+     and bm.role = 'student' and bm.status = 'active'
+     and bm.branch_id <> v_student.branch_id
+     and exists (select 1 from public.erp_branches b
+                  where b.id = bm.branch_id and b.org_id = v_org);
+
+  insert into public.erp_branch_members(branch_id, user_id, role, student_id, status)
+  values (v_student.branch_id, v_user_id, 'student', p_student_id, 'active')
+  on conflict (branch_id, user_id, role) do update
+    set student_id = excluded.student_id, status = 'active';
+
+  insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
+  values (v_org, v_actor, 'grant_student_access', 'student', p_student_id,
+          jsonb_build_object('studentUserId', v_user_id, 'email', lower(v_auth_email)));
+
+  return jsonb_build_object(
+    'studentId', p_student_id,
+    'studentUserId', v_user_id,
+    'email', lower(v_auth_email),
+    'portalAccessStatus', 'active');
+end $$;
+
+create or replace function public.erp_revoke_student_access(p_student_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_actor uuid := auth.uid();
+  v_org uuid;
+  v_student public.erp_students%rowtype;
+  v_count integer := 0;
+  v_email text := '';
+begin
+  if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
+  v_org := public.erp_current_org();
+  if v_org is null then raise exception 'NO_ORGANIZATION: create or join an organization first'; end if;
+  if p_student_id is null then raise exception 'VALIDATION_FAILED: student'; end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('erp-student-access:' || v_org::text, 0));
+
+  select * into v_student
+    from public.erp_students
+   where id = p_student_id and org_id = v_org
+   for update;
+  if v_student.id is null then raise exception 'FORBIDDEN'; end if;
+
+  if not (
+    exists (select 1 from public.erp_org_members
+             where org_id = v_org and user_id = v_actor and status = 'active')
+    or exists (select 1 from public.erp_branch_members
+                where branch_id = v_student.branch_id and user_id = v_actor
+                  and role = 'admin' and status = 'active')
+  ) then
+    raise exception 'FORBIDDEN';
+  end if;
+
+  select coalesce(lower(u.email::text), '') into v_email
+    from public.erp_branch_members bm
+    join public.erp_branches b on b.id = bm.branch_id and b.org_id = v_org
+    join auth.users u on u.id = bm.user_id
+   where bm.student_id = p_student_id and bm.role = 'student' and bm.status = 'active'
+   order by bm.created_at desc
+   limit 1;
+
+  update public.erp_branch_members bm
+     set status = 'suspended'
+   where bm.student_id = p_student_id and bm.role = 'student' and bm.status = 'active'
+     and exists (select 1 from public.erp_branches b
+                  where b.id = bm.branch_id and b.org_id = v_org);
+  get diagnostics v_count = row_count;
+
+  if v_count > 0 then
+    insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
+    values (v_org, v_actor, 'revoke_student_access', 'student', p_student_id,
+            jsonb_build_object('email', coalesce(v_email, ''), 'linksSuspended', v_count));
+  end if;
+
+  return jsonb_build_object(
+    'studentId', p_student_id,
+    'email', coalesce(v_email, ''),
+    'portalAccessStatus', case when v_count > 0 then 'suspended' else 'none' end,
+    'linksSuspended', v_count);
 end $$;
 
 create or replace function public.erp_save_instructor(p_payload jsonb)
@@ -1695,6 +1995,7 @@ end $$;
 -- Internal sync helpers are called only by erp_sync_push (same owner). They
 -- must not become a second browser-callable data door.
 revoke all on function public.erp__touch_sync() from public, anon, authenticated;
+revoke all on function public.erp__move_student_access_branch() from public, anon, authenticated;
 revoke all on function public.erp__sync_result(jsonb, text, uuid, integer, text, text, text) from public, anon, authenticated;
 revoke all on function public.erp__sync_apply_branch(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.erp__sync_apply_student(uuid, jsonb) from public, anon, authenticated;
@@ -1719,7 +2020,8 @@ begin
     'erp__require_manager()', 'erp__log(uuid, text, text, uuid)',
     'erp_bootstrap_organization(text)', 'erp_get_context()', 'erp_get_snapshot()',
     'erp_save_branch(jsonb)', 'erp_archive_branch(uuid)', 'erp_save_student(jsonb)',
-    'erp_archive_student(uuid)', 'erp_save_instructor(jsonb)', 'erp_save_batch(jsonb)',
+    'erp_archive_student(uuid)', 'erp_grant_student_access(uuid, text)',
+    'erp_revoke_student_access(uuid)', 'erp_save_instructor(jsonb)', 'erp_save_batch(jsonb)',
     'erp_archive_batch(uuid)', 'erp_enroll_student(jsonb)', 'erp_end_enrollment(uuid)',
     'erp_mark_attendance(jsonb)', 'erp_save_plan(jsonb)', 'erp_save_membership(jsonb)',
     'erp_cancel_membership(uuid)', 'erp_record_payment(jsonb)', 'erp_sync_push(jsonb)']
@@ -1730,8 +2032,13 @@ begin
 end $$;
 
 -- ============================================================================
--- AFTER SETUP — giving other people access (examples; edit, uncomment, run)
--- The person must first create an account in the app with that email.
+-- AFTER SETUP — giving other people access
+-- Students: use Students -> Portal access in the app (preferred). The
+-- student creates and confirms an account first, and an Owner/Admin enters
+-- that exact sign-in email. Students must NOT create their own organization.
+-- The commented SQL below remains for Co-Owner/Admin/Instructor links and
+-- for emergency student-link repair only. The person must first create an
+-- account in the app with that email.
 -- Find branch / student / instructor ids in the app or with a select, e.g.
 --   select id, name from public.erp_branches;
 --
@@ -1750,11 +2057,14 @@ end $$;
 -- select '<BRANCH_UUID>', id, 'instructor', '<INSTRUCTOR_UUID>'
 --   from auth.users where email = 'teacher@example.com';
 --
--- Student (link to the student record so they see only themselves):
+-- Student emergency repair only (normally use Students -> Portal access;
+-- the branch UUID must be the student record's current branch):
 -- insert into public.erp_branch_members(branch_id, user_id, role, student_id)
 -- select '<BRANCH_UUID>', id, 'student', '<STUDENT_UUID>'
 --   from auth.users where email = 'student@example.com';
 --
--- Remove access: set status = 'suspended' on the matching membership row, or
--- delete that row. At least one active Owner must always remain.
+-- Remove access: for students, use Students -> Portal access -> Remove
+-- access. For other roles, set status = 'suspended' on the matching
+-- membership row, or delete that row. At least one active Owner must
+-- always remain.
 -- ============================================================================
