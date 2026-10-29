@@ -4,9 +4,25 @@ import {test, expect} from '@playwright/test';
 // offline device mode is the only way in, and it must start empty.
 test('offline device mode runs the core ERP flow end to end', async ({page}) => {
   page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await page.emulateMedia({colorScheme: 'light'});
   await page.goto('/');
   await page.getByRole('button', {name: 'Use this device only — offline mode'}).click();
   await expect(page.getByRole('heading', {name: 'Set up your studio'})).toBeVisible();
+
+  // Theme from feature_development: quick toggle cycles system -> light -> dark and persists.
+  const themeToggle = page.getByRole('button', {name: /Switch theme/});
+  await themeToggle.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await themeToggle.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await page.evaluate(() => localStorage.getItem('ys-theme'))).toBe('dark');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await page.getByRole('radio', {name: 'System'}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  expect(await page.evaluate(() => localStorage.getItem('ys-theme'))).toBe('system');
+  await page.getByRole('button', {name: 'Dashboard', exact: true}).click();
 
   // Branch
   await page.getByRole('button', {name: 'Branches', exact: true}).click();

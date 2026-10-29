@@ -80,3 +80,44 @@
  .erp-receipt,.erp-receipt *{visibility:visible}
  .erp-receipt{position:fixed;inset:20px auto auto 20px;right:20px}
 }
+
+/* Dark theme for ERP screens (paired with src/lib/theme.js) */
+:root[data-theme="dark"]{--border:#2d2540;--muted:#a89abb;--purple:#b596dd}
+:root[data-theme="dark"] .erp-toolbar,:root[data-theme="dark"] .erp-kpi,:root[data-theme="dark"] .erp-panel,:root[data-theme="dark"] .erp-dialog{background:#211b2f;border-color:#2d2540;color:#e8e2ef}
+:root[data-theme="dark"] .erp-toolbar label,:root[data-theme="dark"] .erp-kpi small,:root[data-theme="dark"] .erp-table th{color:#a89abb}
+:root[data-theme="dark"] .erp-toolbar select,:root[data-theme="dark"] .erp-toolbar input,:root[data-theme="dark"] .erp-field select,:root[data-theme="dark"] .erp-field input,:root[data-theme="dark"] .erp-field textarea{background:#251f34;border-color:#3a304d;color:#e8e2ef}
+:root[data-theme="dark"] .erp-field{color:#c3b2d4}
+:root[data-theme="dark"] .erp-field input::placeholder,:root[data-theme="dark"] .erp-field textarea::placeholder{color:#847399}
+:root[data-theme="dark"] .erp-mode-badge{background:#22392c;color:#a9d3b6}
+:root[data-theme="dark"] .erp-mode-badge.offline{background:#3d3020;color:#ecc98d}
+:root[data-theme="dark"] .erp-kpi strong,:root[data-theme="dark"] .erp-panel-head h2,:root[data-theme="dark"] .erp-dialog h2,:root[data-theme="dark"] .erp-empty h3,:root[data-theme="dark"] .erp-check strong{color:#f0e8f7}
+:root[data-theme="dark"] .erp-kpi p,:root[data-theme="dark"] .erp-panel-head p,:root[data-theme="dark"] .erp-empty,:root[data-theme="dark"] .erp-dialog .dialog-sub,:root[data-theme="dark"] .erp-person small,:root[data-theme="dark"] .erp-check small{color:#aa99bd}
+:root[data-theme="dark"] .erp-table th{border-bottom-color:#342a49}
+:root[data-theme="dark"] .erp-table td{border-bottom-color:#2d253f;color:#ddd2e9}
+:root[data-theme="dark"] .erp-badge.green{background:#22392c;color:#a9d3b6}
+:root[data-theme="dark"] .erp-badge.red{background:#3b2530;color:#eda9b6}
+:root[data-theme="dark"] .erp-badge.amber{background:#3d3020;color:#ecc98d}
+:root[data-theme="dark"] .erp-badge.grey{background:#2c253d;color:#bdaed0}
+:root[data-theme="dark"] .erp-badge.lavender{background:#312649;color:#cdb1eb}
+:root[data-theme="dark"] .erp-search{background:#251f34;border-color:#3a304d;color:#aa99bd}
+:root[data-theme="dark"] .erp-search input{color:#e8e2ef}
+:root[data-theme="dark"] .erp-search input::placeholder{color:#847399}
+:root[data-theme="dark"] .erp-dialog{box-shadow:0 24px 80px #00000090}
+:root[data-theme="dark"] .erp-day,:root[data-theme="dark"] .erp-att-btns button{background:#251f34;border-color:#3a304d;color:#cbbddd}
+:root[data-theme="dark"] .erp-day.on{background:#9875c7;border-color:#9875c7;color:#171320}
+:root[data-theme="dark"] .erp-seg{background:#2c253d}
+:root[data-theme="dark"] .erp-seg button{color:#b7a7c8}
+:root[data-theme="dark"] .erp-seg button.on{background:#3a2f52;color:#f0e8f7;box-shadow:0 2px 8px #00000060}
+:root[data-theme="dark"] .erp-att-row{border-bottom-color:#2d253f}
+:root[data-theme="dark"] .erp-check{background:#251f34;border-color:#342a49}
+:root[data-theme="dark"] .erp-check-num{background:#312649;color:#cdb1eb}
+:root[data-theme="dark"] .erp-banner{background:#3d3020;border-color:#5c4825;color:#f0d3a0}
+:root[data-theme="dark"] .erp-banner.blue{background:#2d2344;border-color:#493761;color:#d8c7f1}
+:root[data-theme="dark"] .erp-link-btn{color:#c5a9e4}
+:root[data-theme="dark"] .erp-danger{color:#eda9b6!important}
+:root[data-theme="dark"] .erp-receipt{background:#251f34;border-color:#57476f}
+:root[data-theme="dark"] .erp-receipt dt{color:#aa99bd}
+:root[data-theme="dark"] .erp-receipt dd{color:#f0e8f7}
+:root[data-theme="dark"] .auth-local{border-top-color:#342a49}
+:root[data-theme="dark"] .auth-local p{color:#a89abb}
+@media print{:root[data-theme="dark"] .erp-receipt{background:#fff;color:#171320}:root[data-theme="dark"] .erp-receipt dt{color:#6b5c76}:root[data-theme="dark"] .erp-receipt dd{color:#171320}}

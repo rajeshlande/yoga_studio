@@ -16,6 +16,7 @@ support, **Owner / Admin / Instructor / Student portals**, monthly fees in
 | Attendance | Date + batch picker (today's batch auto-selected), Present/Absent/Late per student, mark-all-present, history + CSV; students see only their own |
 | Fees | Plans (₹, months), memberships with **calendar-month or joining-date** billing and price snapshot, dues (paid/partial/unpaid/expired), manual payments (cash/UPI/card/bank), auto receipt numbers `YS-YYYY-NNNN`, printable receipt, CSV export |
 | Portals | Owner/Admin manage everything in scope; Instructor sees own batches + attendance; Student sees own batches, attendance, dues and payments |
+| Appearance | Light/Dark/System theme from `feature_development`, adapted to every ERP screen, dialog, table and form; persisted as `ys-theme`, with pre-paint bootstrap and OS-preference sync |
 
 Deferred ( unchanged from the management plan): online payment gateway,
 automated reminders/messaging, payroll, QR/self check-in, expenses and

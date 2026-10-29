@@ -8,6 +8,7 @@ Version numbers follow semantic versioning. `package.json` is the authoritative 
 - Core studio ERP: multi-branch Branches, Students, Instructors, Batches with rosters/capacity, Attendance (present/absent/late), and Fees & Payments (INR plans, calendar-month or joining-date memberships, dues, manual payments and printable receipts).
 - Role portals for Owner, Admin, Instructor and Student with branch filtering; dashboard KPIs, today's classes, expiring memberships and a first-run setup checklist.
 - Two data modes behind one API: Supabase mode using only the typed `erp_*` RPC functions in the new single setup file `supabase/erp_setup.sql` (RLS-locked tables, per-call tenant/role checks, audit log), and an explicit offline local-device mode (empty by default, browser storage, JSON backup export/import) so the ERP works before/without Supabase and fully offline after the first visit.
+- Light/Dark/System theme support ported from `feature_development` and extended across the ERP screens: pre-paint bootstrap, persistent per-device preference, OS-preference sync, top-bar/auth quick toggle, Settings picker, theme-color sync, and a printable receipt that remains light on paper.
 - Unit tests for billing dates/money/attendance and a Playwright end-to-end test of the offline ERP flow. See `docs/12-erp-core/README.md`.
 
 ### Notes

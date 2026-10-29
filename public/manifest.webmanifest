@@ -2,11 +2,11 @@
   "id": "./",
   "name": "Yoga Studio",
   "short_name": "Yoga Studio",
-  "description": "Your personal space for a little more balance.",
+  "description": "Manage yoga studio operations — students, batches, attendance and payments.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f8f9fb",
+  "background_color": "#faf9fc",
   "theme_color": "#8263bc",
   "orientation": "any",
   "icons": [

@@ -13,7 +13,7 @@ Read [CLAUDE.md](CLAUDE.md) before any codebase work, including exploration, pla
 - Login, sign-up, forgot-password email and recovery-link password update.
 - **Yoga Studio ERP (Core)** — multi-branch students, instructors, batches/rosters, attendance and INR fees/payments with Owner/Admin/Instructor/Student portals. See [the ERP guide](docs/12-erp-core/README.md).
 - After authentication: ERP dashboard, editable name/bio profile, read-only account email, settings, installation and logout.
-- Responsive sidebar/mobile drawer, keyboard-focus handling and offline app shell.
+- Responsive sidebar/mobile drawer, keyboard-focus handling, offline app shell, and Light/Dark/System appearance themes with a top-bar quick toggle and Settings picker (persisted per device).
 - Visible application version, sourced from `package.json` (authentication footer, private footer and Settings).
 
 **There is no demo account, demo sign-in, seeded user profile, local sample-data mode or authentication bypass.** Account pages require a Supabase session; without a configured public key, account forms display a setup message. The one deliberate addition is an explicitly-labelled **offline local-device mode** for the ERP: it starts empty, stores only owner-entered studio data in that browser (Settings can export/clear it) and never grants access to account data. Supabase ERP tables/functions come from the single file `supabase/erp_setup.sql`, which the owner pastes into their Supabase SQL Editor. Test fixtures are isolated under `tests/`, mocked at the network boundary, and are not bundled in the app.
@@ -76,7 +76,7 @@ npm test
 node scripts/test-pages.mjs
 ```
 
-Six browser tests run on isolated development ports (the sixth drives the offline ERP flow), plus unit tests for ERP billing/money helpers. Configured-flow tests use a test-only provider URL/key and intercepted responses; no test account is present in application code or deployed assets. The unconfigured test checks that legacy sample storage is removed and cannot authorize access. Mocked API tests are not proof of real Supabase email delivery or production authentication.
+Six browser tests run on isolated development ports (the sixth drives the offline ERP and theme-persistence flows), plus unit tests for ERP billing/money and theme helpers. Configured-flow tests use a test-only provider URL/key and intercepted responses; no test account is present in application code or deployed assets. The unconfigured test checks that legacy sample storage is removed and cannot authorize access. Mocked API tests are not proof of real Supabase email delivery or production authentication.
 
 ## Management expansion
 
