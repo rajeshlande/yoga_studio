@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, memberships,
 INR fees, payment setup and themed invoice PDFs.
 
-> **Current source release:** 1.6.0 · **Database setup:** SQL v5 in
+> **Current source release:** 1.6.0 · **Database setup:** SQL v6 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -56,8 +56,9 @@ into the application.
 - Multi-branch studio structure with branch filtering throughout the ERP.
 - Dashboard KPIs for active students, today's classes, monthly collections
   and pending dues, plus expiring-membership alerts and a setup checklist.
-- Student records with branch, contact details, joining date, batches,
-  attendance history/percentage, search and CSV export.
+- Student records with branch, split first/last name, contact and admission
+  profile details, joining date, batches, attendance history/percentage,
+  search and CSV export.
 - Instructor records and recurring batches with weekdays, start time,
   duration, capacity and roster management.
 - Attendance by date and batch using **Present**, **Absent** and **Late**,
@@ -93,6 +94,15 @@ into the application.
   Instructor Portal grants/removals are limited to the Owner, a Co-owner or
   an Admin acting within their assigned branches. Manual membership SQL is
   an emergency-repair fallback only.
+- **Public Student admissions:** a manager copies the studio-specific link
+  from **Students → Admission requests**. The applicant creates/confirms an
+  account with **Join an existing studio**, signs in and submits the form.
+  An Owner/Co-owner, or a branch Admin for an assigned branch, selects the
+  branch and joining date at review; confirmation atomically creates the
+  Student and grants Student portal access to the submitting account. The
+  **Medical / Physical issue** field is limited to Owner, Co-owner, the
+  student's branch Admin and the student; it is redacted from Instructor
+  snapshots.
 
 ### Experience and platform
 
@@ -298,9 +308,11 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v5 without deleting business rows.
-3. Configure the production Site URL and allowed redirect URL for
-   `https://rajeshlande.github.io/yoga_studio/`; add your local development
+   earlier ERP installs to SQL v6 without deleting business rows.
+3. Configure the production Site URL for
+   `https://rajeshlande.github.io/yoga_studio/` and add the scoped redirect
+   pattern `https://rajeshlande.github.io/yoga_studio/**` so email links can
+   return an applicant to the admission flow; add your local development
    origin separately.
 4. The primary studio Owner selects **Create my own studio** during sign-up,
    signs in through the app, selects **Settings → Data mode: Supabase** if
@@ -309,7 +321,11 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    studio** during sign-up and confirm their own account first. Then link the
    exact sign-in email in **Access** for Co-owner/Admin/Instructor roles,
    selecting branches for Admin/Instructor access, or in
-   **Students → Portal access** for a Student. If a joining user signs in
+   **Students → Portal access** for an existing Student. For a new Student,
+   a manager may instead share **Students → Admission requests → Public
+   admission link**; after account confirmation/sign-in the applicant
+   submits the form, and the reviewing manager chooses branch and joining
+   date. If a joining user signs in
    before the grant, they see a dedicated **Waiting for studio access**
    screen with no ERP navigation, studio data or organization-creation
    controls. Access changes are online-only and never enter the offline
@@ -381,8 +397,9 @@ The suite includes:
   dedicated no-access screen and Retry flow; an explicit prospective-Owner
   creation path; the student's personal view-only dashboard/assigned-batch
   portal without sync controls or **Studio ERP data** settings;
-  Owner/Admin-only visibility of that settings panel; and cleared studio
-  display after online revocation;
+  Owner/Admin-only visibility of that settings panel; cleared studio
+  display after online revocation; and the account-first public admission
+  submission plus manager confirmation into a Student + portal grant;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
   browser-close guard and automatic sync after reconnect.
 
@@ -410,9 +427,11 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v5 in the real Supabase project, test real Owner, Co-owner,
+running SQL v6 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
-confirmed email; verify branch and own-record scoping; run an offline
+confirmed email; submit and confirm a public admission from a fresh
+account and verify branch scope, Student portal access and Instructor
+medical-field redaction; verify other branch and own-record scoping; run an offline
 attendance/payment cycle and billing-settings sync as an authorized manager;
 and resolve a two-account conflict before operational sign-off.
 
@@ -437,7 +456,7 @@ the installed PWA/site data once so the old service-worker shell is replaced.
 Recommended go-live order for 1.6.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` to install **SQL v5**.
+2. Run the complete current `supabase/erp_setup.sql` to install **SQL v6**.
    This is required for fixed Role Access management and is additive/
    idempotent for existing ERP data.
 3. Deploy the 1.6.0 web build with the two public Actions secrets.
@@ -449,9 +468,9 @@ Recommended go-live order for 1.6.0:
 
 If the new app reaches an older database, a billing-settings change remains
 queued with a setup-needed message rather than becoming a false conflict,
-and **Access** / **Students → Portal access** report that SQL v5 is
-required; run the complete current SQL file and reopen/focus the app to
-resume.
+and **Access** / **Students → Portal access** / **Admission requests**
+report that SQL v6 is required; run the complete current SQL file and
+reopen/focus the app to resume.
 
 ## Versioning and releases
 

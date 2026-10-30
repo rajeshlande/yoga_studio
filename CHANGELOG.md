@@ -52,6 +52,30 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   limited to Owner and Admin accounts and is not shown to Co-owner,
   Instructor or Student accounts.
 
+### Added — Public Student admissions
+
+- **Studio-specific admission link:** managers copy the link from
+  **Students → Admission requests**. The link code selects the organization
+  only; the applicant first creates/confirms an account with **Join an
+  existing studio**, signs in and then submits First Name, Last Name, Date Of
+  Birth, Phone Number, Subject, their read-only sign-in Email, Address, Pin
+  Code, optional Reference by, Experience in yoga, Medical / Physical issue
+  and Reasons to join yoga. No anonymous business-data submission is allowed.
+- **Manager confirmation:** Owner/Co-owner may confirm into any active
+  branch; a branch Admin may view unassigned requests but confirm only into
+  an assigned branch. The reviewer selects branch and joining date and may
+  reject with a note. Pending requests can be updated and rejected requests
+  corrected/resubmitted by the applicant.
+- **Student + portal in one transaction:** confirmation creates the Student
+  and grants Student portal access to the exact submitting account through
+  the existing audited grant. An existing Student with the same email is
+  flagged and blocks confirmation so staff can resolve/link the existing
+  record instead of silently creating a duplicate.
+- **Structured, privacy-scoped profile:** admission fields are copied to
+  split-name Student profile fields and shown to the student on their own
+  dashboard. Medical / Physical issue is visible only to Owner, Co-owner,
+  the student's branch Admin and the student; Instructor snapshots redact it.
+
 ### Security and behavior
 
 - SQL v5 treats `co_owner` as a distinct organization role and enforces the
@@ -75,30 +99,40 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   branch-manager helpers now return strict `true`/`false`, never SQL
   `NULL`, so `IF NOT ...` authorization guards cannot be bypassed by a
   missing role row.
+- SQL v6 adds a locked `erp_admissions` table and authenticated-only
+  `erp_get_my_admission`, `erp_submit_admission`,
+  `erp_get_admission_link_info`, `erp_list_admissions` and
+  `erp_review_admission` RPCs. Submissions require the confirmed Auth email
+  and an account with no active ERP role; admission review and the Student
+  portal grant are serialized/audited and remain online-only.
 - Browser coverage adds Owner Co-owner/Admin/Instructor management,
   Co-owner and branch-Admin Instructor Portal grants, hiding of Instructor
   profile setup/portal controls from Instructor and Student accounts,
   branch-Admin UI restrictions, signed-in Instructor locking, the waiting
   joining-account screen, the explicit prospective-Owner creation path,
   the personal Student dashboard/assigned-batch portal without sync
-  controls, and Owner/Admin-only visibility of **Studio ERP data**.
-  PGlite
-  validation exercises the RPC surface as `authenticated`; live Supabase
+  controls, Owner/Admin-only visibility of **Studio ERP data**, applicant
+  admission submission and manager admission confirmation. PGlite
+  validation exercises the role-access RPC surface as `authenticated`, and
+  a dedicated SQL v6 admission harness passes 24 lifecycle, branch-scope,
+  duplicate, privilege and medical-redaction checks; live Supabase
   Auth/RLS UAT with five real accounts remains required after deployment.
 
-### Database migration — SQL v5
+### Database migration — SQL v6 (includes SQL v5)
 
 - Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
-  Editor. SQL v5 adds `erp_list_role_access()`,
+  Editor. The complete file now installs SQL v6: SQL v5 adds `erp_list_role_access()`,
   `erp_grant_co_owner_access(text)`, `erp_revoke_co_owner_access(uuid)`,
   `erp_grant_admin_access(text, uuid[])`,
   `erp_revoke_admin_access(uuid)`,
   `erp_grant_instructor_access(uuid, text, uuid[])` and
   `erp_revoke_instructor_access(uuid)`, strengthens branch checks across
   existing RPC/sync functions, adds lookup indexes and revokes internal
-  helpers. The single setup file remains idempotent and does not delete
-  business rows. Deploy/run SQL v5 before using **Access** or relying on
-  the narrowed branch-Admin permissions.
+  helpers, while SQL v6 adds the organization admission code, locked
+  admissions table/RPCs and structured Student profile columns and revokes
+  admission helpers. The single setup file remains idempotent and does not
+  delete business rows. Deploy/run the complete SQL v6 file before using
+  **Access**, **Admission requests** or the narrowed branch-Admin permissions.
 
 ## 1.5.0 — 2026-10-30
 

@@ -78,11 +78,22 @@ export const localStore = {
 
   async saveStudent(payload) {
     const db = loadDb();
+    const suppliedFullName = String(payload.fullName || '').trim();
+    const firstName = String(payload.firstName || '').trim()
+      || (suppliedFullName ? suppliedFullName.split(/\s+/)[0] : '');
+    const lastName = String(payload.lastName || '').trim()
+      || (payload.firstName ? '' : suppliedFullName.split(/\s+/).slice(1).join(' '));
+    const fullName = [firstName, lastName].filter(Boolean).join(' ') || suppliedFullName;
     upsert(db.students, {
-      id: payload.id || uid(), branchId: payload.branchId, fullName: payload.fullName?.trim(),
+      id: payload.id || uid(), branchId: payload.branchId, firstName, lastName, fullName,
       phone: payload.phone || '', email: payload.email || '', gender: payload.gender || '',
       dob: payload.dob || '', joiningDate: payload.joiningDate || toISODate(),
-      status: payload.status || 'active', notes: payload.notes || '', createdAt: payload.createdAt || nowISO(),
+      status: payload.status || 'active', notes: payload.notes || '',
+      address: payload.address || '', pinCode: payload.pinCode || '',
+      admissionSubject: payload.admissionSubject || '', referredBy: payload.referredBy || '',
+      yogaExperience: payload.yogaExperience || '',
+      medicalPhysicalIssue: payload.medicalPhysicalIssue || '',
+      reasonToJoin: payload.reasonToJoin || '', createdAt: payload.createdAt || nowISO(),
     });
     return saveDb(db);
   },

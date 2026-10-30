@@ -69,7 +69,7 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v5) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v6) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -107,7 +107,7 @@ function studentAccessError(error) {
 
 function roleAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v5) in Supabase, then try again.');
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v6) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -158,6 +158,53 @@ function roleAccessError(error) {
   return error instanceof Error ? error : new Error(error?.message || 'Role access could not be updated.');
 }
 
+function admissionError(error) {
+  if (isMissingRpcError(error)) {
+    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v6) in Supabase, then try again.');
+  }
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
+  if (/ADMISSION_LINK_INVALID/.test(text)) {
+    return new Error('This admission link is not valid. Ask the studio for its current admission link.');
+  }
+  if (/ADMISSION_ACCOUNT_UNCONFIRMED/.test(text)) {
+    return new Error('Confirm your account email first, then return to the admission form.');
+  }
+  if (/ADMISSION_ACCOUNT_UNAVAILABLE/.test(text)) {
+    return new Error('This sign-in account is unavailable for admission. Contact the studio for help.');
+  }
+  if (/ADMISSION_ACCOUNT_ALREADY_LINKED/.test(text)) {
+    return new Error('This account already has an ERP role. Use the account already linked by the studio, or ask the studio to review the existing access.');
+  }
+  if (/ADMISSION_ALREADY_CONFIRMED/.test(text)) {
+    return new Error('This admission has already been confirmed. Press Retry or sign in again to open the Student portal.');
+  }
+  if (/ADMISSION_EMAIL_MISMATCH/.test(text)) {
+    return new Error('The admission email must match the email used to sign in. Sign in with the same account that submitted the admission.');
+  }
+  if (/ADMISSION_DUPLICATE_PENDING/.test(text)) {
+    return new Error('A pending admission already exists for this email. Ask the studio to review it.');
+  }
+  if (/ADMISSION_POSSIBLE_DUPLICATE/.test(text)) {
+    return new Error('A student record already uses this email. Link that existing student through Portal access or resolve the duplicate before confirming this admission.');
+  }
+  if (/ADMISSION_NOT_PENDING/.test(text)) {
+    return new Error('This admission has already been reviewed. Refresh the admission list.');
+  }
+  if (/STUDENT_BRANCH_ARCHIVED/.test(text)) {
+    return new Error('The selected branch is archived. Restore it or choose an active branch.');
+  }
+  if (/FORBIDDEN/.test(text)) {
+    return new Error('Your current role or branch assignment does not allow this admission action.');
+  }
+  if (/VALIDATION_FAILED/.test(text)) {
+    return new Error('Check the required admission fields, including date of birth, phone number and 6-digit Pin Code.');
+  }
+  if (isOfflineError(error)) {
+    return new Error('Admissions can be submitted or reviewed only while online. Reconnect and try again.');
+  }
+  return error instanceof Error ? error : new Error(error?.message || 'The admission could not be processed.');
+}
+
 const emptySyncSummary = (mode, overrides = {}) => ({
   enabled: mode === 'supabase',
   mode,
@@ -190,6 +237,21 @@ export function createErpClient(mode, options = {}) {
       },
       async revokeStudentAccess() {
         throw new Error('Student sign-in access is available only in Supabase mode.');
+      },
+      async getMyAdmission() {
+        throw new Error('Public admissions are available only in Supabase mode.');
+      },
+      async submitAdmission() {
+        throw new Error('Public admissions are available only in Supabase mode.');
+      },
+      async getAdmissionLinkInfo() {
+        throw new Error('Public admissions are available only in Supabase mode.');
+      },
+      async listAdmissions() {
+        throw new Error('Public admissions are available only in Supabase mode.');
+      },
+      async reviewAdmission() {
+        throw new Error('Public admissions are available only in Supabase mode.');
       },
       async listRoleAccess() {
         throw new Error('Role account access is available only in Supabase mode.');
@@ -765,13 +827,23 @@ export function createErpClient(mode, options = {}) {
     }),
 
     saveStudent: payload => queue((state, snapshot) => {
-      if (!payload?.fullName?.trim() || !payload?.branchId) throw new Error('Student name and branch are required.');
+      const suppliedFullName = String(payload?.fullName || '').trim();
+      const firstName = String(payload?.firstName || '').trim()
+        || (suppliedFullName ? suppliedFullName.split(/\s+/)[0] : '');
+      const lastName = String(payload?.lastName || '').trim()
+        || (payload?.firstName ? '' : suppliedFullName.split(/\s+/).slice(1).join(' '));
+      const fullName = [firstName, lastName].filter(Boolean).join(' ') || suppliedFullName;
+      if (!fullName || !payload?.branchId) throw new Error('Student name and branch are required.');
       return enqueueUpsert(state, 'students', proposed(snapshot, 'students', payload, {
-        branchId: payload.branchId, fullName: payload.fullName.trim(),
+        branchId: payload.branchId, firstName, lastName, fullName,
         phone: payload.phone || '', email: payload.email || '', gender: payload.gender || '',
         dob: payload.dob || '', joiningDate: payload.joiningDate || toISODate(),
         status: payload.status || existing(snapshot, 'students', payload)?.status || 'active',
-        notes: payload.notes || '',
+        notes: payload.notes || '', address: payload.address || '',
+        pinCode: payload.pinCode || '', admissionSubject: payload.admissionSubject || '',
+        referredBy: payload.referredBy || '', yogaExperience: payload.yogaExperience || '',
+        medicalPhysicalIssue: payload.medicalPhysicalIssue || '',
+        reasonToJoin: payload.reasonToJoin || '',
       }));
     }),
 
@@ -816,6 +888,104 @@ export function createErpClient(mode, options = {}) {
         );
       } catch (error) {
         throw studentAccessError(error);
+      }
+    },
+
+    async getMyAdmission(code) {
+      const cleanCode = String(code || '').trim().toLowerCase();
+      if (!cleanCode) throw admissionError(new Error('ADMISSION_LINK_INVALID'));
+      try {
+        if (!browserOnline()) {
+          const error = new Error('Offline');
+          error.code = 'OFFLINE';
+          throw error;
+        }
+        const result = await rpc('erp_get_my_admission', {p_code: cleanCode});
+        return {
+          target: result?.target || {},
+          applicantEmail: result?.applicantEmail || '',
+          admission: result?.admission || null,
+        };
+      } catch (error) {
+        throw admissionError(error);
+      }
+    },
+
+    async submitAdmission({code, ...values} = {}) {
+      const cleanCode = String(code || '').trim().toLowerCase();
+      if (!cleanCode) throw admissionError(new Error('ADMISSION_LINK_INVALID'));
+      const payload = {
+        firstName: String(values.firstName || '').trim(),
+        lastName: String(values.lastName || '').trim(),
+        dob: String(values.dob || '').trim(),
+        phone: String(values.phone || '').trim(),
+        subject: String(values.subject || '').trim(),
+        email: String(values.email || '').trim().toLowerCase(),
+        address: String(values.address || '').trim(),
+        pinCode: String(values.pinCode || '').trim(),
+        referredBy: String(values.referredBy || '').trim(),
+        yogaExperience: String(values.yogaExperience || '').trim(),
+        medicalPhysicalIssue: String(values.medicalPhysicalIssue || '').trim(),
+        reasonToJoin: String(values.reasonToJoin || '').trim(),
+      };
+      try {
+        if (!browserOnline()) {
+          const error = new Error('Offline');
+          error.code = 'OFFLINE';
+          throw error;
+        }
+        return await rpc('erp_submit_admission', {p_code: cleanCode, p_payload: payload});
+      } catch (error) {
+        throw admissionError(error);
+      }
+    },
+
+    async getAdmissionLinkInfo() {
+      try {
+        if (!browserOnline()) {
+          const error = new Error('Offline');
+          error.code = 'OFFLINE';
+          throw error;
+        }
+        return await rpc('erp_get_admission_link_info');
+      } catch (error) {
+        throw admissionError(error);
+      }
+    },
+
+    async listAdmissions(status = 'pending') {
+      try {
+        if (!browserOnline()) {
+          const error = new Error('Offline');
+          error.code = 'OFFLINE';
+          throw error;
+        }
+        const result = await rpc('erp_list_admissions', {p_status: status});
+        return Array.isArray(result?.admissions) ? result.admissions : [];
+      } catch (error) {
+        throw admissionError(error);
+      }
+    },
+
+    async reviewAdmission({admissionId, action, branchId = '', joiningDate = '', reviewNote = ''} = {}) {
+      if (!admissionId || !['confirm', 'reject'].includes(action)) {
+        throw admissionError(new Error('VALIDATION_FAILED: admission review'));
+      }
+      try {
+        if (!browserOnline()) {
+          const error = new Error('Offline');
+          error.code = 'OFFLINE';
+          throw error;
+        }
+        return await rpc('erp_review_admission', {
+          p_admission_id: admissionId,
+          p_action: action,
+          p_branch_id: branchId || null,
+          p_joining_date: joiningDate || toISODate(),
+          p_review_note: String(reviewNote || '').trim(),
+        });
+      } catch (error) {
+        throw admissionError(error);
       }
     },
 

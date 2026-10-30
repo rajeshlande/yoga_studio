@@ -125,7 +125,8 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await page.getByRole('button', {name: 'Students', exact: true}).click();
   await page.getByRole('button', {name: 'Add student'}).click();
   expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
-  await page.getByLabel('Full name').fill('Asha Patil');
+  await page.getByLabel('First Name').fill('Asha');
+  await page.getByLabel('Last Name').fill('Patil');
   await page.getByRole('dialog').getByLabel('Student branch').selectOption({label: 'Panvel'});
   await page.getByRole('button', {name: 'Save student'}).click();
   await expect(page.getByRole('cell', {name: /Asha Patil/})).toBeVisible();

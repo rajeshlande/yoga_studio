@@ -1,8 +1,9 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 5.
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 6.
 -- Matches app version 1.6.0 (safer autosync, GST/UPI invoicing,
 -- Owner/Co-owner payment configuration/readiness checks, Student portal
--- access and Odoo-style fixed Role Access management for all five roles).
+-- access, Odoo-style fixed Role Access management for all five roles, and
+-- account-first public Student admissions with manager confirmation).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -21,6 +22,11 @@
 --      Owner/Co-owner use Access for branch Admins. Owner/Co-owner or a
 --      branch Admin use Access for Instructors and Students -> Portal
 --      access for Students, entering the exact registered sign-in email.
+--      For a new Student, a manager may instead share Students ->
+--      Admission requests -> Public admission link. The applicant signs
+--      up/signs in with Join an existing studio, submits the Admission
+--      form, and a manager confirms it; confirmation creates the Student
+--      and grants that same account Student portal access atomically.
 --
 -- SECURITY MODEL
 --   * Tables have Row Level Security enabled with NO direct-access policies
@@ -273,6 +279,81 @@ create table if not exists public.erp_sync_operations (
   primary key (org_id, op_id)
 );
 
+-- ----------------------------------------------------------------------------
+-- Public Student admissions (SQL v6). An organization-specific admission
+-- code is only a target selector in the shareable account-first link; it is
+-- never authorization. The applicant must be signed in with a confirmed
+-- account before erp_submit_admission can write a pending request.
+-- ----------------------------------------------------------------------------
+alter table public.erp_organizations
+  add column if not exists admission_code text;
+update public.erp_organizations
+   set admission_code = encode(gen_random_bytes(12), 'hex')
+ where admission_code is null or btrim(admission_code) = '';
+alter table public.erp_organizations
+  alter column admission_code set default encode(gen_random_bytes(12), 'hex');
+alter table public.erp_organizations
+  alter column admission_code set not null;
+create unique index if not exists erp_organizations_admission_code_idx
+  on public.erp_organizations(admission_code);
+
+alter table public.erp_students add column if not exists first_name text not null default '';
+alter table public.erp_students add column if not exists last_name text not null default '';
+alter table public.erp_students add column if not exists address text not null default '';
+alter table public.erp_students add column if not exists pin_code text not null default '';
+alter table public.erp_students add column if not exists admission_subject text not null default '';
+alter table public.erp_students add column if not exists referred_by text not null default '';
+alter table public.erp_students add column if not exists yoga_experience text not null default '';
+alter table public.erp_students add column if not exists medical_physical_issue text not null default '';
+alter table public.erp_students add column if not exists reason_to_join text not null default '';
+update public.erp_students
+   set first_name = split_part(btrim(full_name), ' ', 1),
+       last_name = btrim(regexp_replace(btrim(full_name), '^[^ ]+\s*', ''))
+ where (first_name = '' and last_name = '') and btrim(full_name) <> '';
+alter table public.erp_students
+  drop constraint if exists erp_students_yoga_experience_check;
+alter table public.erp_students
+  add constraint erp_students_yoga_experience_check
+  check (yoga_experience in ('', 'experienced', 'no_experience', 'less_experienced'));
+
+create table if not exists public.erp_admissions (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references public.erp_organizations(id) on delete cascade,
+  applicant_user_id uuid not null references auth.users(id) on delete cascade,
+  first_name text not null,
+  last_name text not null,
+  dob date not null,
+  phone text not null,
+  subject text not null,
+  email text not null,
+  address text not null,
+  pin_code text not null,
+  referred_by text not null default '',
+  yoga_experience text not null
+    check (yoga_experience in ('experienced', 'no_experience', 'less_experienced')),
+  medical_physical_issue text not null,
+  reason_to_join text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'confirmed', 'rejected')),
+  branch_id uuid references public.erp_branches(id),
+  student_id uuid references public.erp_students(id),
+  submitted_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  reviewed_by uuid references auth.users(id),
+  reviewed_at timestamptz,
+  review_note text not null default ''
+);
+create index if not exists erp_admissions_org_status_idx
+  on public.erp_admissions(org_id, status, submitted_at desc);
+create index if not exists erp_admissions_applicant_idx
+  on public.erp_admissions(applicant_user_id, submitted_at desc);
+create unique index if not exists erp_admissions_pending_user_idx
+  on public.erp_admissions(org_id, applicant_user_id) where status = 'pending';
+create unique index if not exists erp_admissions_pending_email_idx
+  on public.erp_admissions(org_id, lower(email)) where status = 'pending';
+create unique index if not exists erp_admissions_student_idx
+  on public.erp_admissions(student_id) where student_id is not null;
+
 create index if not exists erp_branches_org_idx on public.erp_branches(org_id);
 create index if not exists erp_students_org_branch_idx on public.erp_students(org_id, branch_id);
 create index if not exists erp_batches_org_branch_idx on public.erp_batches(org_id, branch_id);
@@ -416,7 +497,7 @@ begin
     'erp_organizations','erp_org_members','erp_branches','erp_students',
     'erp_instructors','erp_branch_members','erp_batches','erp_enrollments',
     'erp_attendance','erp_plans','erp_memberships','erp_payments','erp_billing_settings',
-    'erp_counters','erp_audit_log','erp_sync_operations']
+    'erp_counters','erp_audit_log','erp_sync_operations','erp_admissions']
   loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on table public.%I from anon, authenticated', t);
@@ -702,9 +783,20 @@ begin
         'status', status, 'createdAt', created_at, 'updatedAt', updated_at, 'syncVersion', sync_version) order by created_at), '[]')
       from public.erp_branches where org_id = v_org and id = any(v_branches)),
     'students', (select coalesce(jsonb_agg(jsonb_build_object(
-        'id', s.id, 'branchId', s.branch_id, 'fullName', s.full_name, 'phone', s.phone,
+        'id', s.id, 'branchId', s.branch_id, 'firstName', s.first_name,
+        'lastName', s.last_name, 'fullName', s.full_name, 'phone', s.phone,
         'email', s.email, 'gender', s.gender, 'dob', coalesce(s.dob::text, ''),
         'joiningDate', s.joining_date::text, 'status', s.status, 'notes', s.notes,
+        'address', s.address, 'pinCode', s.pin_code,
+        'admissionSubject', s.admission_subject, 'referredBy', s.referred_by,
+        'yogaExperience', s.yoga_experience,
+        -- Medical / physical details are manager-and-self-only. Instructors
+        -- receive the roster fields they need, never this free-text field.
+        'medicalPhysicalIssue', case
+          when v_org_mgr or s.branch_id = any(v_admin_branches)
+            or (v_student is not null and s.id = v_student)
+            then s.medical_physical_issue else '' end,
+        'reasonToJoin', s.reason_to_join,
         -- Portal fields are manager-only metadata, never part of the student
         -- record's offline-sync payload. Other roles receive "hidden".
         'portalAccessStatus', case
@@ -881,13 +973,25 @@ end $$;
 
 create or replace function public.erp_save_student(p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_org uuid; v_id uuid; v_branch uuid; v_current_branch uuid;
+declare
+  v_org uuid; v_id uuid; v_branch uuid; v_current_branch uuid;
+  v_first_name text := btrim(coalesce(p_payload->>'firstName', ''));
+  v_last_name text := btrim(coalesce(p_payload->>'lastName', ''));
+  v_full_name text := btrim(coalesce(nullif(btrim(concat_ws(' ', nullif(btrim(coalesce(p_payload->>'firstName', '')), ''), nullif(btrim(coalesce(p_payload->>'lastName', '')), ''))), ''), p_payload->>'fullName', ''));
+  v_experience text := coalesce(nullif(p_payload->>'yogaExperience', ''), '');
 begin
   v_org := public.erp__require_manager();
   v_id := nullif(p_payload->>'id', '')::uuid;
   v_branch := nullif(p_payload->>'branchId', '')::uuid;
-  if nullif(trim(p_payload->>'fullName'), '') is null or v_branch is null then
+  if v_first_name = '' and v_full_name <> '' then
+    v_first_name := split_part(v_full_name, ' ', 1);
+    v_last_name := btrim(regexp_replace(v_full_name, '^[^ ]+\s*', ''));
+  end if;
+  if v_full_name = '' or v_branch is null then
     raise exception 'VALIDATION_FAILED: fullName/branchId';
+  end if;
+  if v_experience not in ('', 'experienced', 'no_experience', 'less_experienced') then
+    raise exception 'VALIDATION_FAILED: yogaExperience';
   end if;
   perform public.erp__require_branch_manager(v_org, v_branch);
   if v_id is not null then
@@ -897,19 +1001,32 @@ begin
     perform public.erp__require_branch_manager(v_org, v_current_branch);
   end if;
   if v_id is null then
-    insert into public.erp_students(org_id, branch_id, full_name, phone, email, gender, dob, joining_date, notes)
-    values (v_org, v_branch, trim(p_payload->>'fullName'), coalesce(p_payload->>'phone', ''),
-            coalesce(p_payload->>'email', ''), coalesce(p_payload->>'gender', ''),
-            nullif(p_payload->>'dob', '')::date,
+    insert into public.erp_students(
+      org_id, branch_id, first_name, last_name, full_name, phone, email,
+      gender, dob, joining_date, notes, address, pin_code, admission_subject,
+      referred_by, yoga_experience, medical_physical_issue, reason_to_join)
+    values (v_org, v_branch, v_first_name, v_last_name, v_full_name,
+            coalesce(p_payload->>'phone', ''), coalesce(p_payload->>'email', ''),
+            coalesce(p_payload->>'gender', ''), nullif(p_payload->>'dob', '')::date,
             coalesce(nullif(p_payload->>'joiningDate', '')::date, current_date),
-            coalesce(p_payload->>'notes', ''))
+            coalesce(p_payload->>'notes', ''), coalesce(p_payload->>'address', ''),
+            coalesce(p_payload->>'pinCode', ''), coalesce(p_payload->>'admissionSubject', ''),
+            coalesce(p_payload->>'referredBy', ''), v_experience,
+            coalesce(p_payload->>'medicalPhysicalIssue', ''),
+            coalesce(p_payload->>'reasonToJoin', ''))
     returning id into v_id;
   else
-    update public.erp_students set branch_id = v_branch, full_name = trim(p_payload->>'fullName'),
+    update public.erp_students set branch_id = v_branch,
+      first_name = v_first_name, last_name = v_last_name, full_name = v_full_name,
       phone = coalesce(p_payload->>'phone', ''), email = coalesce(p_payload->>'email', ''),
       gender = coalesce(p_payload->>'gender', ''), dob = nullif(p_payload->>'dob', '')::date,
       joining_date = coalesce(nullif(p_payload->>'joiningDate', '')::date, joining_date),
-      notes = coalesce(p_payload->>'notes', '')
+      notes = coalesce(p_payload->>'notes', ''), address = coalesce(p_payload->>'address', ''),
+      pin_code = coalesce(p_payload->>'pinCode', ''),
+      admission_subject = coalesce(p_payload->>'admissionSubject', ''),
+      referred_by = coalesce(p_payload->>'referredBy', ''), yoga_experience = v_experience,
+      medical_physical_issue = coalesce(p_payload->>'medicalPhysicalIssue', ''),
+      reason_to_join = coalesce(p_payload->>'reasonToJoin', '')
      where id = v_id and org_id = v_org;
     if not found then raise exception 'FORBIDDEN'; end if;
   end if;
@@ -1128,6 +1245,371 @@ begin
 end $$;
 
 -- ----------------------------------------------------------------------------
+-- Public Student admissions (SQL v6)
+--
+-- The shareable link contains only the organization admission code. The
+-- applicant first creates/confirms a normal account with "Join an existing
+-- studio" and signs in; these RPCs derive identity from auth.uid(), use the
+-- account email as the future portal sign-in, and never accept anonymous
+-- business-data writes. A manager selects the branch/joining date during
+-- review. Confirmation inserts the Student and calls the existing audited,
+-- server-checked Student portal grant in the same transaction.
+-- ----------------------------------------------------------------------------
+create or replace function public.erp__admission_json(p_admission public.erp_admissions)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'id', p_admission.id,
+    'organizationId', p_admission.org_id,
+    'applicantUserId', p_admission.applicant_user_id,
+    'firstName', p_admission.first_name,
+    'lastName', p_admission.last_name,
+    'fullName', btrim(concat_ws(' ', p_admission.first_name, p_admission.last_name)),
+    'dob', p_admission.dob::text,
+    'phone', p_admission.phone,
+    'subject', p_admission.subject,
+    'email', p_admission.email,
+    'address', p_admission.address,
+    'pinCode', p_admission.pin_code,
+    'referredBy', p_admission.referred_by,
+    'yogaExperience', p_admission.yoga_experience,
+    'medicalPhysicalIssue', p_admission.medical_physical_issue,
+    'reasonToJoin', p_admission.reason_to_join,
+    'status', p_admission.status,
+    'branchId', p_admission.branch_id,
+    'studentId', p_admission.student_id,
+    'submittedAt', p_admission.submitted_at,
+    'updatedAt', p_admission.updated_at,
+    'reviewedBy', p_admission.reviewed_by,
+    'reviewedAt', p_admission.reviewed_at,
+    'reviewNote', p_admission.review_note)
+$$;
+
+create or replace function public.erp__admission_org(p_code text)
+returns uuid language sql stable security definer set search_path = public as $$
+  select id from public.erp_organizations
+   where admission_code = lower(btrim(coalesce(p_code, '')))
+   limit 1
+$$;
+
+create or replace function public.erp_get_my_admission(p_code text)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_actor uuid := auth.uid();
+  v_org uuid;
+  v_org_name text := '';
+  v_email text := '';
+  v_admission public.erp_admissions%rowtype;
+begin
+  if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
+  v_org := public.erp__admission_org(p_code);
+  if v_org is null then raise exception 'ADMISSION_LINK_INVALID'; end if;
+  select name into v_org_name from public.erp_organizations where id = v_org;
+  select coalesce(lower(email::text), '') into v_email
+    from auth.users where id = v_actor;
+  select * into v_admission
+    from public.erp_admissions
+   where org_id = v_org and applicant_user_id = v_actor
+   order by case status when 'pending' then 0 when 'confirmed' then 1 else 2 end,
+            submitted_at desc
+   limit 1;
+  return jsonb_build_object(
+    'target', jsonb_build_object(
+      'organizationId', v_org,
+      'organizationName', coalesce(v_org_name, ''),
+      'admissionCode', lower(btrim(coalesce(p_code, '')))),
+    'applicantEmail', coalesce(v_email, ''),
+    'admission', case when v_admission.id is null then null
+                      else public.erp__admission_json(v_admission) end);
+end $$;
+
+create or replace function public.erp_submit_admission(p_code text, p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_actor uuid := auth.uid();
+  v_org uuid;
+  v_auth_email text := '';
+  v_confirmed_at timestamptz;
+  v_banned_until timestamptz;
+  v_deleted_at timestamptz;
+  v_first_name text := btrim(coalesce(p_payload->>'firstName', ''));
+  v_last_name text := btrim(coalesce(p_payload->>'lastName', ''));
+  v_dob_text text := btrim(coalesce(p_payload->>'dob', ''));
+  v_dob date;
+  v_phone text := btrim(coalesce(p_payload->>'phone', ''));
+  v_subject text := btrim(coalesce(p_payload->>'subject', ''));
+  v_email text := lower(btrim(coalesce(p_payload->>'email', '')));
+  v_address text := btrim(coalesce(p_payload->>'address', ''));
+  v_pin_code text := btrim(coalesce(p_payload->>'pinCode', ''));
+  v_referred_by text := btrim(coalesce(p_payload->>'referredBy', ''));
+  v_experience text := btrim(coalesce(p_payload->>'yogaExperience', ''));
+  v_medical text := btrim(coalesce(p_payload->>'medicalPhysicalIssue', ''));
+  v_reason text := btrim(coalesce(p_payload->>'reasonToJoin', ''));
+  v_existing public.erp_admissions%rowtype;
+  v_saved public.erp_admissions%rowtype;
+  v_action text := 'submit_admission';
+begin
+  if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
+  if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
+    raise exception 'VALIDATION_FAILED: admission';
+  end if;
+  v_org := public.erp__admission_org(p_code);
+  if v_org is null then raise exception 'ADMISSION_LINK_INVALID'; end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('erp-admissions:' || v_org::text, 0));
+
+  select lower(email::text), coalesce(email_confirmed_at, confirmed_at),
+         banned_until, deleted_at
+    into v_auth_email, v_confirmed_at, v_banned_until, v_deleted_at
+    from auth.users where id = v_actor;
+  if v_auth_email is null or v_deleted_at is not null
+     or (v_banned_until is not null and v_banned_until > now()) then
+    raise exception 'ADMISSION_ACCOUNT_UNAVAILABLE';
+  end if;
+  if v_confirmed_at is null then raise exception 'ADMISSION_ACCOUNT_UNCONFIRMED'; end if;
+  if exists (select 1 from public.erp_org_members
+              where user_id = v_actor and status = 'active')
+     or exists (select 1 from public.erp_branch_members
+                 where user_id = v_actor and status = 'active') then
+    raise exception 'ADMISSION_ACCOUNT_ALREADY_LINKED';
+  end if;
+
+  if length(v_first_name) not between 1 and 80 then raise exception 'VALIDATION_FAILED: firstName'; end if;
+  if length(v_last_name) not between 1 and 80 then raise exception 'VALIDATION_FAILED: lastName'; end if;
+  if v_dob_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then raise exception 'VALIDATION_FAILED: dob'; end if;
+  v_dob := v_dob_text::date;
+  if v_dob < date '1900-01-01' or v_dob > current_date then raise exception 'VALIDATION_FAILED: dob'; end if;
+  if length(v_phone) not between 7 and 25 or v_phone !~ '^[+0-9][0-9 ()-]{6,24}$' then
+    raise exception 'VALIDATION_FAILED: phone';
+  end if;
+  if length(v_subject) not between 1 and 160 then raise exception 'VALIDATION_FAILED: subject'; end if;
+  if v_email <> lower(v_auth_email) then raise exception 'ADMISSION_EMAIL_MISMATCH'; end if;
+  if length(v_address) not between 1 and 500 then raise exception 'VALIDATION_FAILED: address'; end if;
+  if v_pin_code !~ '^[0-9]{6}$' then raise exception 'VALIDATION_FAILED: pinCode'; end if;
+  if length(v_referred_by) > 120 then raise exception 'VALIDATION_FAILED: referredBy'; end if;
+  if v_experience not in ('experienced', 'no_experience', 'less_experienced') then
+    raise exception 'VALIDATION_FAILED: yogaExperience';
+  end if;
+  if length(v_medical) not between 1 and 2000 then
+    raise exception 'VALIDATION_FAILED: medicalPhysicalIssue';
+  end if;
+  if length(v_reason) not between 1 and 2000 then raise exception 'VALIDATION_FAILED: reasonToJoin'; end if;
+
+  if exists (select 1 from public.erp_admissions
+              where org_id = v_org and lower(email) = v_email
+                and applicant_user_id <> v_actor and status = 'pending') then
+    raise exception 'ADMISSION_DUPLICATE_PENDING';
+  end if;
+
+  select * into v_existing
+    from public.erp_admissions
+   where org_id = v_org and applicant_user_id = v_actor
+   order by case status when 'pending' then 0 when 'confirmed' then 1 else 2 end,
+            submitted_at desc
+   limit 1
+   for update;
+  if v_existing.status = 'confirmed' then raise exception 'ADMISSION_ALREADY_CONFIRMED'; end if;
+
+  if v_existing.id is not null then
+    v_action := case when v_existing.status = 'rejected'
+                     then 'resubmit_admission' else 'update_admission' end;
+    update public.erp_admissions set
+      first_name = v_first_name, last_name = v_last_name, dob = v_dob,
+      phone = v_phone, subject = v_subject, email = v_email, address = v_address,
+      pin_code = v_pin_code, referred_by = v_referred_by,
+      yoga_experience = v_experience, medical_physical_issue = v_medical,
+      reason_to_join = v_reason, status = 'pending', branch_id = null,
+      student_id = null, submitted_at = case when status = 'rejected' then now() else submitted_at end,
+      updated_at = now(), reviewed_by = null, reviewed_at = null, review_note = ''
+     where id = v_existing.id
+     returning * into v_saved;
+  else
+    insert into public.erp_admissions(
+      org_id, applicant_user_id, first_name, last_name, dob, phone, subject,
+      email, address, pin_code, referred_by, yoga_experience,
+      medical_physical_issue, reason_to_join)
+    values (v_org, v_actor, v_first_name, v_last_name, v_dob, v_phone,
+            v_subject, v_email, v_address, v_pin_code, v_referred_by,
+            v_experience, v_medical, v_reason)
+    returning * into v_saved;
+  end if;
+
+  insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
+  values (v_org, v_actor, v_action, 'admission', v_saved.id,
+          jsonb_build_object('email', v_email, 'status', 'pending'));
+  return public.erp__admission_json(v_saved);
+end $$;
+
+create or replace function public.erp_get_admission_link_info()
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_org uuid := public.erp__require_manager();
+  v_name text := '';
+  v_code text := '';
+begin
+  select name, admission_code into v_name, v_code
+    from public.erp_organizations where id = v_org;
+  return jsonb_build_object(
+    'organizationId', v_org,
+    'organizationName', coalesce(v_name, ''),
+    'admissionCode', coalesce(v_code, ''));
+end $$;
+
+create or replace function public.erp_list_admissions(p_status text default 'pending')
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_org uuid := public.erp__require_manager();
+  v_status text := lower(btrim(coalesce(nullif(p_status, ''), 'pending')));
+  v_items jsonb := '[]'::jsonb;
+begin
+  if v_status not in ('pending', 'confirmed', 'rejected', 'all') then
+    raise exception 'VALIDATION_FAILED: admission status';
+  end if;
+  select coalesce(jsonb_agg(item order by submitted_sort desc), '[]'::jsonb)
+    into v_items
+    from (
+      select public.erp__admission_json(a) || jsonb_build_object(
+               'possibleDuplicateStudentId', dup.student_id,
+               'possibleDuplicateStudentName', coalesce(dup.student_name, '')) as item,
+             a.submitted_at as submitted_sort
+        from public.erp_admissions a
+        left join lateral (
+          select s.id as student_id, s.full_name as student_name
+            from public.erp_students s
+           where s.org_id = v_org and s.email <> ''
+             and lower(s.email) = lower(a.email)
+             and (a.student_id is null or s.id <> a.student_id)
+           order by case s.status when 'active' then 0 else 1 end, s.created_at
+           limit 1
+        ) dup on true
+       where a.org_id = v_org
+         and (v_status = 'all' or a.status = v_status)
+       order by a.submitted_at desc
+       limit 100
+    ) bounded;
+  return jsonb_build_object('admissions', v_items);
+end $$;
+
+create or replace function public.erp_review_admission(
+  p_admission_id uuid,
+  p_action text,
+  p_branch_id uuid default null,
+  p_joining_date date default current_date,
+  p_review_note text default ''
+)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_actor uuid := auth.uid();
+  v_org uuid;
+  v_action text := lower(btrim(coalesce(p_action, '')));
+  v_note text := btrim(coalesce(p_review_note, ''));
+  v_admission public.erp_admissions%rowtype;
+  v_student_id uuid;
+  v_branch_status text;
+  v_auth_email text := '';
+  v_confirmed_at timestamptz;
+  v_banned_until timestamptz;
+  v_deleted_at timestamptz;
+  v_grant jsonb;
+begin
+  if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
+  if p_admission_id is null or v_action not in ('confirm', 'reject') or length(v_note) > 500 then
+    raise exception 'VALIDATION_FAILED: admission review';
+  end if;
+  v_org := public.erp__require_manager();
+
+  perform pg_advisory_xact_lock(hashtextextended('erp-role-access:' || v_org::text, 0));
+  perform pg_advisory_xact_lock(hashtextextended('erp-admissions:' || v_org::text, 0));
+  select * into v_admission
+    from public.erp_admissions
+   where id = p_admission_id and org_id = v_org
+   for update;
+  if v_admission.id is null then raise exception 'FORBIDDEN'; end if;
+  if v_admission.status <> 'pending' then raise exception 'ADMISSION_NOT_PENDING'; end if;
+
+  if v_action = 'reject' then
+    update public.erp_admissions set
+      status = 'rejected', reviewed_by = v_actor, reviewed_at = now(),
+      review_note = v_note, updated_at = now()
+     where id = v_admission.id;
+    insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
+    values (v_org, v_actor, 'reject_admission', 'admission', v_admission.id,
+            jsonb_build_object('email', v_admission.email, 'reviewNote', v_note));
+    return jsonb_build_object(
+      'admissionId', v_admission.id, 'status', 'rejected', 'studentId', null,
+      'email', v_admission.email, 'portalAccessStatus', 'none');
+  end if;
+
+  if p_branch_id is null then raise exception 'VALIDATION_FAILED: admission branch'; end if;
+  perform public.erp__require_branch_manager(v_org, p_branch_id);
+  select status into v_branch_status
+    from public.erp_branches where id = p_branch_id and org_id = v_org;
+  if v_branch_status is null then raise exception 'FORBIDDEN'; end if;
+  if v_branch_status <> 'active' then raise exception 'STUDENT_BRANCH_ARCHIVED'; end if;
+  if coalesce(p_joining_date, current_date) < date '1900-01-01' then
+    raise exception 'VALIDATION_FAILED: joiningDate';
+  end if;
+
+  select lower(email::text), coalesce(email_confirmed_at, confirmed_at),
+         banned_until, deleted_at
+    into v_auth_email, v_confirmed_at, v_banned_until, v_deleted_at
+    from auth.users where id = v_admission.applicant_user_id;
+  if v_auth_email is null or v_deleted_at is not null
+     or (v_banned_until is not null and v_banned_until > now()) then
+    raise exception 'ADMISSION_ACCOUNT_UNAVAILABLE';
+  end if;
+  if v_confirmed_at is null then raise exception 'ADMISSION_ACCOUNT_UNCONFIRMED'; end if;
+  if lower(v_auth_email) <> lower(v_admission.email) then
+    raise exception 'ADMISSION_EMAIL_MISMATCH';
+  end if;
+  if exists (select 1 from public.erp_org_members
+              where user_id = v_admission.applicant_user_id and status = 'active')
+     or exists (select 1 from public.erp_branch_members
+                 where user_id = v_admission.applicant_user_id and status = 'active') then
+    raise exception 'ADMISSION_ACCOUNT_ALREADY_LINKED';
+  end if;
+  if exists (select 1 from public.erp_students
+              where org_id = v_org and email <> ''
+                and lower(email) = lower(v_admission.email)) then
+    raise exception 'ADMISSION_POSSIBLE_DUPLICATE';
+  end if;
+
+  insert into public.erp_students(
+    org_id, branch_id, first_name, last_name, full_name, phone, email,
+    gender, dob, joining_date, status, notes, address, pin_code,
+    admission_subject, referred_by, yoga_experience,
+    medical_physical_issue, reason_to_join)
+  values (
+    v_org, p_branch_id, v_admission.first_name, v_admission.last_name,
+    btrim(concat_ws(' ', v_admission.first_name, v_admission.last_name)),
+    v_admission.phone, v_admission.email, '', v_admission.dob,
+    coalesce(p_joining_date, current_date), 'active', '', v_admission.address,
+    v_admission.pin_code, v_admission.subject, v_admission.referred_by,
+    v_admission.yoga_experience, v_admission.medical_physical_issue,
+    v_admission.reason_to_join)
+  returning id into v_student_id;
+
+  v_grant := public.erp_grant_student_access(v_student_id, v_admission.email);
+  if nullif(v_grant->>'studentUserId', '')::uuid is distinct from v_admission.applicant_user_id then
+    raise exception 'ADMISSION_EMAIL_MISMATCH';
+  end if;
+
+  update public.erp_admissions set
+    status = 'confirmed', branch_id = p_branch_id, student_id = v_student_id,
+    reviewed_by = v_actor, reviewed_at = now(), review_note = v_note,
+    updated_at = now()
+   where id = v_admission.id;
+
+  insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
+  values (v_org, v_actor, 'confirm_admission', 'admission', v_admission.id,
+          jsonb_build_object('studentId', v_student_id, 'branchId', p_branch_id,
+                             'email', v_admission.email,
+                             'portalAccessStatus', 'active'));
+  return jsonb_build_object(
+    'admissionId', v_admission.id, 'status', 'confirmed',
+    'studentId', v_student_id, 'email', v_admission.email,
+    'portalAccessStatus', 'active');
+end $$;
+
 -- Role access management (SQL v5)
 --
 -- Odoo-style fixed security groups, adapted to Yoga Studio's five roles.
@@ -2201,13 +2683,24 @@ declare
   v_branch uuid := nullif(v_payload->>'branchId', '')::uuid;
   v_base integer := coalesce(nullif(p_op->>'baseVersion', '')::integer, 0);
   v_status text := coalesce(nullif(v_payload->>'status', ''), 'active');
+  v_first_name text := btrim(coalesce(v_payload->>'firstName', ''));
+  v_last_name text := btrim(coalesce(v_payload->>'lastName', ''));
+  v_full_name text := btrim(coalesce(nullif(btrim(concat_ws(' ', nullif(btrim(coalesce(v_payload->>'firstName', '')), ''), nullif(btrim(coalesce(v_payload->>'lastName', '')), ''))), ''), v_payload->>'fullName', ''));
+  v_experience text := coalesce(nullif(v_payload->>'yogaExperience', ''), '');
   v_current public.erp_students%rowtype;
   v_version integer;
 begin
-  if v_id is null or v_branch is null or nullif(trim(v_payload->>'fullName'), '') is null then
+  if v_first_name = '' and v_full_name <> '' then
+    v_first_name := split_part(v_full_name, ' ', 1);
+    v_last_name := btrim(regexp_replace(v_full_name, '^[^ ]+\s*', ''));
+  end if;
+  if v_id is null or v_branch is null or v_full_name = '' then
     raise exception 'VALIDATION_FAILED: student id/fullName/branchId';
   end if;
   if v_status not in ('active','inactive') then raise exception 'VALIDATION_FAILED: status'; end if;
+  if v_experience not in ('', 'experienced', 'no_experience', 'less_experienced') then
+    raise exception 'VALIDATION_FAILED: yogaExperience';
+  end if;
   perform public.erp__require_branch_manager(p_org, v_branch);
   select * into v_current from public.erp_students where id = v_id for update;
   if v_current.id is not null then
@@ -2219,22 +2712,36 @@ begin
       return public.erp__sync_result(p_op, 'conflict', v_id, v_current.sync_version, 'VERSION_CONFLICT', 'This student changed in Supabase after it was copied to this device.');
     end if;
     update public.erp_students set
-      branch_id = v_branch, full_name = trim(v_payload->>'fullName'),
+      branch_id = v_branch, first_name = v_first_name, last_name = v_last_name,
+      full_name = v_full_name,
       phone = coalesce(v_payload->>'phone', ''), email = coalesce(v_payload->>'email', ''),
       gender = coalesce(v_payload->>'gender', ''), dob = nullif(v_payload->>'dob', '')::date,
       joining_date = coalesce(nullif(v_payload->>'joiningDate', '')::date, joining_date),
-      status = v_status, notes = coalesce(v_payload->>'notes', '')
+      status = v_status, notes = coalesce(v_payload->>'notes', ''),
+      address = coalesce(v_payload->>'address', ''), pin_code = coalesce(v_payload->>'pinCode', ''),
+      admission_subject = coalesce(v_payload->>'admissionSubject', ''),
+      referred_by = coalesce(v_payload->>'referredBy', ''), yoga_experience = v_experience,
+      medical_physical_issue = coalesce(v_payload->>'medicalPhysicalIssue', ''),
+      reason_to_join = coalesce(v_payload->>'reasonToJoin', '')
      where id = v_id returning sync_version into v_version;
   else
     if v_base > 0 then
       return public.erp__sync_result(p_op, 'conflict', null, null, 'RECORD_MISSING', 'This student no longer exists in Supabase.');
     end if;
-    insert into public.erp_students(id, org_id, branch_id, full_name, phone, email, gender, dob, joining_date, status, notes)
-    values (v_id, p_org, v_branch, trim(v_payload->>'fullName'), coalesce(v_payload->>'phone', ''),
-            coalesce(v_payload->>'email', ''), coalesce(v_payload->>'gender', ''),
-            nullif(v_payload->>'dob', '')::date,
+    insert into public.erp_students(
+      id, org_id, branch_id, first_name, last_name, full_name, phone, email,
+      gender, dob, joining_date, status, notes, address, pin_code,
+      admission_subject, referred_by, yoga_experience,
+      medical_physical_issue, reason_to_join)
+    values (v_id, p_org, v_branch, v_first_name, v_last_name, v_full_name,
+            coalesce(v_payload->>'phone', ''), coalesce(v_payload->>'email', ''),
+            coalesce(v_payload->>'gender', ''), nullif(v_payload->>'dob', '')::date,
             coalesce(nullif(v_payload->>'joiningDate', '')::date, current_date), v_status,
-            coalesce(v_payload->>'notes', ''))
+            coalesce(v_payload->>'notes', ''), coalesce(v_payload->>'address', ''),
+            coalesce(v_payload->>'pinCode', ''), coalesce(v_payload->>'admissionSubject', ''),
+            coalesce(v_payload->>'referredBy', ''), v_experience,
+            coalesce(v_payload->>'medicalPhysicalIssue', ''),
+            coalesce(v_payload->>'reasonToJoin', ''))
     returning sync_version into v_version;
   end if;
   return public.erp__sync_result(p_op, 'applied', v_id, v_version);
@@ -2983,6 +3490,8 @@ revoke all on function public.erp__require_org_manager() from public, anon, auth
 revoke all on function public.erp__resolve_access_account(text) from public, anon, authenticated;
 revoke all on function public.erp__assert_access_account_available(uuid, uuid, text, uuid) from public, anon, authenticated;
 revoke all on function public.erp__can_manage_instructor_access(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.erp__admission_json(public.erp_admissions) from public, anon, authenticated;
+revoke all on function public.erp__admission_org(text) from public, anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- Function permissions: signed-in users only; never anonymous.
@@ -2997,7 +3506,11 @@ begin
     'erp_bootstrap_organization(text)', 'erp_get_context()', 'erp_get_snapshot()',
     'erp_save_branch(jsonb)', 'erp_archive_branch(uuid)', 'erp_save_student(jsonb)',
     'erp_archive_student(uuid)', 'erp_grant_student_access(uuid, text)',
-    'erp_revoke_student_access(uuid)', 'erp_list_role_access()',
+    'erp_revoke_student_access(uuid)', 'erp_get_my_admission(text)',
+    'erp_submit_admission(text, jsonb)', 'erp_get_admission_link_info()',
+    'erp_list_admissions(text)',
+    'erp_review_admission(uuid, text, uuid, date, text)',
+    'erp_list_role_access()',
     'erp_grant_co_owner_access(text)', 'erp_revoke_co_owner_access(uuid)',
     'erp_grant_admin_access(text, uuid[])', 'erp_revoke_admin_access(uuid)',
     'erp_grant_instructor_access(uuid, text, uuid[])',

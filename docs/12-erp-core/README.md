@@ -16,9 +16,12 @@ signed-in **Student portal access** workflow. Version 1.6.0 generalizes that
 server-checked account-linking model to **fixed Role Access for all five
 roles**: each person creates/confirms a dedicated account first, then an
 authorized manager links the exact sign-in email in **Access** (or
-**Students → Portal access** for a Student). SQL v5 enforces the role,
+**Students → Portal access** for a Student). SQL v6 enforces the role,
 selected-branch and own-record rules on snapshot, direct RPC and offline-sync
-paths; there is no custom permission-group/module editor.
+paths; there is no custom permission-group/module editor. It also adds an
+account-first public Student admission link: a signed-in applicant submits
+the form, a manager chooses branch/joining date during review, and
+confirmation creates the Student and grants that same account portal access.
 
 ## What works today
 
@@ -26,7 +29,7 @@ paths; there is no custom permission-group/module editor.
 |---|---|
 | Dashboard | KPIs (active students, today's classes, collected this month, pending dues), today's class list, memberships expiring in 7 days, first-run setup checklist; role-specific cards for Instructor/Student |
 | Branches | Add/edit/archive branches; per-branch student & batch counts; branch filter everywhere |
-| Students | Add/edit/deactivate, search, branch, contact, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email |
+| Students | Add/edit/deactivate, search, branch, split name/contact/admission profile, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email, and a copyable public admission link with pending/confirmed/rejected manager review |
 | Batches | Instructors, recurring days + start time (60 min default), capacity, roster enroll/remove with capacity guard |
 | Attendance | Date + batch picker (today's batch auto-selected), Present/Absent/Late per student, mark-all-present, history + CSV; students see only their own |
 | Fees | Plans (₹, months), memberships with **calendar-month or joining-date** billing and price snapshot, dues (paid/partial/unpaid/expired), verified manual payments (cash/UPI/card/bank), server receipt numbers `YS-YYYY-NNNN`, CSV export; synced payments are append-only and corrected by audited void, never edit/delete |
@@ -208,6 +211,47 @@ that browser, but the account receives no further server refresh and cannot
 push ERP changes; the Student role has no ERP write operations in the first
 place.
 
+### Public Student admissions
+
+**Students → Admission requests** shows managers a copyable studio-specific
+link containing the organization's `admission_code`. That code selects the
+target studio only; it is not authorization and no anonymous business-data
+RPC is exposed. The applicant opens the link, creates/confirms a normal
+account with **Join an existing studio**, signs in, and completes First Name,
+Last Name, Date Of Birth, Phone Number, Subject, read-only sign-in Email,
+Address, Pin Code, optional Reference by, Experience in yoga, Medical /
+Physical issue and Reasons to join yoga. Submission and review are
+online-only typed RPCs: `erp_get_my_admission(text)`,
+`erp_submit_admission(text, jsonb)`, `erp_get_admission_link_info()`,
+`erp_list_admissions(text)` and
+`erp_review_admission(uuid, text, uuid, date, text)`. The locked
+`erp_admissions` table has no browser table grants.
+
+The server requires a confirmed, usable account with no active ERP role,
+requires the submitted email to equal the Auth email, and bounds/validates
+all fields (including a six-digit PIN code and the fixed yoga-experience
+values). A pending applicant may update their request; a rejected applicant
+may correct and resubmit the same request; a confirmed request cannot be
+changed. Branch is deliberately absent from the public form. During review
+the Owner or Co-owner may choose any active branch, while a branch Admin may
+view unassigned organization requests but can confirm only into an assigned
+active branch. The manager also selects joining date and may add a review
+note or reject the request.
+
+Confirmation runs in one transaction: it rechecks the applicant account,
+blocks an exact-email possible duplicate instead of silently creating a
+second Student, inserts the Student, calls the existing audited
+`erp_grant_student_access` for the submitting account, verifies that the
+granted user is the applicant, and marks the admission confirmed. Structured
+admission values are copied to the Student profile (`firstName`, `lastName`,
+address, PIN code, subject, reference, yoga experience, medical/physical
+issue and reason to join) and are editable later by an authorized manager.
+`fullName` remains the canonical display name composed from first/last.
+Medical / Physical issue is returned only to Owner/Co-owner, an Admin of the
+student's branch and that student; Instructor snapshots deliberately carry
+an empty value. The student can view their own confirmed admission details
+on the personal dashboard but remains view-only.
+
 ### Sync and conflict protocol
 
 - Creates made offline receive client UUIDs. Repeated edits to one record
@@ -314,16 +358,18 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.6.0 this upgrades the database to **SQL v5**: all prior sync,
+   For v1.6.0 this upgrades the database to **SQL v6**: all prior sync,
    billing and Student-access objects, plus distinct Co-owner handling,
    organization/selected-branch authorization helpers, exact branch-scoped
    snapshot/direct/sync checks, seven audited staff-access RPCs, lookup
-   indexes and internal-helper privilege revokes. It is additive and does
-   not delete business rows. Deploy/run SQL v5 before relying on Role Access
+   indexes and internal-helper privilege revokes, plus the SQL v6
+   organization admission code, locked `erp_admissions` workflow, five
+   admission RPCs and structured Student admission-profile fields. It is additive and does
+   not delete business rows. Deploy/run SQL v6 before relying on Role Access
    or narrowed Admin plan/billing permissions; if the new app reaches an
    older database, supported sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and Access/Portal access report
-   that SQL v5 is required.
+   that SQL v6 is required.
 2. Ensure the app is built with `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_ANON_KEY` (publishable/anon key only).
 3. The primary Owner signs up with **Create my own studio** selected, signs
@@ -333,7 +379,9 @@ a backup.
 4. For every other person, have them sign up with **Join an existing studio**
    selected and confirm their email first. Then use **Access** online for
    Co-owner, Admin or Instructor sign-ins and **Students → Portal access**
-   for a Student. Manual membership SQL at the bottom of the setup file is
+   for an existing Student. For a brand-new Student, a manager may instead
+   share **Students → Admission requests → Public admission link** and
+   review the signed-in applicant's submission in that panel. Manual membership SQL at the bottom of the setup file is
    now an emergency-repair fallback only and bypasses in-app conflict
    checks, so it must not be the normal provisioning path.
 
@@ -349,7 +397,7 @@ rule), keeping it idempotent and non-destructive.
   inclusive/exclusive and CGST/SGST/IGST calculations, UPI URI construction,
   payment-setup validation, corrupt-primary sync-state recovery, and proof
   that student portal metadata never enters an offline student upsert.
-- `npm test` also runs seventeen Playwright tests: the existing auth suite,
+- `npm test` also runs twenty Playwright tests: the existing auth suite,
   `tests/erp-local.spec.js` for separate local mode (including GST Payment
   setup, dynamic UPI QR, unpaid vs paid invoice behaviour and generation of a
   real `%PDF` through Chromium), and `tests/erp-sync.spec.js`, which mocks
@@ -364,19 +412,27 @@ rule), keeping it idempotent and non-destructive.
   no-access screen and Retry after grant, an explicit prospective-Owner
   organization-creation path, the signed-in student's personal dashboard,
   assigned-batch-only/no-roster portal, hidden sync controls, Owner/Admin-only
-  **Studio ERP data** settings, and online revocation display clearing.
+  **Studio ERP data** settings, online revocation display clearing, an
+  account-first applicant admission submission, and manager confirmation
+  creating the Student while granting portal access.
 - During development the full SQL file was also executed twice (idempotent
   rerun) in an ephemeral PGlite Postgres with stub Auth users/`auth.uid()`.
   In addition to the prior sync, billing, payment and Student-access checks,
-  the SQL v5 harness runs RPCs as the `authenticated` role and covers
+  the SQL v6 harness runs RPCs as the `authenticated` role and covers
   Owner/Co-owner protection, unconfirmed and cross-organization account
   rejection, role-conflict rejection, exact Admin branch replacement,
   branch-scoped snapshots/direct writes/sync rejection, Instructor
   own-batch attendance and current-batch sync protection, inactive-linked
   Instructor denial, Student own-record scoping, all role revocations, and
-  denial of direct calls to internal access helpers. That harness is not
-  shipped and is not live Supabase UAT.
-- Production UAT still required after running SQL v5 in the real project:
+  denial of direct calls to internal access helpers. A separate ephemeral
+  SQL v6 admission harness passes 24 checks for invalid code, unconfirmed
+  and email-mismatched accounts, pending submission/reload, Instructor
+  denial, branch-Admin scope, atomic Student+portal confirmation,
+  Instructor medical-field redaction versus Student self-visibility,
+  reject/resubmit, exact-email duplicate blocking with no partial writes,
+  and authenticated-only RPC/table privileges. Those harnesses are not
+  shipped and are not live Supabase UAT.
+- Production UAT still required after running SQL v6 in the real project:
   sign in as Owner and wait for **Online · synced**; save Payment setup as
   Owner/Co-owner; go offline and mark attendance + record a payment; verify
   the close warning, reconnect and verify automatic sync and one receipt
@@ -385,7 +441,12 @@ rule), keeping it idempotent and non-destructive.
   conflict both ways; then use separate confirmed Co-owner, Admin,
   Instructor and Student accounts to grant/revoke access and verify each
   role's branch/own-record visibility, including that revoked accounts stop
-  loading fresh studio data on their next successful online refresh. Mocked tests are not
+  loading fresh studio data on their next successful online refresh; and
+  copy the public admission link, submit it from a new confirmed account,
+  verify a branch Admin cannot confirm outside assigned branches, confirm
+  into the correct branch, verify the applicant opens the Student portal,
+  and verify an Instructor's roster/snapshot does not expose Medical /
+  Physical issue. Mocked tests are not
   proof of live Auth, RLS, email delivery or role revocation behaviour.
 
 ## Known limits of this release

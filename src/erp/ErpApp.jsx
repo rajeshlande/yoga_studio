@@ -333,11 +333,22 @@ const SYNC_FIELD_LABELS = {
   bankAccountType: 'Account type', ifsc: 'IFSC', gatewayProvider: 'Gateway provider',
   gatewayEnvironment: 'Gateway environment', gatewayPublicKeyId: 'Gateway public key ID',
   gatewayWebhookUrl: 'Webhook URL', gatewayWebhookConfigured: 'Webhook configured', terms: 'Terms',
+  firstName: 'First Name', lastName: 'Last Name', admissionSubject: 'Subject',
+  referredBy: 'Reference by', yogaExperience: 'Experience in yoga',
+  medicalPhysicalIssue: 'Medical / Physical issue', reasonToJoin: 'Reasons to join yoga',
 };
+
+const YOGA_EXPERIENCE_OPTIONS = [
+  {value: 'experienced', label: 'Experienced'},
+  {value: 'no_experience', label: 'No Experience'},
+  {value: 'less_experienced', label: 'Less Experienced'},
+];
+const yogaExperienceLabel = value => YOGA_EXPERIENCE_OPTIONS.find(option => option.value === value)?.label || 'Not specified';
 
 function syncValue(field, value, data) {
   if (value === null || value === undefined || value === '') return '—';
   if (field === 'amountPaise') return formatINR(value);
+  if (field === 'yogaExperience') return yogaExperienceLabel(value);
   if (field === 'days' && Array.isArray(value)) return value.map(day => DAY_LABELS[day] || day).join(', ');
   if (field === 'branchId') return branchName(data, value);
   if (field === 'studentId') return studentName(data, value);
@@ -584,6 +595,17 @@ function StudentDashboardSection(props) {
         })}</div>}
       </section>
 
+      {(student?.admissionSubject || student?.yogaExperience || student?.medicalPhysicalIssue || student?.reasonToJoin || student?.address) && <section className="erp-panel">
+        <div className="erp-panel-head"><div><h2>My admission details</h2><p>The information from your confirmed admission. Contact the studio if anything needs correction.</p></div></div>
+        <div className="erp-student-detail-grid">
+          {student.admissionSubject && <div><small>Subject</small><strong>{student.admissionSubject}</strong></div>}
+          {student.yogaExperience && <div><small>Experience in yoga</small><strong>{yogaExperienceLabel(student.yogaExperience)}</strong></div>}
+          {student.address && <div style={{gridColumn: '1 / -1'}}><small>Address</small><strong>{student.address}{student.pinCode ? ` · ${student.pinCode}` : ''}</strong></div>}
+          {student.medicalPhysicalIssue && <div style={{gridColumn: '1 / -1'}}><small>Medical / Physical issue</small><strong>{student.medicalPhysicalIssue}</strong></div>}
+          {student.reasonToJoin && <div style={{gridColumn: '1 / -1'}}><small>Reasons to join yoga</small><strong>{student.reasonToJoin}</strong></div>}
+        </div>
+      </section>}
+
       <div className="erp-student-columns">
         <section className="erp-panel">
           <div className="erp-panel-head"><div><h2>My membership & fees</h2><p>Your current plan, balance and recent payments.</p></div>
@@ -727,6 +749,159 @@ export function BranchesPage(props) {
   </>;
 }
 
+/* ---------------- public admission ---------------- */
+
+const emptyAdmissionForm = (profile = {}, admission = null) => {
+  const nameParts = String(profile.name || '').trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: admission?.firstName || nameParts[0] || '',
+    lastName: admission?.lastName || nameParts.slice(1).join(' ') || '',
+    dob: admission?.dob || '',
+    phone: admission?.phone || '',
+    subject: admission?.subject || '',
+    email: admission?.email || profile.email || '',
+    address: admission?.address || '',
+    pinCode: admission?.pinCode || '',
+    referredBy: admission?.referredBy || '',
+    yogaExperience: admission?.yogaExperience || '',
+    medicalPhysicalIssue: admission?.medicalPhysicalIssue || '',
+    reasonToJoin: admission?.reasonToJoin || '',
+  };
+};
+
+export function PublicAdmissionPanel({erp, admissionCode, profile = {}, notify}) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [target, setTarget] = useState(null);
+  const [admission, setAdmission] = useState(null);
+  const [form, setForm] = useState(() => emptyAdmissionForm(profile));
+  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!admissionCode || !erp.client?.getMyAdmission) return;
+    setLoading(true);
+    setLoadError('');
+    try {
+      const result = await erp.client.getMyAdmission(admissionCode);
+      const nextAdmission = result.admission || null;
+      setTarget(result.target || null);
+      setAdmission(nextAdmission);
+      setForm(emptyAdmissionForm(
+        {...profile, email: result.applicantEmail || profile.email || ''},
+        nextAdmission,
+      ));
+      setSubmitted(nextAdmission?.status === 'pending');
+    } catch (error) {
+      setLoadError(error?.message || 'The admission form could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  }, [admissionCode, erp.client, profile.email, profile.name]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setField = (field, value) => setForm(current => ({...current, [field]: value}));
+  const submit = async event => {
+    event.preventDefault();
+    setBusy(true);
+    setSubmitError('');
+    try {
+      const saved = await erp.client.submitAdmission({code: admissionCode, ...form});
+      setAdmission(saved);
+      setForm(emptyAdmissionForm(profile, saved));
+      setSubmitted(true);
+      notify?.('Admission submitted. The studio will review and confirm it.');
+    } catch (error) {
+      setSubmitError(error?.message || 'The admission could not be submitted.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return <section className="erp-panel admission-panel"><p>Loading the admission form…</p></section>;
+  }
+  if (loadError) {
+    return <section className="erp-panel admission-panel">
+      <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{loadError}</span></div>
+      <button className="secondary-button" onClick={load}>Retry</button>
+    </section>;
+  }
+  if (admission?.status === 'confirmed') {
+    return <section className="erp-panel admission-panel">
+      <span className="erp-badge green">Admission confirmed</span>
+      <h2>Your Student portal is ready</h2>
+      <p>The studio has created your student record and linked this sign-in account. Press Retry to open your personal Student portal. If it does not open, contact the studio to check the portal link.</p>
+      <button className="primary-button" onClick={erp.load}>Retry</button>
+    </section>;
+  }
+
+  return <section className="erp-panel admission-panel">
+    <div className="erp-panel-head"><div>
+      <h2>Your details</h2>
+      <p>{target?.organizationName ? `Apply to ${target.organizationName}. ` : ''}Complete this form for studio review. A manager selects your branch and joining date when confirming the admission.</p>
+    </div>{admission?.status && <span className={`erp-badge ${admission.status === 'pending' ? 'amber' : 'red'}`}>{admission.status}</span>}</div>
+
+    {submitted && admission?.status === 'pending' && <div className="erp-banner blue" role="status">
+      <Check size={18}/><span><b>Admission submitted — pending studio confirmation.</b><br/>You may update the details below until the studio confirms or rejects the request.</span>
+    </div>}
+    {admission?.status === 'rejected' && <div className="erp-banner" role="status">
+      <AlertCircle size={18}/><span><b>The studio could not confirm this admission.</b>{admission.reviewNote ? ` ${admission.reviewNote}` : ''} You may correct the form and submit it again.</span>
+    </div>}
+    {submitError && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{submitError}</span></div>}
+
+    <form className="erp-form admission-form" onSubmit={submit}>
+      <label className="erp-field">First Name *
+        <input required autoComplete="given-name" maxLength={80} value={form.firstName} onChange={e => setField('firstName', e.target.value)}/>
+      </label>
+      <label className="erp-field">Last Name *
+        <input required autoComplete="family-name" maxLength={80} value={form.lastName} onChange={e => setField('lastName', e.target.value)}/>
+      </label>
+      <label className="erp-field">Date Of Birth *
+        <input required type="date" autoComplete="bday" value={form.dob} onChange={e => setField('dob', e.target.value)}/>
+      </label>
+      <label className="erp-field">Phone Number *
+        <input required type="tel" autoComplete="tel" inputMode="tel" maxLength={25} value={form.phone} onChange={e => setField('phone', e.target.value)} placeholder="9876543210"/>
+      </label>
+      <label className="erp-field full">Subject *
+        <input required maxLength={160} value={form.subject} onChange={e => setField('subject', e.target.value)} placeholder="Ex. New Admission in Personal yoga session"/>
+      </label>
+      <label className="erp-field full">Your Email *
+        <input required readOnly type="email" autoComplete="email" value={form.email}/>
+        <small>This is your confirmed sign-in email. The studio will grant Student portal access to this same account.</small>
+      </label>
+      <label className="erp-field full">Address *
+        <textarea required rows={3} maxLength={500} autoComplete="street-address" value={form.address} onChange={e => setField('address', e.target.value)}/>
+      </label>
+      <label className="erp-field">Pin Code *
+        <input required inputMode="numeric" autoComplete="postal-code" pattern="[0-9]{6}" maxLength={6} value={form.pinCode} onChange={e => setField('pinCode', e.target.value)} placeholder="410206"/>
+      </label>
+      <label className="erp-field">Reference by
+        <input maxLength={120} value={form.referredBy} onChange={e => setField('referredBy', e.target.value)}/>
+      </label>
+      <fieldset className="erp-field full admission-experience">
+        <legend>Experience in yoga *</legend>
+        <div className="admission-radio-row">{YOGA_EXPERIENCE_OPTIONS.map(option => <label key={option.value}>
+          <input required type="radio" name="yoga-experience" value={option.value} checked={form.yogaExperience === option.value} onChange={() => setField('yogaExperience', option.value)}/>
+          <span>{option.label}</span>
+        </label>)}</div>
+      </fieldset>
+      <label className="erp-field full">Medical / Physical issue *
+        <textarea required rows={4} maxLength={2000} value={form.medicalPhysicalIssue} onChange={e => setField('medicalPhysicalIssue', e.target.value)} placeholder="Write “None” if you have no medical or physical issue."/>
+        <small><b>Medical:</b> diagnosis, treatment and prevention of illness or injury. <b>Physical:</b> body structure, function, movement and fitness. Only authorized studio managers can view this field; Instructors cannot.</small>
+      </label>
+      <label className="erp-field full">Reasons to join yoga *
+        <textarea required rows={4} maxLength={2000} value={form.reasonToJoin} onChange={e => setField('reasonToJoin', e.target.value)}/>
+      </label>
+      <div className="erp-form-actions">
+        <button className="primary-button" disabled={busy}>{busy ? 'Submitting…' : admission?.status === 'pending' ? 'Update admission' : 'Submit admission'}</button>
+      </div>
+    </form>
+  </section>;
+}
+
 /* ---------------- students ---------------- */
 
 function portalAccessMeta(student) {
@@ -797,7 +972,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v5) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v6) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
@@ -829,6 +1004,171 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
   </Dialog>;
 }
 
+function AdmissionReviewDialog({admission, branches, erp, online, notify, onClose, onReviewed}) {
+  const [branchId, setBranchId] = useState(admission.branchId || branches[0]?.id || '');
+  const [joiningDate, setJoiningDate] = useState(toISODate());
+  const [reviewNote, setReviewNote] = useState('');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const hasDuplicate = Boolean(admission.possibleDuplicateStudentId);
+
+  const review = async action => {
+    if (action === 'confirm' && !branchId) return;
+    setBusy(action);
+    setError('');
+    try {
+      const result = await erp.client.reviewAdmission({
+        admissionId: admission.id,
+        action,
+        branchId: action === 'confirm' ? branchId : '',
+        joiningDate,
+        reviewNote,
+      });
+      try { await erp.syncNow?.({waitForIdle: true}); } catch { /* The review already committed; the next refresh will show the new student. */ }
+      onClose();
+      notify?.(action === 'confirm'
+        ? 'Admission confirmed. Student record created and portal access granted.'
+        : 'Admission rejected.');
+      await onReviewed?.(result);
+    } catch (reviewError) {
+      setError(reviewError?.message || 'The admission could not be reviewed.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return <Dialog title="Review admission" onClose={onClose} className="admission-review-dialog">
+    {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{error}</span></div>}
+    {!online && <div className="erp-banner amber" role="status"><WifiOff size={18}/><span>Admissions can be reviewed only while online.</span></div>}
+    {hasDuplicate && <div className="erp-banner amber" role="alert"><AlertCircle size={18}/><span>
+      <b>Possible duplicate:</b> student “{admission.possibleDuplicateStudentName}” already uses this email. Link that existing student through Portal access or resolve the duplicate before confirming; this protects against a second student record for the same account.
+    </span></div>}
+    <dl className="erp-detail-list admission-details">
+      <div><dt>First Name</dt><dd>{admission.firstName}</dd></div>
+      <div><dt>Last Name</dt><dd>{admission.lastName}</dd></div>
+      <div><dt>Date Of Birth</dt><dd>{formatDate(admission.dob)}</dd></div>
+      <div><dt>Phone Number</dt><dd>{admission.phone || '—'}</dd></div>
+      <div className="full"><dt>Subject</dt><dd>{admission.subject || '—'}</dd></div>
+      <div className="full"><dt>Your Email</dt><dd>{admission.email || '—'}</dd></div>
+      <div className="full"><dt>Address</dt><dd>{admission.address || '—'}</dd></div>
+      <div><dt>Pin Code</dt><dd>{admission.pinCode || '—'}</dd></div>
+      <div><dt>Reference by</dt><dd>{admission.referredBy || '—'}</dd></div>
+      <div><dt>Experience in yoga</dt><dd>{yogaExperienceLabel(admission.yogaExperience)}</dd></div>
+      <div><dt>Status</dt><dd>{admission.status}</dd></div>
+      <div className="full"><dt>Medical / Physical issue</dt><dd>{admission.medicalPhysicalIssue || '—'}</dd></div>
+      <div className="full"><dt>Reasons to join yoga</dt><dd>{admission.reasonToJoin || '—'}</dd></div>
+    </dl>
+    <form className="erp-form" onSubmit={event => { event.preventDefault(); review('confirm'); }}>
+      <label className="erp-field">Admission branch
+        <select value={branchId} onChange={event => setBranchId(event.target.value)} required>
+          <option value="">Select branch</option>
+          {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+        </select>
+      </label>
+      <label className="erp-field">Joining date
+        <input type="date" value={joiningDate} onChange={event => setJoiningDate(event.target.value)} required/>
+      </label>
+      <label className="erp-field full">Review note
+        <textarea rows={2} maxLength={500} value={reviewNote} onChange={event => setReviewNote(event.target.value)}/>
+      </label>
+      <div className="erp-form-actions">
+        <button type="button" className="danger-button" disabled={!online || Boolean(busy)} onClick={() => review('reject')}>
+          {busy === 'reject' ? 'Rejecting…' : 'Reject admission'}
+        </button>
+        <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
+        <button className="primary-button" disabled={!online || Boolean(busy) || hasDuplicate}>
+          {busy === 'confirm' ? 'Confirming…' : 'Confirm admission & grant portal'}
+        </button>
+      </div>
+    </form>
+  </Dialog>;
+}
+
+function AdmissionsPanel({erp, branches, notify}) {
+  const [status, setStatus] = useState('pending');
+  const [admissions, setAdmissions] = useState([]);
+  const [linkInfo, setLinkInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reviewing, setReviewing] = useState(null);
+  const online = useOnline();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [rows, info] = await Promise.all([
+        erp.client.listAdmissions(status),
+        erp.client.getAdmissionLinkInfo(),
+      ]);
+      setAdmissions(rows);
+      setLinkInfo(info);
+    } catch (loadError) {
+      setError(loadError?.message || 'Admission requests could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  }, [erp.client, status]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const admissionLink = useMemo(() => {
+    if (!linkInfo?.admissionCode || typeof window === 'undefined') return '';
+    const url = new URL(window.location.href);
+    url.searchParams.set('admission', linkInfo.admissionCode);
+    url.hash = '';
+    return url.toString();
+  }, [linkInfo]);
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(admissionLink);
+      notify?.('Public admission link copied.');
+    } catch {
+      notify?.('Copy the public admission link from the field shown.');
+    }
+  };
+
+  return <section className="erp-panel admissions-manager-panel">
+    <div className="erp-panel-head"><div>
+      <h2>Admission requests</h2>
+      <p>Share the public link with a new student. They first create and confirm an account with “Join an existing studio,” then submit the form. Confirming creates the student and grants portal access to that same account.</p>
+    </div><button className="secondary-button" onClick={load} disabled={loading}><RefreshCw size={16}/> Refresh</button></div>
+    <div className="admission-link-row">
+      <label className="erp-field">Public admission link
+        <input readOnly value={admissionLink} placeholder="Loading admission link…"/>
+      </label>
+      <button className="secondary-button" onClick={copyLink} disabled={!admissionLink}>Copy link</button>
+      <label className="erp-field">Admission status
+        <select value={status} onChange={event => setStatus(event.target.value)}>
+          <option value="pending">Pending</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="rejected">Rejected</option>
+          <option value="all">All</option>
+        </select>
+      </label>
+    </div>
+    {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{error}</span></div>}
+    {loading ? <p>Loading admission requests…</p> : admissions.length ? <div className="erp-table-wrap"><table className="erp-table">
+      <thead><tr><th>Applicant</th><th>Subject</th><th>Submitted</th><th>Experience</th><th>Status</th><th></th></tr></thead>
+      <tbody>{admissions.map(admission => <tr key={admission.id}>
+        <td><b>{admission.fullName || `${admission.firstName} ${admission.lastName}`.trim()}</b><div className="erp-muted">{admission.email}</div>
+          {admission.possibleDuplicateStudentId && <span className="erp-badge amber">Possible duplicate</span>}</td>
+        <td>{admission.subject}</td>
+        <td>{admission.submittedAt ? formatDate(String(admission.submittedAt).slice(0, 10)) : '—'}</td>
+        <td>{yogaExperienceLabel(admission.yogaExperience)}</td>
+        <td><span className={`erp-badge ${admission.status === 'confirmed' ? 'green' : admission.status === 'rejected' ? 'red' : 'amber'}`}>{admission.status}</span></td>
+        <td>{admission.status === 'pending'
+          ? <button className="erp-link-btn" onClick={() => setReviewing(admission)}>Review</button>
+          : <span className="erp-muted">Reviewed</span>}</td>
+      </tr>)}</tbody>
+    </table></div> : <Empty icon={Users} title="No admission requests" text="New public admission submissions will appear here for manager review."/>}
+    {reviewing && <AdmissionReviewDialog
+      admission={reviewing} branches={branches} erp={erp} online={online} notify={notify}
+      onClose={() => setReviewing(null)} onReviewed={load}/>}
+  </section>;
+}
+
 export function StudentsPage(props) {
   const {erp, ctx, go} = props; const {data} = erp;
   const [query, setQuery] = useState(''); const [editing, setEditing] = useState(null);
@@ -837,12 +1177,37 @@ export function StudentsPage(props) {
   const canShowAccess = student => showAccess && student.portalAccessStatus !== 'hidden';
   const list = data.students.filter(s => inBranch(ctx, s.branchId)
     && (`${s.fullName} ${s.phone} ${s.email} ${s.portalAccessEmail || ''}`.toLowerCase().includes(query.toLowerCase())));
-  const save = async e => { e.preventDefault(); if (await erp.act(c => c.saveStudent(editing), 'Student saved.')) setEditing(null); };
-  const empty = {fullName: '', phone: '', email: '', gender: '', dob: '', joiningDate: toISODate(), branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), notes: ''};
+  const editStudent = student => {
+    const nameParts = String(student.fullName || '').trim().split(/\s+/).filter(Boolean);
+    setEditing({
+      ...student,
+      firstName: student.firstName || nameParts[0] || '',
+      lastName: student.lastName || nameParts.slice(1).join(' ') || '',
+      address: student.address || '', pinCode: student.pinCode || '',
+      admissionSubject: student.admissionSubject || '', referredBy: student.referredBy || '',
+      yogaExperience: student.yogaExperience || '',
+      medicalPhysicalIssue: student.medicalPhysicalIssue || '',
+      reasonToJoin: student.reasonToJoin || '',
+    });
+  };
+  const save = async e => {
+    e.preventDefault();
+    const firstName = String(editing.firstName || '').trim();
+    const lastName = String(editing.lastName || '').trim();
+    const payload = {...editing, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' ')};
+    if (await erp.act(c => c.saveStudent(payload), 'Student saved.')) setEditing(null);
+  };
+  const empty = {
+    firstName: '', lastName: '', fullName: '', phone: '', email: '', gender: '', dob: '',
+    joiningDate: toISODate(), branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''),
+    notes: '', address: '', pinCode: '', admissionSubject: '', referredBy: '',
+    yogaExperience: '', medicalPhysicalIssue: '', reasonToJoin: '',
+  };
   return <>
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Students <span className="flower">✳</span></h1><p>Everyone who practices at your studio.</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
+    {showAccess && <AdmissionsPanel erp={erp} notify={props.notify} branches={data.branches.filter(branch => branch.status !== 'archived')}/>}
     <section className="erp-panel"><div className="erp-panel-head">
       <span className="erp-search"><Search size={16}/><input aria-label="Search students" placeholder="Search name, phone or email…" value={query} onChange={e => setQuery(e.target.value)}/></span>
       <div className="erp-actions">
@@ -860,20 +1225,28 @@ export function StudentsPage(props) {
           <td><span className={`erp-badge ${s.status === 'active' ? 'green' : 'grey'}`}>{s.status}</span>
             {canShowAccess(s) && <><br/><span className={`erp-badge ${access.className}`} style={{marginTop: 5}}>{access.label}</span>
             {s.portalAccessEmail && <><br/><small>{s.portalAccessEmail}</small></>}</>}</td>
-          <td>{canManage(ctx) && <><button className="erp-link-btn" onClick={() => setEditing({...s})}><Pencil size={13}/> Edit</button>
+          <td>{canManage(ctx) && <><button className="erp-link-btn" onClick={() => editStudent(s)}><Pencil size={13}/> Edit</button>
           {canShowAccess(s) && <button className="erp-link-btn" onClick={() => setAccessStudent({...s})}><KeyRound size={13}/> Portal access</button>}
           <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveStudent(s.id), s.status === 'active' ? 'Student deactivated.' : 'Student reactivated.')}>{s.status === 'active' ? 'Deactivate' : 'Activate'}</button></>}</td></tr>; })}
       </tbody></table></div>}
     </section>
     {editing && <Dialog title={editing.id ? 'Edit student' : 'Add student'} onClose={() => setEditing(null)}>
       <form className="erp-form" onSubmit={save}>
-        <label className="erp-field">Full name<input required value={editing.fullName} onChange={e => setEditing({...editing, fullName: e.target.value})} placeholder="Student name"/></label>
+        <label className="erp-field">First Name<input required value={editing.firstName || ''} onChange={e => setEditing({...editing, firstName: e.target.value})} placeholder="First name"/></label>
+        <label className="erp-field">Last Name<input value={editing.lastName || ''} onChange={e => setEditing({...editing, lastName: e.target.value})} placeholder="Last name"/></label>
         <label className="erp-field">Branch<select aria-label="Student branch" required value={editing.branchId} onChange={e => setEditing({...editing, branchId: e.target.value})}><option value="">Choose branch…</option>{data.branches.filter(b => b.status !== 'archived').map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
-        <label className="erp-field">Phone<input type="tel" value={editing.phone || ''} onChange={e => setEditing({...editing, phone: e.target.value})} placeholder="10-digit mobile"/></label>
+        <label className="erp-field">Phone Number<input type="tel" value={editing.phone || ''} onChange={e => setEditing({...editing, phone: e.target.value})} placeholder="10-digit mobile"/></label>
         <label className="erp-field">Email<input type="email" value={editing.email || ''} onChange={e => setEditing({...editing, email: e.target.value})}/></label>
         <label className="erp-field">Gender<select value={editing.gender || ''} onChange={e => setEditing({...editing, gender: e.target.value})}><option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Other</option></select></label>
-        <label className="erp-field">Date of birth<input type="date" value={editing.dob || ''} onChange={e => setEditing({...editing, dob: e.target.value})}/></label>
+        <label className="erp-field">Date Of Birth<input type="date" value={editing.dob || ''} onChange={e => setEditing({...editing, dob: e.target.value})}/></label>
         <label className="erp-field">Joining date<input type="date" required value={editing.joiningDate} onChange={e => setEditing({...editing, joiningDate: e.target.value})}/></label>
+        <label className="erp-field full">Address<textarea rows={2} value={editing.address || ''} onChange={e => setEditing({...editing, address: e.target.value})}/></label>
+        <label className="erp-field">Pin Code<input inputMode="numeric" value={editing.pinCode || ''} onChange={e => setEditing({...editing, pinCode: e.target.value})}/></label>
+        <label className="erp-field">Subject<input value={editing.admissionSubject || ''} onChange={e => setEditing({...editing, admissionSubject: e.target.value})} placeholder="Ex. New Admission in Personal yoga session"/></label>
+        <label className="erp-field">Reference by<input value={editing.referredBy || ''} onChange={e => setEditing({...editing, referredBy: e.target.value})}/></label>
+        <label className="erp-field">Experience in yoga<select value={editing.yogaExperience || ''} onChange={e => setEditing({...editing, yogaExperience: e.target.value})}><option value="">Not specified</option>{YOGA_EXPERIENCE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+        <label className="erp-field full">Medical / Physical issue<textarea rows={3} value={editing.medicalPhysicalIssue || ''} onChange={e => setEditing({...editing, medicalPhysicalIssue: e.target.value})} placeholder="Manager-and-student-only health detail"/><small>Visible only to Owner, Co-owner, branch Admin and this student. Instructors do not receive this field.</small></label>
+        <label className="erp-field full">Reasons to join yoga<textarea rows={3} value={editing.reasonToJoin || ''} onChange={e => setEditing({...editing, reasonToJoin: e.target.value})}/></label>
         <label className="erp-field full">Notes<textarea rows={2} value={editing.notes || ''} onChange={e => setEditing({...editing, notes: e.target.value})} placeholder="Optional studio note (avoid medical details)"/></label>
         {showAccess && editing.id && <div className="erp-banner blue" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
           <KeyRound size={18}/><span>The contact email above does not change the student’s sign-in. Use <b>Portal access</b> in the student row to link or replace their login email.</span>
