@@ -352,6 +352,67 @@ test('owner manages co-owner, branch Admin and instructor sign-in access', async
   expect(roleCalls.at(-1)).toEqual({name: 'erp_revoke_instructor_access', body: {p_instructor_id: INSTRUCTOR_RECORD}});
 });
 
+test('co-owner can set up instructor profiles and grant instructor portal access', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+  const server = emptySnapshot();
+  server.branches.push({id: BRANCH, name: 'Panvel', city: 'Panvel', address: '', phone: '', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  server.instructors.push({id: INSTRUCTOR_RECORD, branchId: BRANCH, fullName: 'Isha Rao', phone: '', email: 'isha-record@example.test', specialties: [], status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  const accessState = {
+    actor: {
+      userId: account.id, email: account.email, roles: ['co_owner'], primaryRole: 'co_owner', orgRole: 'co_owner',
+      branchIds: [BRANCH], adminBranchIds: [],
+      canManageCoOwners: false, canManageAdmins: true, canManageInstructors: true, canManageStudents: true,
+    },
+    orgMembers: [
+      {userId: '11111111-1111-4111-8111-111111111111', email: 'owner@example.test', role: 'owner', status: 'active', createdAt: '2026-01-01T00:00:00Z', isSelf: false},
+      {userId: account.id, email: account.email, role: 'co_owner', status: 'active', createdAt: '2026-01-01T00:00:00Z', isSelf: true},
+    ],
+    adminAssignments: [],
+    instructors: [{instructorId: INSTRUCTOR_RECORD, fullName: 'Isha Rao', contactEmail: 'isha-record@example.test', phone: '', branchId: BRANCH, recordStatus: 'active', accessStatus: 'none', accessEmail: '', accessUserId: null, accessBranchIds: [], batchBranchIds: [BRANCH]}],
+  };
+  const instructorGrantCalls = [];
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    const body = route.request().postDataJSON() || {};
+    const reply = value => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(value)});
+    if (name === 'erp_get_context') return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['co_owner'], primaryRole: 'co_owner', adminBranchIds: [], instructorId: null, studentId: null});
+    if (name === 'erp_get_snapshot') return reply(structuredClone(server));
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    if (name === 'erp_list_role_access') return reply(structuredClone(accessState));
+    if (name === 'erp_grant_instructor_access') {
+      instructorGrantCalls.push(structuredClone(body));
+      Object.assign(accessState.instructors[0], {
+        accessStatus: 'active', accessEmail: body.p_email, accessUserId: INSTRUCTOR_USER,
+        accessBranchIds: body.p_branch_ids,
+      });
+      return reply({instructorId: body.p_instructor_id, userId: INSTRUCTOR_USER, email: body.p_email, role: 'instructor', branchIds: body.p_branch_ids});
+    }
+    return route.fulfill({status: 404, contentType: 'application/json', body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'})});
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await page.getByRole('button', {name: 'Batches', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Instructor profiles'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Add instructor'})).toBeVisible();
+  await page.getByRole('button', {name: 'Portal access'}).click();
+  await expect(page.getByRole('heading', {name: 'Instructor sign-ins'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Add Co-owner', exact: true})).toHaveCount(0);
+
+  await page.getByRole('row', {name: /Isha Rao/}).getByRole('button', {name: 'Sign-in access'}).click();
+  const instructorDialog = page.getByRole('dialog', {name: 'Instructor sign-in access'});
+  await instructorDialog.getByLabel('Instructor sign-in email').fill('instructor-login@example.test');
+  await instructorDialog.getByRole('button', {name: 'Grant access'}).click();
+  await expect(page.getByRole('row', {name: /Isha Rao.*instructor-login@example.test/})).toBeVisible();
+  expect(instructorGrantCalls).toEqual([{
+    p_instructor_id: INSTRUCTOR_RECORD,
+    p_email: 'instructor-login@example.test',
+    p_branch_ids: [BRANCH],
+  }]);
+});
+
 test('branch Admin access page hides organization roles and owner-only setup actions', async ({page}) => {
   page.on('pageerror', error => console.error('Browser page error:', error.message));
   await mockAuth(page);
@@ -368,14 +429,24 @@ test('branch Admin access page hides organization roles and owner-only setup act
     orgMembers: [], adminAssignments: [],
     instructors: [{instructorId: INSTRUCTOR_RECORD, fullName: 'Isha Rao', contactEmail: 'isha-record@example.test', phone: '', branchId: BRANCH, recordStatus: 'active', accessStatus: 'none', accessEmail: '', accessUserId: null, accessBranchIds: [], batchBranchIds: [BRANCH]}],
   };
+  const instructorGrantCalls = [];
 
   await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
     const name = new URL(route.request().url()).pathname.split('/').pop();
+    const body = route.request().postDataJSON() || {};
     const reply = value => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(value)});
     if (name === 'erp_get_context') return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['admin'], primaryRole: 'admin', adminBranchIds: [BRANCH], instructorId: null, studentId: null});
     if (name === 'erp_get_snapshot') return reply(structuredClone(server));
     if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
     if (name === 'erp_list_role_access') return reply(structuredClone(accessState));
+    if (name === 'erp_grant_instructor_access') {
+      instructorGrantCalls.push(structuredClone(body));
+      Object.assign(accessState.instructors[0], {
+        accessStatus: 'active', accessEmail: body.p_email, accessUserId: INSTRUCTOR_USER,
+        accessBranchIds: body.p_branch_ids,
+      });
+      return reply({instructorId: body.p_instructor_id, userId: INSTRUCTOR_USER, email: body.p_email, role: 'instructor', branchIds: body.p_branch_ids});
+    }
     return route.fulfill({status: 404, contentType: 'application/json', body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'})});
   });
 
@@ -385,6 +456,17 @@ test('branch Admin access page hides organization roles and owner-only setup act
   await expect(page.getByRole('heading', {name: 'Instructor sign-ins'})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Owner & Co-owners'})).toHaveCount(0);
   await expect(page.getByRole('heading', {name: 'Branch Admins'})).toHaveCount(0);
+
+  await page.getByRole('row', {name: /Isha Rao/}).getByRole('button', {name: 'Sign-in access'}).click();
+  const instructorDialog = page.getByRole('dialog', {name: 'Instructor sign-in access'});
+  await instructorDialog.getByLabel('Instructor sign-in email').fill('instructor-login@example.test');
+  await instructorDialog.getByRole('button', {name: 'Grant access'}).click();
+  await expect(page.getByRole('row', {name: /Isha Rao.*instructor-login@example.test/})).toBeVisible();
+  expect(instructorGrantCalls).toEqual([{
+    p_instructor_id: INSTRUCTOR_RECORD,
+    p_email: 'instructor-login@example.test',
+    p_branch_ids: [BRANCH],
+  }]);
 
   await page.getByRole('button', {name: 'Fees', exact: true}).click();
   await expect(page.getByRole('heading', {name: /Fees & payments/})).toBeVisible();
@@ -415,6 +497,10 @@ test('signed-in instructor is locked to their linked instructor record', async (
   await signIn(page);
   await expect(page.getByRole('button', {name: 'Access', exact: true})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Fees', exact: true})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Batches', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Instructor profiles'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Add instructor'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Portal access'})).toHaveCount(0);
   await page.getByRole('button', {name: 'Attendance', exact: true}).click();
   const instructorPicker = page.getByLabel('Signed-in instructor');
   await expect(instructorPicker).toBeDisabled();
@@ -519,6 +605,7 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByRole('button', {name: 'Sync now'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Branches', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Access', exact: true})).toHaveCount(0);
   await expect(page.getByRole('heading', {name: 'My assigned batches'})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'My membership & fees'})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Recent attendance'})).toBeVisible();
@@ -532,6 +619,9 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByText('Evening Yoga')).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Roster/})).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Add batch/})).toHaveCount(0);
+  await expect(page.getByRole('heading', {name: 'Instructor profiles'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Add instructor'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Portal access'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Edit/})).toHaveCount(0);
 
   await page.getByRole('button', {name: 'Attendance', exact: true}).click();

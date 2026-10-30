@@ -79,7 +79,8 @@ into the application.
     selected branches; cannot manage Admins/Co-owners, plans, payment setup
     or other branches.
   - **Instructor:** own linked batches, rosters and attendance only; no
-    fees, payments, student editing or access administration.
+    fees, payments, student editing, Instructor profile setup or access
+    administration.
   - **Student:** a personal, view-only dashboard for their assigned batches,
     next classes, attendance, membership, dues, payments and invoices. The
     Student portal does not show studio rosters/class counts, sync badges or
@@ -88,7 +89,10 @@ into the application.
   account and does not create their own organization, an authorized manager
   links that exact sign-in email. Use **Access** for Co-owner, branch Admin
   and Instructor roles, and **Students → Portal access** for a Student.
-  Manual membership SQL is an emergency-repair fallback only.
+  Instructor profile setup in **Batches → Instructor profiles** and
+  Instructor Portal grants/removals are limited to the Owner, a Co-owner or
+  an Admin acting within their assigned branches. Manual membership SQL is
+  an emergency-repair fallback only.
 
 ### Experience and platform
 
@@ -370,13 +374,15 @@ The suite includes:
   mocked-Supabase offline → conflict → resolution flow;
 - mocked-Supabase role-access tests proving Owner grant/remove for Student,
   Co-owner, selected-branch Admin and Instructor accounts by registered
-  email; branch-Admin hiding of organization roles/plans/payment setup;
-  signed-in Instructor identity locking; a waiting student's dedicated
-  no-access screen and Retry flow; an explicit prospective-Owner creation
-  path; the student's personal view-only dashboard/assigned-batch portal
-  without sync controls or **Studio ERP data** settings; Owner/Admin-only
-  visibility of that settings panel; and cleared studio display after online
-  revocation;
+  email; Co-owner and branch-Admin Instructor Portal grants; hiding of
+  Instructor profile setup and portal-access controls from Instructor and
+  Student accounts; branch-Admin hiding of organization roles/plans/payment
+  setup; signed-in Instructor identity locking; a waiting student's
+  dedicated no-access screen and Retry flow; an explicit prospective-Owner
+  creation path; the student's personal view-only dashboard/assigned-batch
+  portal without sync controls or **Studio ERP data** settings;
+  Owner/Admin-only visibility of that settings panel; and cleared studio
+  display after online revocation;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
   browser-close guard and automatic sync after reconnect.
 

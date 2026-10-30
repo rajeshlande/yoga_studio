@@ -95,7 +95,7 @@ security-group and record-rule ideas to this ERP:
 | **Owner** | All branches | Co-owner, Admin, Instructor, Student | Primary Owner is protected; ownership transfer/removal is not offered in the app |
 | **Co-owner** | All branches | Admin, Instructor, Student | Cannot add/remove Owner or Co-owner |
 | **Admin** | Explicitly selected branches | Instructor and Student in those branches | Cannot manage Admins/Co-owners, plans, Payment setup or unassigned branches |
-| **Instructor** | Own linked instructor record and batches in authorized branches | Nobody | No fees, payments, student editing or access administration |
+| **Instructor** | Own linked instructor record and batches in authorized branches | Nobody | No fees, payments, student editing, Instructor profile setup or access administration |
 | **Student** | Own student record and assigned batches | Nobody | Personal view-only dashboard; no ERP writes, studio roster/class counts, sync badges/controls or **Studio ERP data** settings |
 
 The matrix is deliberately fixed. This release does not provide custom
@@ -103,6 +103,16 @@ security groups, per-user permission matrices or module-level
 None/View/Manage permission editors. The SQL snapshot, direct RPCs and
 `erp_sync_push` all re-check organization, role and branch/record scope;
 hiding a screen in React is not treated as authorization.
+
+Instructor profile setup and Instructor Portal authorization are separate
+manager-only steps. **Batches → Instructor profiles** creates the teaching
+record, while **Access → Instructor sign-ins** links a confirmed account to
+that record for explicit branches. Only the Owner, a Co-owner or an Admin
+acting within assigned branches can perform either step. The React screens
+hide both controls from Instructor and Student accounts, and
+`erp_save_instructor`, `erp_sync_push`, `erp_list_role_access`,
+`erp_grant_instructor_access` and `erp_revoke_instructor_access` re-check
+the same manager/branch boundary in SQL.
 
 The **Settings → Studio ERP data** panel—data-mode selection, Supabase
 connection status, offline-copy reset and local-device backup import/export
@@ -339,7 +349,7 @@ rule), keeping it idempotent and non-destructive.
   inclusive/exclusive and CGST/SGST/IGST calculations, UPI URI construction,
   payment-setup validation, corrupt-primary sync-state recovery, and proof
   that student portal metadata never enters an offline student upsert.
-- `npm test` also runs sixteen Playwright tests: the existing auth suite,
+- `npm test` also runs seventeen Playwright tests: the existing auth suite,
   `tests/erp-local.spec.js` for separate local mode (including GST Payment
   setup, dynamic UPI QR, unpaid vs paid invoice behaviour and generation of a
   real `%PDF` through Chromium), and `tests/erp-sync.spec.js`, which mocks
@@ -347,6 +357,8 @@ rule), keeping it idempotent and non-destructive.
   change → conflict review → resolution → dependency-ordered creates,
   offline Payment setup → mirrored queue/close guard → automatic sync,
   Owner Student/Co-owner/Admin/Instructor access flows by email,
+  Co-owner and branch-Admin Instructor Portal grants, hiding of Instructor
+  profile setup/portal controls from Instructor and Student accounts,
   branch-Admin hiding of organization-role and Owner/Co-owner setup actions,
   signed-in Instructor identity locking, a waiting student's dedicated
   no-access screen and Retry after grant, an explicit prospective-Owner

@@ -27,10 +27,12 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   read plans/billing settings needed for operations but can no longer
   create/edit plans or change Payment setup.
 - **Instructor sign-ins:** an Instructor account is linked to exactly one
-  active instructor record and explicit sign-in branches. Owner/Co-owner
-  can replace the global sign-in; a branch Admin can manage only their
-  branch portion and cannot replace another account globally. Supabase mode
-  locks the signed-in Instructor identity in the toolbar.
+  active instructor record and explicit sign-in branches. Instructor profile
+  setup and Instructor Portal grants/removals are limited to the Owner, a
+  Co-owner or an Admin acting within assigned branches. Owner/Co-owner can
+  replace the global sign-in; a branch Admin can manage only their branch
+  portion and cannot replace another account globally. Supabase mode locks
+  the signed-in Instructor identity in the toolbar.
 - **Student workflow retained:** Student accounts remain managed from
   **Students → Portal access**, preserving branch-move link transfer,
   inactive-student denial and the view-only own-record portal.
@@ -74,6 +76,8 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   `NULL`, so `IF NOT ...` authorization guards cannot be bypassed by a
   missing role row.
 - Browser coverage adds Owner Co-owner/Admin/Instructor management,
+  Co-owner and branch-Admin Instructor Portal grants, hiding of Instructor
+  profile setup/portal controls from Instructor and Student accounts,
   branch-Admin UI restrictions, signed-in Instructor locking, the waiting
   joining-account screen, the explicit prospective-Owner creation path,
   the personal Student dashboard/assigned-batch portal without sync

@@ -493,6 +493,7 @@ export function ErpToolbar({data, ctx, setCtx, mode, remoteContext, erp}) {
 const canManage = ctx => ctx.role === 'owner' || ctx.role === 'co_owner' || ctx.role === 'admin';
 const canManageOrg = ctx => ctx.role === 'owner' || ctx.role === 'co_owner';
 const canManageAccess = ctx => canManage(ctx);
+const canSetupInstructorProfiles = ctx => canManage(ctx);
 
 /* ---------------- dashboard ---------------- */
 
@@ -954,8 +955,9 @@ function InstructorAccessDialog({instructor, branches, erp, ctx, onClose, onSave
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const isActive = instructor.accessStatus === 'active';
-  const grantBlocked = busy || instructor.recordStatus !== 'active' || Boolean(instructor.syncPending) || branchIds.length === 0;
-  const revokeBlocked = busy || Boolean(instructor.syncPending);
+  const accessManager = canManageAccess(ctx);
+  const grantBlocked = busy || !accessManager || instructor.recordStatus !== 'active' || Boolean(instructor.syncPending) || branchIds.length === 0;
+  const revokeBlocked = busy || !accessManager || Boolean(instructor.syncPending);
 
   const run = async (action, successMessage) => {
     setBusy(true);
@@ -1215,7 +1217,7 @@ export function RoleAccessPage(props) {
           </section>}
 
           {manageInstructors && <section className="erp-panel">
-            <div className="erp-panel-head"><div><h2>Instructor sign-ins</h2><p>Each instructor account is linked to one instructor record and sees only that instructor’s batches in authorized branches.</p></div>
+            <div className="erp-panel-head"><div><h2>Instructor sign-ins</h2><p>Only the Owner, a Co-owner or an authorized branch Admin can grant or remove Instructor Portal access. Each account is linked to one instructor record and sees only that instructor’s batches in authorized branches.</p></div>
               <span className="erp-search"><Search size={16}/><input aria-label="Search instructors" placeholder="Search instructor or email…" value={instructorQuery} onChange={e => setInstructorQuery(e.target.value)}/></span>
             </div>
             {instructors.length === 0 ? <Empty icon={Users} title="No instructors in your scope" text="Add an instructor in Batches, sync the record, then grant sign-in access here."/> :
@@ -1245,7 +1247,7 @@ export function RoleAccessPage(props) {
       </>}
     </>}
 
-    {instructorAccess && <InstructorAccessDialog
+    {instructorAccess && manageInstructors && canManageAccess(ctx) && <InstructorAccessDialog
       instructor={instructorAccess}
       branches={authorizedBranches}
       erp={erp}
@@ -1276,15 +1278,15 @@ export function BatchesPage(props) {
     && (ctx.role !== 'student' || data.enrollments.some(e => e.batchId === b.id && e.studentId === ctx.studentId && e.status === 'active')));
   const toggleDay = day => setEditing(prev => ({...prev, days: prev.days.includes(day) ? prev.days.filter(d => d !== day) : [...prev.days, day]}));
   const saveBatch = async e => { e.preventDefault(); if (!editing.days.length) return; if (await erp.act(c => c.saveBatch(editing), 'Batch saved.')) setEditing(null); };
-  const saveInstructor = async e => { e.preventDefault(); if (await erp.act(c => c.saveInstructor(newInstructor), 'Instructor saved.')) setNewInstructor(null); };
+  const saveInstructor = async e => { e.preventDefault(); if (!canSetupInstructorProfiles(ctx)) return; if (await erp.act(c => c.saveInstructor(newInstructor), 'Instructor saved.')) setNewInstructor(null); };
   const rosterList = roster ? data.enrollments.filter(e => e.batchId === roster.id && e.status === 'active') : [];
   const addable = roster ? data.students.filter(s => s.status === 'active' && s.branchId === roster.branchId && !rosterList.some(e => e.studentId === s.id)) : [];
   return <>
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{ctx.role === 'student' ? 'My batches' : 'Batches'} <span className="flower">✳</span></h1><p>{ctx.role === 'student' ? 'Only the batches assigned to you.' : 'Recurring class groups, instructors and rosters.'}</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
-    {canManage(ctx) && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Instructors</h2><p>{data.instructors.length} instructor(s)</p></div>
-      <button className="secondary-button" onClick={() => setNewInstructor({fullName: '', phone: '', email: '', branchId: data.branches[0]?.id || ''})}><Plus size={15}/> Add instructor</button></div>
+    {canSetupInstructorProfiles(ctx) && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Instructor profiles</h2><p>{data.instructors.length} instructor(s) · Profile setup is limited to the Owner, Co-owner and authorized branch Admins.</p></div>
+      <div className="erp-actions"><button className="secondary-button" onClick={() => go('access')}><KeyRound size={15}/> Portal access</button><button className="secondary-button" onClick={() => setNewInstructor({fullName: '', phone: '', email: '', branchId: data.branches[0]?.id || ''})}><Plus size={15}/> Add instructor</button></div></div>
       {data.instructors.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No instructors yet. Add one before creating a batch.</p> :
       <div className="erp-actions">{data.instructors.map(i => <span key={i.id} className="erp-badge lavender" style={{padding: '8px 12px', fontSize: 12}}>{i.fullName}{i.branchId ? ` · ${branchName(data, i.branchId)}` : ''}</span>)}</div>}
     </section>}
@@ -1304,7 +1306,7 @@ export function BatchesPage(props) {
           <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveBatch(b.id), b.status === 'archived' ? 'Batch restored.' : 'Batch archived.')}>{b.status === 'archived' ? 'Restore' : 'Archive'}</button></>}</td>}</tr>; })}
       </tbody></table></div>}
     </section>
-    {newInstructor && <Dialog title="Add instructor" onClose={() => setNewInstructor(null)}><form className="erp-form" onSubmit={saveInstructor}>
+    {newInstructor && canSetupInstructorProfiles(ctx) && <Dialog title="Add instructor" onClose={() => setNewInstructor(null)}><form className="erp-form" onSubmit={saveInstructor}>
       <label className="erp-field">Instructor name<input required value={newInstructor.fullName} onChange={e => setNewInstructor({...newInstructor, fullName: e.target.value})}/></label>
       <label className="erp-field">Branch<select required={!canManageOrg(ctx)} value={newInstructor.branchId} onChange={e => setNewInstructor({...newInstructor, branchId: e.target.value})}>{canManageOrg(ctx) ? <option value="">All branches</option> : <option value="">Choose branch…</option>}{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
       <label className="erp-field">Phone<input type="tel" value={newInstructor.phone} onChange={e => setNewInstructor({...newInstructor, phone: e.target.value})}/></label>
