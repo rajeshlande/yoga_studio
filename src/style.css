@@ -212,3 +212,23 @@ label,.password-label>button,.auth-switch,.auth-switch>button,.back-link,.nav-it
 @media(max-width:420px){
   .topbar .connection-badge span{max-width:118px;overflow:hidden;text-overflow:ellipsis}
 }
+
+/* Signed-in account that has not been granted an ERP organization/role yet */
+.no-org-screen{min-height:100svh;background:linear-gradient(135deg,#faf9fc,#f3edf8)}
+.no-org-header{max-width:1200px;margin:0 auto;padding:26px 32px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.no-org-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.no-org-user{display:flex;align-items:center;gap:8px;color:#8d7d99;font-size:11px;max-width:260px;overflow-wrap:anywhere}
+.no-org-main{max-width:780px;margin:0 auto;padding:52px 24px 72px}
+.no-org-main h1{font-size:34px;line-height:1.35;color:#514559;margin-top:12px}
+.no-org-main>p{font-size:13px;line-height:1.8;color:#9b92a4;margin-top:12px}
+:root[data-theme="dark"] .no-org-screen{background:linear-gradient(135deg,#171320,#211a30)}
+:root[data-theme="dark"] .no-org-main h1{color:#f0e8f7}
+:root[data-theme="dark"] .no-org-main>p{color:#aa99bd}
+:root[data-theme="dark"] .no-org-user{color:#bfadd1}
+@media(max-width:650px){
+  .no-org-header{align-items:flex-start;padding:22px 18px}
+  .no-org-actions{gap:8px}
+  .no-org-user{display:none}
+  .no-org-main{padding:38px 18px 56px}
+  .no-org-main h1{font-size:29px}
+}

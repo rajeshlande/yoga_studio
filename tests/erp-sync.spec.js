@@ -591,9 +591,16 @@ test('waiting student can retry after an admin grants portal access', async ({pa
   });
 
   await page.goto('/');
-  await signIn(page);
+  await page.getByLabel('Email address').fill(account.email);
+  await page.getByLabel('Password', {exact: true}).fill('valid-test-password');
+  await page.getByRole('button', {name: 'Sign in', exact: true}).click();
+  await expect(page.getByRole('heading', {name: /Waiting for studio access/})).toBeVisible();
   await expect(page.getByText('This account is not connected to a studio yet.')).toBeVisible();
-  await expect(page.getByText(/Student\? Do not create an organization/)).toBeVisible();
+  await expect(page.getByText('Waiting for your studio to grant access.')).toBeVisible();
+  await expect(page.getByRole('radio', {name: /Join an existing studio/})).toBeChecked();
+  await expect(page.getByRole('navigation', {name: 'Main navigation'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Create organization'})).toHaveCount(0);
+  await expect(page.getByLabel('Organization name')).toHaveCount(0);
 
   granted = true;
   await page.getByRole('button', {name: 'Retry'}).click();
@@ -601,6 +608,64 @@ test('waiting student can retry after an admin grants portal access', async ({pa
   await expect(page.getByLabel('Signed-in student')).toHaveValue(STUDENT);
   await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);
   await expect(page.getByText('My dues')).toBeVisible();
+});
+
+test('prospective owner explicitly chooses the studio creation path', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+  let created = false;
+  const server = {...emptySnapshot(), billingSettings: []};
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split('/').pop();
+    const reply = value => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(value),
+    });
+    if (name === 'erp_get_context') {
+      return reply(created ? {
+        organizationId: ORG, organizationName: 'New Yoga Studio', roles: ['owner'],
+        instructorId: null, studentId: null,
+      } : {
+        organizationId: null, organizationName: '', roles: [],
+        instructorId: null, studentId: null,
+      });
+    }
+    if (name === 'erp_get_snapshot') {
+      if (!created) {
+        return route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({code: 'P0001', message: 'NO_ORGANIZATION: create or join an organization first'}),
+        });
+      }
+      return reply(structuredClone(server));
+    }
+    if (name === 'erp_bootstrap_organization') {
+      created = true;
+      return reply({organizationId: ORG, alreadyExisted: false});
+    }
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    return route.fulfill({
+      status: 404, contentType: 'application/json',
+      body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'}),
+    });
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Email address').fill(account.email);
+  await page.getByLabel('Password', {exact: true}).fill('valid-test-password');
+  await page.getByRole('button', {name: 'Sign in', exact: true}).click();
+  await expect(page.getByRole('heading', {name: /Waiting for studio access/})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Create organization'})).toHaveCount(0);
+
+  await page.getByRole('radio', {name: /Create my own studio/}).check();
+  await expect(page.getByRole('heading', {name: /Create your studio/})).toBeVisible();
+  await page.getByLabel('Organization name').fill('New Yoga Studio');
+  await page.getByRole('button', {name: 'Create organization'}).click();
+
+  await expect(page.getByRole('heading', {name: /Welcome back, Test/})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Set up your studio'})).toBeVisible();
+  await expect(page.getByText('Supabase · Synced')).toBeVisible();
 });
 
 test('payment setup saved offline stays local, warns before close, then auto-syncs', async ({page}) => {

@@ -264,10 +264,18 @@ function Empty({icon: Icon, title, text, action}) {
   return <div className="erp-empty"><Icon size={34} strokeWidth={1.4}/><h3>{title}</h3><p>{text}</p>{action}</div>;
 }
 
-export function ErpBlockingState({erp, mode, setMode}) {
+export function ErpBlockingState({erp, mode, setMode, accountIntent = '', onAccountIntentChange}) {
   const [orgName, setOrgName] = useState('Yoga Studio');
+  const [intentChoice, setIntentChoice] = useState(accountIntent || 'member');
+  const [hadKnownIntent] = useState(Boolean(accountIntent));
+  useEffect(() => { if (accountIntent) setIntentChoice(accountIntent); }, [accountIntent]);
   if (!erp.error) return null;
   const noOrg = /NO_ORGANIZATION|no organization/i.test(erp.error.message || '');
+  const effectiveIntent = accountIntent || intentChoice;
+  const chooseIntent = intent => {
+    setIntentChoice(intent);
+    onAccountIntentChange?.(intent);
+  };
   return <div className="erp-banner blue" role="alert"><AlertCircle size={20}/>
     <div style={{flex: 1}}>
       {erp.setupNeeded ? <>
@@ -275,16 +283,30 @@ export function ErpBlockingState({erp, mode, setMode}) {
         Open your Supabase project → <b>SQL Editor</b> → paste the full contents of <b>supabase/erp_setup.sql</b> from this repository → <b>Run</b>. Then retry. Your existing login keeps working either way.
       </> : noOrg ? <>
         <strong>This account is not connected to a studio yet.</strong><br/>
-        <b>Studio owner?</b> Create your organization below; this one step makes your signed-in account the primary Owner, and you can add branches right after.<br/>
-        <b>Co-owner, Admin, Instructor or Student?</b> Do not create an organization. Ask an Owner/Co-owner to link your exact sign-in email in <b>Access</b> (Students use <b>Students → Portal access</b>). Then press <b>Retry</b>.
-        <div className="erp-actions" style={{marginTop: 10}}>
-          <span className="erp-search"><Building2 size={15}/><input aria-label="Organization name" value={orgName} onChange={e => setOrgName(e.target.value)}/></span>
-          <button className="primary-button" onClick={async () => { if (await erp.act(c => c.bootstrapOrganization(orgName.trim() || 'Yoga Studio'), 'Organization created. Add your first branch.')) erp.load(); }}>Create organization</button>
-        </div>
+        {!hadKnownIntent && <fieldset className="account-intent">
+          <legend>How will you use Yoga Studio?</legend>
+          <label>
+            <input type="radio" name="waiting-account-intent" value="member" checked={effectiveIntent === 'member'} onChange={() => chooseIntent('member')}/>
+            <span><strong>Join an existing studio</strong><small>Student, Instructor, Admin or Co-owner. The studio must grant access to this sign-in email.</small></span>
+          </label>
+          <label>
+            <input type="radio" name="waiting-account-intent" value="owner" checked={effectiveIntent === 'owner'} onChange={() => chooseIntent('owner')}/>
+            <span><strong>Create my own studio</strong><small>Only choose this if you are the primary studio Owner.</small></span>
+          </label>
+        </fieldset>}
+        {effectiveIntent === 'owner' ? <>
+          Create your organization below; this one step makes your signed-in account the primary Owner, and you can add branches right after.
+          <div className="erp-actions" style={{marginTop: 10}}>
+            <span className="erp-search"><Building2 size={15}/><input aria-label="Organization name" value={orgName} onChange={e => setOrgName(e.target.value)}/></span>
+            <button className="primary-button" onClick={async () => { if (await erp.act(c => c.bootstrapOrganization(orgName.trim() || 'Yoga Studio'), 'Organization created. Add your first branch.')) erp.load(); }}>Create organization</button>
+          </div>
+        </> : <>
+          <b>Waiting for your studio to grant access.</b> Ask an Owner or Co-owner to link your exact sign-in email in <b>Access</b>. For a Student account, they use <b>Students → Portal access</b>. You will receive only the role and records your studio grants to this account. Press <b>Retry</b> after they grant access.
+        </>}
       </> : <><strong>Could not load studio data.</strong><br/>{erp.error.message || 'Please check your connection and try again.'}</>}
       <div className="erp-actions" style={{marginTop: 10}}>
         <button className="secondary-button" onClick={erp.load}>Retry</button>
-        {mode === 'supabase' && <button className="secondary-button" onClick={() => setMode('local')}>Use this device only (offline)</button>}
+        {mode === 'supabase' && !(noOrg && effectiveIntent === 'member') && <button className="secondary-button" onClick={() => setMode('local')}>Use this device only (offline)</button>}
       </div>
     </div>
   </div>;

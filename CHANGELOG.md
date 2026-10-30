@@ -34,6 +34,13 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 - **Student workflow retained:** Student accounts remain managed from
   **Students → Portal access**, preserving branch-move link transfer,
   inactive-student denial and the view-only own-record portal.
+- **Joining-account onboarding:** sign-up now defaults to **Join an existing
+  studio** for Students and staff. An unlinked joining account receives a
+  dedicated **Waiting for studio access** screen with no ERP navigation,
+  studio records or organization-creation controls. Only an account that
+  explicitly chooses **Create my own studio** is routed to organization
+  creation; the choice is onboarding routing only and does not itself grant
+  an ERP role.
 
 ### Security and behavior
 
@@ -59,7 +66,9 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   `NULL`, so `IF NOT ...` authorization guards cannot be bypassed by a
   missing role row.
 - Browser coverage adds Owner Co-owner/Admin/Instructor management,
-  branch-Admin UI restrictions and signed-in Instructor locking. PGlite
+  branch-Admin UI restrictions, signed-in Instructor locking, the waiting
+  joining-account screen and the explicit prospective-Owner creation path.
+  PGlite
   validation exercises the RPC surface as `authenticated`; live Supabase
   Auth/RLS UAT with five real accounts remains required after deployment.
 

@@ -105,10 +105,17 @@ None/View/Manage permission editors. The SQL snapshot, direct RPCs and
 hiding a screen in React is not treated as authorization.
 
 For Co-owner, Admin and Instructor accounts, the person first creates and
-confirms a normal Yoga Studio account and must not create their own
-organization. An authorized manager then opens **Access** online, enters
-that exact sign-in email and, for Admin/Instructor roles, selects explicit
-active branches. Only the primary Owner can grant/remove a Co-owner.
+confirms a normal Yoga Studio account with **Join an existing studio**
+selected during sign-up. An authorized manager then opens **Access** online,
+enters that exact sign-in email and, for Admin/Instructor roles, selects
+explicit active branches. The sign-up choice is onboarding routing only; it
+does not grant a role. Actual authorization still comes only from the
+server-checked grant. If a joining account signs in before that grant, it
+receives a dedicated **Waiting for studio access** screen with no ERP
+navigation, studio records or organization-creation controls. Accounts
+created before the sign-up choice existed choose **Join an existing studio**
+on that waiting screen; only an account explicitly routed as the primary
+studio Owner sees the organization-creation form. Only the primary Owner can grant/remove a Co-owner.
 Owner/Co-owner can grant, replace the complete selected-branch set for, or
 remove an Admin. Owner/Co-owner can replace an Instructor's global sign-in;
 a branch Admin can manage that instructor's sign-in only within the Admin's
@@ -123,14 +130,15 @@ ineffective.
 
 Student sign-in provisioning remains a two-person, server-checked flow:
 
-1. The student creates a normal Yoga Studio account with the email they will
-   use to sign in and opens Supabase's email-confirmation link. The student
-   must **not** create their own organization.
+1. The student creates a normal Yoga Studio account with **Join an existing
+   studio** selected, using the email they will use to sign in, and opens
+   Supabase's email-confirmation link. Student sign-up uses this joining path
+   by default and does not present organization creation.
 2. In Supabase mode, the Owner, a Co-owner or an Admin assigned to that
    student's branch opens **Students → Portal access**, enters the
    exact confirmed sign-in email and grants access. The student can then use
    **Retry** or **Sync now** if the app was already open on the
-   no-organization screen.
+   **Waiting for studio access** screen.
 3. **Students → Portal access** can replace the sign-in email or remove
    access. Replacement suspends the previous link; removal suspends the
    active link without deleting the Auth account, student record or payment
@@ -294,11 +302,12 @@ a backup.
    that SQL v5 is required.
 2. Ensure the app is built with `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_ANON_KEY` (publishable/anon key only).
-3. Sign in while online → **Settings → Data mode: Supabase**. On the
-   dashboard, create your organization once (this account becomes Owner),
-   wait for **Supabase · Synced**, and only then test offline work.
-4. For every other person, have them sign up and confirm their email first
-   without creating an organization. Then use **Access** online for
+3. The primary Owner signs up with **Create my own studio** selected, signs
+   in while online, and chooses **Settings → Data mode: Supabase** if needed.
+   Create the organization once, wait for **Supabase · Synced**, and only
+   then test offline work.
+4. For every other person, have them sign up with **Join an existing studio**
+   selected and confirm their email first. Then use **Access** online for
    Co-owner, Admin or Instructor sign-ins and **Students → Portal access**
    for a Student. Manual membership SQL at the bottom of the setup file is
    now an emergency-repair fallback only and bypasses in-app conflict
@@ -316,7 +325,7 @@ rule), keeping it idempotent and non-destructive.
   inclusive/exclusive and CGST/SGST/IGST calculations, UPI URI construction,
   payment-setup validation, corrupt-primary sync-state recovery, and proof
   that student portal metadata never enters an offline student upsert.
-- `npm test` also runs fourteen Playwright tests: the existing auth suite,
+- `npm test` also runs fifteen Playwright tests: the existing auth suite,
   `tests/erp-local.spec.js` for separate local mode (including GST Payment
   setup, dynamic UPI QR, unpaid vs paid invoice behaviour and generation of a
   real `%PDF` through Chromium), and `tests/erp-sync.spec.js`, which mocks
@@ -325,9 +334,10 @@ rule), keeping it idempotent and non-destructive.
   offline Payment setup → mirrored queue/close guard → automatic sync,
   Owner Student/Co-owner/Admin/Instructor access flows by email,
   branch-Admin hiding of organization-role and Owner/Co-owner setup actions,
-  signed-in Instructor identity locking, a waiting student's Retry after
-  grant, and the signed-in student's view-only portal plus online revocation
-  display clearing.
+  signed-in Instructor identity locking, a waiting student's dedicated
+  no-access screen and Retry after grant, an explicit prospective-Owner
+  organization-creation path, and the signed-in student's view-only portal
+  plus online revocation display clearing.
 - During development the full SQL file was also executed twice (idempotent
   rerun) in an ephemeral PGlite Postgres with stub Auth users/`auth.uid()`.
   In addition to the prior sync, billing, payment and Student-access checks,

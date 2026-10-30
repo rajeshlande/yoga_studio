@@ -292,13 +292,17 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
 3. Configure the production Site URL and allowed redirect URL for
    `https://rajeshlande.github.io/yoga_studio/`; add your local development
    origin separately.
-4. Sign up/sign in through the app, select **Settings → Data mode:
-   Supabase**, create the organization once and wait for **Online · synced**.
-5. For every additional user, have that person create and confirm their own
-   account first (they must not create an organization). Then link the exact
-   sign-in email in **Access** for Co-owner/Admin/Instructor roles, selecting
-   branches for Admin/Instructor access, or in **Students → Portal access**
-   for a Student. Access changes are online-only and never enter the offline
+4. The primary studio Owner selects **Create my own studio** during sign-up,
+   signs in through the app, selects **Settings → Data mode: Supabase** if
+   needed, creates the organization once and waits for **Online · synced**.
+5. For every additional user, have that person select **Join an existing
+   studio** during sign-up and confirm their own account first. Then link the
+   exact sign-in email in **Access** for Co-owner/Admin/Instructor roles,
+   selecting branches for Admin/Instructor access, or in
+   **Students → Portal access** for a Student. If a joining user signs in
+   before the grant, they see a dedicated **Waiting for studio access**
+   screen with no ERP navigation, studio data or organization-creation
+   controls. Access changes are online-only and never enter the offline
    outbox.
 
 ## Configuration
@@ -361,9 +365,10 @@ The suite includes:
 - mocked-Supabase role-access tests proving Owner grant/remove for Student,
   Co-owner, selected-branch Admin and Instructor accounts by registered
   email; branch-Admin hiding of organization roles/plans/payment setup;
-  signed-in Instructor identity locking; a waiting student's Retry flow;
-  the student's view-only portal; and cleared studio display after online
-  revocation;
+  signed-in Instructor identity locking; a waiting student's dedicated
+  no-access screen and Retry flow; an explicit prospective-Owner creation
+  path; the student's view-only portal; and cleared studio display after
+  online revocation;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
   browser-close guard and automatic sync after reconnect.
 

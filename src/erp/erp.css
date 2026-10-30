@@ -60,6 +60,14 @@
 .erp-access-branches label{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:8px 10px;border:1px solid #e7e0ed;border-radius:999px;background:#fdfcfe;color:#514559;font-size:12px;font-weight:600;cursor:pointer}
 .erp-access-branches input{width:18px;height:18px;min-height:18px;accent-color:#8664ba;flex-shrink:0}
 .erp-access-branches p{font-size:12px;color:#9b92a4;margin:2px 0}
+.account-intent{border:1px solid #ded1ef;border-radius:12px;padding:12px;min-width:0;margin:12px 0}
+.account-intent legend{padding:0 6px;font-size:11px;font-weight:700;color:#6f5589;letter-spacing:.03em}
+.account-intent label{display:flex;align-items:flex-start;gap:10px;min-height:44px;padding:11px 12px;border:1px solid #e7e0ed;border-radius:10px;background:#fdfcfe;color:#514559;cursor:pointer}
+.account-intent label+label{margin-top:8px}
+.account-intent label:has(input:checked){border-color:#b59aca;background:#f6f1fb;box-shadow:0 0 0 3px #ac8fd012}
+.account-intent input{width:18px;height:18px;min-height:18px;accent-color:#8664ba;flex-shrink:0;margin-top:2px}
+.account-intent strong{display:block;font-size:12px;line-height:1.45;color:#514559}
+.account-intent small{display:block;margin-top:3px;font-size:10px;line-height:1.55;color:#9b92a4;font-weight:400}
 .erp-seg{display:inline-flex;max-width:100%;overflow-x:auto;background:#f4eff8;border-radius:10px;padding:3px;gap:2px;vertical-align:top;scrollbar-width:none}
 .erp-seg::-webkit-scrollbar{display:none}
 .erp-seg button{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;padding:8px 13px;border-radius:8px;font-size:12px;font-weight:600;color:#8d7d99;min-height:38px;line-height:1.2;white-space:nowrap}
@@ -248,6 +256,12 @@
 :root[data-theme="dark"] .erp-access-branches legend{color:#c3b2d4}
 :root[data-theme="dark"] .erp-access-branches label{background:#251f34;border-color:#3a304d;color:#ddd2e9}
 :root[data-theme="dark"] .erp-access-branches p{color:#aa99bd}
+:root[data-theme="dark"] .account-intent{border-color:#493761}
+:root[data-theme="dark"] .account-intent legend{color:#cdb1eb}
+:root[data-theme="dark"] .account-intent label{background:#251f34;border-color:#3a304d;color:#ddd2e9}
+:root[data-theme="dark"] .account-intent label:has(input:checked){background:#312649;border-color:#6b548d}
+:root[data-theme="dark"] .account-intent strong{color:#f0e8f7}
+:root[data-theme="dark"] .account-intent small{color:#aa99bd}
 :root[data-theme="dark"] .erp-check-num{background:#312649;color:#cdb1eb}
 :root[data-theme="dark"] .erp-banner{background:#3d3020;border-color:#5c4825;color:#f0d3a0}
 :root[data-theme="dark"] .erp-banner.blue{background:#2d2344;border-color:#493761;color:#d8c7f1}

@@ -2,7 +2,8 @@ import {test,expect} from '@playwright/test';
 import {mockAuth,signIn,accessToken} from './auth-fixture';
 import pkg from '../package.json' with {type:'json'};
 
-test.beforeEach(async({page})=>{page.on('pageerror',error=>console.error('Browser page error:',error.message));await mockAuth(page)});
+let authCalls;
+test.beforeEach(async({page})=>{page.on('pageerror',error=>console.error('Browser page error:',error.message));authCalls=await mockAuth(page)});
 
 test('real session path gates dashboard; profile persists through mocked provider; logout closes access',async({page})=>{
  await page.goto('/#dashboard');
@@ -32,6 +33,7 @@ test('signup validates names; login errors are safe; forgot password calls provi
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await expect(page.getByRole('alert')).toHaveText('Email or password is incorrect. Please try again.');
  await page.getByRole('button',{name:'Create an account',exact:true}).click();
+ await expect(page.getByRole('radio',{name:/Join an existing studio/})).toBeChecked();
  await page.getByLabel('Full name').fill('   ');
  await page.getByLabel('Email address').fill('qa@example.test');
  await page.getByLabel('Password',{exact:true}).fill('valid-test-password');
@@ -40,6 +42,7 @@ test('signup validates names; login errors are safe; forgot password calls provi
  await page.getByLabel('Full name').fill('New Member');
  await page.getByRole('button',{name:'Create your account'}).click();
  await expect(page.getByRole('heading',{name:'Your space is almost ready.'})).toBeVisible();
+ expect(authCalls.find(call=>call.path.endsWith('/signup')).data.data.account_intent).toBe('member');
  await page.getByRole('button',{name:'Back to sign in',exact:true}).click();
  await page.getByRole('button',{name:'Forgot password?'}).click();
  await page.getByLabel('Email address').fill('qa@example.test');
