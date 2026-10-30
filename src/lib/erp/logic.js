@@ -15,6 +15,7 @@ export const ATTENDANCE_STATUSES = [
 ];
 export const ROLES = [
   {id: 'owner', label: 'Owner'},
+  {id: 'co_owner', label: 'Co-owner'},
   {id: 'admin', label: 'Admin'},
   {id: 'instructor', label: 'Instructor'},
   {id: 'student', label: 'Student'},

@@ -6,6 +6,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.6.0 — 2026-10-30
+
+### Added — Fixed Role Access for Owner, Co-owner, Admin, Instructor and Student
+
+- **Access page:** Owner, Co-owner and branch Admin users now get a central
+  **Access** screen with a fixed five-role authorization matrix, current
+  actor/branch scope, refresh/offline/error states and a shortcut to the
+  existing Student portal workflow. Role changes are online-only and are
+  never placed in the offline sync outbox.
+- **Co-owner access:** only the protected primary Owner can add or remove a
+  Co-owner by that person's confirmed sign-in email. A Co-owner operates all
+  branches and can manage Admin, Instructor and Student access, plans and
+  Payment setup, but cannot transfer ownership or add/remove the Owner or
+  another Co-owner.
+- **Selected-branch Admin access:** Owner/Co-owner can grant an Admin to an
+  explicit set of active branches; saving again replaces that account's
+  complete branch assignment. A branch Admin can operate and manage
+  Instructor/Student access only in assigned branches. Branch Admins can
+  read plans/billing settings needed for operations but can no longer
+  create/edit plans or change Payment setup.
+- **Instructor sign-ins:** an Instructor account is linked to exactly one
+  active instructor record and explicit sign-in branches. Owner/Co-owner
+  can replace the global sign-in; a branch Admin can manage only their
+  branch portion and cannot replace another account globally. Supabase mode
+  locks the signed-in Instructor identity in the toolbar.
+- **Student workflow retained:** Student accounts remain managed from
+  **Students → Portal access**, preserving branch-move link transfer,
+  inactive-student denial and the view-only own-record portal.
+
+### Security and behavior
+
+- SQL v5 treats `co_owner` as a distinct organization role and enforces the
+  fixed matrix in context, snapshot, direct RPC and offline-sync paths.
+  Branch Admins are checked against both current and destination branches
+  for records that can move; branch creation, unassigned Instructor
+  creation, plans, Billing Settings and historical null-branch payment
+  voids are Owner/Co-owner-only.
+- Instructor snapshot and attendance rules require both the linked
+  instructor record on the batch and active access to that batch's branch.
+  Instructors receive no plans, memberships or payments in their snapshot.
+  Attendance sync also checks the existing record's current batch so a row
+  cannot be moved across an authorization boundary.
+- New access grants resolve confirmed, usable Supabase accounts only on the
+  server; reject cross-organization and conflicting active-role accounts;
+  serialize changes per organization; suspend rather than delete removed
+  links; and write audit rows. Inactive linked Instructor/Student records
+  make sign-in ineffective. Internal authorization/account-resolution
+  helpers are revoked from browser API roles.
+- Important three-valued-logic hardening: organization-manager and
+  branch-manager helpers now return strict `true`/`false`, never SQL
+  `NULL`, so `IF NOT ...` authorization guards cannot be bypassed by a
+  missing role row.
+- Browser coverage adds Owner Co-owner/Admin/Instructor management,
+  branch-Admin UI restrictions and signed-in Instructor locking. PGlite
+  validation exercises the RPC surface as `authenticated`; live Supabase
+  Auth/RLS UAT with five real accounts remains required after deployment.
+
+### Database migration — SQL v5
+
+- Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
+  Editor. SQL v5 adds `erp_list_role_access()`,
+  `erp_grant_co_owner_access(text)`, `erp_revoke_co_owner_access(uuid)`,
+  `erp_grant_admin_access(text, uuid[])`,
+  `erp_revoke_admin_access(uuid)`,
+  `erp_grant_instructor_access(uuid, text, uuid[])` and
+  `erp_revoke_instructor_access(uuid)`, strengthens branch checks across
+  existing RPC/sync functions, adds lookup indexes and revokes internal
+  helpers. The single setup file remains idempotent and does not delete
+  business rows. Deploy/run SQL v5 before using **Access** or relying on
+  the narrowed branch-Admin permissions.
+
 ## 1.5.0 — 2026-10-30
 
 ### Added — In-app Student portal access

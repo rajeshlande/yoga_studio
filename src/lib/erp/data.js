@@ -69,7 +69,7 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v4) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v5) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -94,7 +94,7 @@ function studentAccessError(error) {
     return new Error('This student’s branch is archived. Restore the branch before granting portal access.');
   }
   if (/FORBIDDEN/.test(text)) {
-    return new Error('Only the Owner or an Admin of this student’s branch can change student portal access.');
+    return new Error('Only the Owner, a Co-owner or an Admin of this student’s branch can change student portal access.');
   }
   if (/VALIDATION_FAILED/.test(text)) {
     return new Error('Enter the student’s valid sign-in email.');
@@ -103,6 +103,59 @@ function studentAccessError(error) {
     return new Error('Student portal access can be changed only while online. Reconnect and try again.');
   }
   return error instanceof Error ? error : new Error(error?.message || 'Student portal access could not be updated.');
+}
+
+function roleAccessError(error) {
+  if (isMissingRpcError(error)) {
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v5) in Supabase, then try again.');
+  }
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
+  if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
+    return new Error('No usable Yoga Studio account uses that email yet. Ask the person to create an account with this exact email, confirm it, and not create an organization. Then grant access again.');
+  }
+  if (/ACCESS_ACCOUNT_UNCONFIRMED/.test(text)) {
+    return new Error('That account exists, but its email has not been confirmed yet. Ask the person to open the confirmation link, then grant access again.');
+  }
+  if (/ACCESS_ACCOUNT_ALREADY_OWNER/.test(text)) {
+    return new Error('That account is already an organization Owner. Use a separate account for a different ERP role.');
+  }
+  if (/ACCESS_ACCOUNT_OTHER_ORG/.test(text)) {
+    return new Error('That account already has access to a different studio organization. Use a separate account for this studio.');
+  }
+  if (/ACCESS_ACCOUNT_ROLE_CONFLICT/.test(text)) {
+    return new Error('That account already has another active ERP role in this studio. Remove that role first, or use a separate account.');
+  }
+  if (/ACCESS_INSTRUCTOR_ALREADY_LINKED/.test(text)) {
+    return new Error('That instructor is already linked to a different sign-in account. An Owner or Co-owner must replace the instructor’s global sign-in.');
+  }
+  if (/INSTRUCTOR_INACTIVE/.test(text)) {
+    return new Error('This instructor record is inactive. Reactivate the instructor before granting sign-in access.');
+  }
+  if (/INSTRUCTOR_BRANCH_REQUIRED/.test(text)) {
+    return new Error('Select at least one active branch where this instructor may sign in and view their batches.');
+  }
+  if (/ACCESS_BRANCH_REQUIRED/.test(text)) {
+    return new Error('Select at least one active branch for this Admin.');
+  }
+  if (/ACCESS_BRANCH_ARCHIVED/.test(text)) {
+    return new Error('A selected branch is archived. Restore it before granting access there.');
+  }
+  if (/PRIMARY_OWNER_PROTECTED/.test(text)) {
+    return new Error('The primary Owner is protected and cannot be removed from Role Access.');
+  }
+  if (/FORBIDDEN/.test(text)) {
+    return new Error('Your current role or branch assignment does not allow this access change.');
+  }
+  if (/VALIDATION_FAILED/.test(text)) {
+    return new Error('Check the sign-in email, role and branch selection, then try again.');
+  }
+  if (/NO_ORGANIZATION/.test(text)) {
+    return new Error('This account is not connected to a studio organization yet.');
+  }
+  if (isOfflineError(error)) {
+    return new Error('Role access can be changed only while online. Reconnect and try again.');
+  }
+  return error instanceof Error ? error : new Error(error?.message || 'Role access could not be updated.');
 }
 
 const emptySyncSummary = (mode, overrides = {}) => ({
@@ -137,6 +190,27 @@ export function createErpClient(mode, options = {}) {
       },
       async revokeStudentAccess() {
         throw new Error('Student sign-in access is available only in Supabase mode.');
+      },
+      async listRoleAccess() {
+        throw new Error('Role account access is available only in Supabase mode.');
+      },
+      async grantCoOwnerAccess() {
+        throw new Error('Role account access is available only in Supabase mode.');
+      },
+      async revokeCoOwnerAccess() {
+        throw new Error('Role account access is available only in Supabase mode.');
+      },
+      async grantAdminAccess() {
+        throw new Error('Role account access is available only in Supabase mode.');
+      },
+      async revokeAdminAccess() {
+        throw new Error('Role account access is available only in Supabase mode.');
+      },
+      async grantInstructorAccess() {
+        throw new Error('Role account access is available only in Supabase mode.');
+      },
+      async revokeInstructorAccess() {
+        throw new Error('Role account access is available only in Supabase mode.');
       },
       refreshFromStorage() { return null; },
     };
@@ -576,8 +650,9 @@ export function createErpClient(mode, options = {}) {
     emit({snapshot: true});
   }
 
-  async function requireSyncedStudent(studentId) {
-    if (!studentId) throw new Error('VALIDATION_FAILED: student');
+  async function requireSyncedRecords(entity, ids, label) {
+    const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+    if (!entity || !uniqueIds.length) throw new Error(`VALIDATION_FAILED: ${label || entity || 'record'}`);
     if (!browserOnline()) {
       const error = new Error('Offline');
       error.code = 'OFFLINE';
@@ -587,17 +662,22 @@ export function createErpClient(mode, options = {}) {
     if (!state.organizationId) throw new Error('NO_ORGANIZATION: create or join an organization first');
     await syncNow();
     reloadFromStorage();
-    const waiting = (state.outbox || []).some(
-      op => op.entity === 'students' && op.entityId === studentId,
-    );
-    const conflicted = (state.conflicts || []).some(
-      conflict => conflict.op?.entity === 'students' && conflict.op?.entityId === studentId,
-    );
-    const onServer = (state.baseSnapshot?.students || []).some(student => student.id === studentId);
-    if (waiting || conflicted || !onServer) {
-      throw new Error('Sync this student record before changing portal access. Resolve any sync conflict for the student, then try again.');
+    const display = label || entity.replace(/s$/, '');
+    for (const id of uniqueIds) {
+      const waiting = (state.outbox || []).some(
+        op => op.entity === entity && op.entityId === id,
+      );
+      const conflicted = (state.conflicts || []).some(
+        conflict => conflict.op?.entity === entity && conflict.op?.entityId === id,
+      );
+      const onServer = (state.baseSnapshot?.[entity] || []).some(record => record.id === id);
+      if (waiting || conflicted || !onServer) {
+        throw new Error(`Sync this ${display} record before changing access. Resolve any sync conflict for the ${display}, then try again.`);
+      }
     }
   }
+
+  const requireSyncedStudent = studentId => requireSyncedRecords('students', [studentId], 'student');
 
   async function refreshAfterStudentAccess(studentId, status, email) {
     // The RPC has already committed. Reflect its result immediately, then
@@ -736,6 +816,109 @@ export function createErpClient(mode, options = {}) {
         );
       } catch (error) {
         throw studentAccessError(error);
+      }
+    },
+
+    async listRoleAccess() {
+      try {
+        if (!browserOnline()) {
+          const error = new Error('Offline');
+          error.code = 'OFFLINE';
+          throw error;
+        }
+        const result = await rpc('erp_list_role_access');
+        return {
+          organizationId: result?.organizationId || state?.organizationId || '',
+          actor: result?.actor || {},
+          orgMembers: Array.isArray(result?.orgMembers) ? result.orgMembers : [],
+          adminAssignments: Array.isArray(result?.adminAssignments) ? result.adminAssignments : [],
+          instructors: Array.isArray(result?.instructors) ? result.instructors : [],
+        };
+      } catch (error) {
+        throw roleAccessError(error);
+      }
+    },
+
+    async grantCoOwnerAccess({email} = {}) {
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
+        throw roleAccessError(new Error('VALIDATION_FAILED: sign-in email'));
+      }
+      try {
+        return await rpc('erp_grant_co_owner_access', {p_email: cleanEmail});
+      } catch (error) {
+        throw roleAccessError(error);
+      }
+    },
+
+    async revokeCoOwnerAccess(input) {
+      const userId = typeof input === 'string' ? input : input?.userId;
+      if (!userId) throw roleAccessError(new Error('VALIDATION_FAILED: user'));
+      try {
+        return await rpc('erp_revoke_co_owner_access', {p_user_id: userId});
+      } catch (error) {
+        throw roleAccessError(error);
+      }
+    },
+
+    async grantAdminAccess({email, branchIds} = {}) {
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const uniqueBranchIds = [...new Set((branchIds || []).filter(Boolean))];
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail) || !uniqueBranchIds.length) {
+        throw roleAccessError(new Error(uniqueBranchIds.length
+          ? 'VALIDATION_FAILED: sign-in email'
+          : 'ACCESS_BRANCH_REQUIRED'));
+      }
+      try {
+        await requireSyncedRecords('branches', uniqueBranchIds, 'branch');
+        return await rpc('erp_grant_admin_access', {
+          p_email: cleanEmail,
+          p_branch_ids: uniqueBranchIds,
+        });
+      } catch (error) {
+        throw roleAccessError(error);
+      }
+    },
+
+    async revokeAdminAccess(input) {
+      const userId = typeof input === 'string' ? input : input?.userId;
+      if (!userId) throw roleAccessError(new Error('VALIDATION_FAILED: user'));
+      try {
+        return await rpc('erp_revoke_admin_access', {p_user_id: userId});
+      } catch (error) {
+        throw roleAccessError(error);
+      }
+    },
+
+    async grantInstructorAccess({instructorId, email, branchIds} = {}) {
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const uniqueBranchIds = [...new Set((branchIds || []).filter(Boolean))];
+      if (!instructorId || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail) || !uniqueBranchIds.length) {
+        throw roleAccessError(new Error(uniqueBranchIds.length
+          ? 'VALIDATION_FAILED: instructor sign-in'
+          : 'INSTRUCTOR_BRANCH_REQUIRED'));
+      }
+      try {
+        await requireSyncedRecords('instructors', [instructorId], 'instructor');
+        await requireSyncedRecords('branches', uniqueBranchIds, 'branch');
+        return await rpc('erp_grant_instructor_access', {
+          p_instructor_id: instructorId,
+          p_email: cleanEmail,
+          p_branch_ids: uniqueBranchIds,
+        });
+      } catch (error) {
+        throw roleAccessError(error);
+      }
+    },
+
+    async revokeInstructorAccess(input) {
+      const instructorId = typeof input === 'string' ? input : input?.instructorId;
+      if (!instructorId) throw roleAccessError(new Error('VALIDATION_FAILED: instructor'));
+      try {
+        await requireSyncedRecords('instructors', [instructorId], 'instructor');
+        return await rpc('erp_revoke_instructor_access', {p_instructor_id: instructorId});
+      } catch (error) {
+        throw roleAccessError(error);
       }
     },
 

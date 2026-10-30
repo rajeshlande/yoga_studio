@@ -3,7 +3,12 @@ import {mockAuth, signIn, account} from './auth-fixture';
 
 const ORG = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const BRANCH = '11111111-1111-4111-8111-111111111111';
+const BRANCH2 = '99999999-9999-4999-8999-999999999999';
 const STUDENT = '22222222-2222-4222-8222-222222222222';
+const INSTRUCTOR_RECORD = '33333333-3333-4333-8333-333333333333';
+const COOWNER_USER = '44444444-4444-4444-8444-444444444444';
+const ADMIN_USER = '55555555-5555-4555-8555-555555555555';
+const INSTRUCTOR_USER = '66666666-6666-4666-8666-666666666666';
 
 const emptySnapshot = () => ({
   branches: [], students: [], instructors: [], batches: [], enrollments: [],
@@ -238,6 +243,183 @@ test('owner grants and removes student portal access by registered email', async
   await dialog.getByRole('button', {name: 'Yes, remove access'}).click();
   await expect(row.getByText('Portal suspended')).toBeVisible();
   expect(revokeCalls).toEqual([{p_student_id: STUDENT}]);
+});
+
+test('owner manages co-owner, branch Admin and instructor sign-in access', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+
+  const server = emptySnapshot();
+  server.branches.push(
+    {id: BRANCH, name: 'Panvel', city: 'Panvel', address: '', phone: '', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1},
+    {id: BRANCH2, name: 'Nerul', city: 'Navi Mumbai', address: '', phone: '', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1},
+  );
+  server.instructors.push({
+    id: INSTRUCTOR_RECORD, branchId: BRANCH, fullName: 'Isha Rao', phone: '', email: 'isha-record@example.test',
+    specialties: ['Hatha'], status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+  });
+  const accessState = {
+    actor: {
+      userId: account.id, email: account.email, roles: ['owner'], primaryRole: 'owner', orgRole: 'owner',
+      branchIds: [BRANCH, BRANCH2], adminBranchIds: [],
+      canManageCoOwners: true, canManageAdmins: true, canManageInstructors: true, canManageStudents: true,
+    },
+    orgMembers: [{userId: account.id, email: account.email, role: 'owner', status: 'active', createdAt: '2026-01-01T00:00:00Z', isSelf: true}],
+    adminAssignments: [],
+    instructors: [{
+      instructorId: INSTRUCTOR_RECORD, fullName: 'Isha Rao', contactEmail: 'isha-record@example.test', phone: '',
+      branchId: BRANCH, recordStatus: 'active',
+      accessStatus: 'none', accessEmail: '', accessUserId: null, accessBranchIds: [], batchBranchIds: [BRANCH],
+    }],
+  };
+  const roleCalls = [];
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split('/').pop();
+    const body = route.request().postDataJSON() || {};
+    const reply = (value, status = 200) => route.fulfill({status, contentType: 'application/json', body: JSON.stringify(value)});
+    if (name === 'erp_get_context') {
+      return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['owner'], primaryRole: 'owner', adminBranchIds: [], instructorId: null, studentId: null});
+    }
+    if (name === 'erp_get_snapshot') return reply(structuredClone(server));
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    if (name === 'erp_list_role_access') return reply(structuredClone(accessState));
+    if (name === 'erp_grant_co_owner_access') {
+      roleCalls.push({name, body: structuredClone(body)});
+      accessState.orgMembers.push({userId: COOWNER_USER, email: body.p_email, role: 'co_owner', status: 'active', createdAt: '2026-10-30T00:00:00Z', isSelf: false});
+      return reply({userId: COOWNER_USER, email: body.p_email, role: 'co_owner'});
+    }
+    if (name === 'erp_grant_admin_access') {
+      roleCalls.push({name, body: structuredClone(body)});
+      accessState.adminAssignments = body.p_branch_ids.map(branchId => ({
+        userId: ADMIN_USER, email: body.p_email, role: 'admin', status: 'active', branchId,
+        createdAt: '2026-10-30T00:00:00Z', isSelf: false,
+      }));
+      return reply({userId: ADMIN_USER, email: body.p_email, role: 'admin', branchIds: body.p_branch_ids});
+    }
+    if (name === 'erp_grant_instructor_access') {
+      roleCalls.push({name, body: structuredClone(body)});
+      Object.assign(accessState.instructors[0], {
+        accessStatus: 'active', accessEmail: body.p_email, accessUserId: INSTRUCTOR_USER,
+        accessBranchIds: body.p_branch_ids,
+      });
+      return reply({instructorId: body.p_instructor_id, userId: INSTRUCTOR_USER, email: body.p_email, role: 'instructor', branchIds: body.p_branch_ids, accessStatus: 'active'});
+    }
+    if (name === 'erp_revoke_instructor_access') {
+      roleCalls.push({name, body: structuredClone(body)});
+      Object.assign(accessState.instructors[0], {accessStatus: 'suspended', accessBranchIds: []});
+      return reply({instructorId: body.p_instructor_id, email: 'instructor-login@example.test', accessStatus: 'suspended', linksSuspended: 1});
+    }
+    return reply({code: 'PGRST202', message: 'Function not mocked'}, 404);
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await page.getByRole('button', {name: 'Access', exact: true}).click();
+  await expect(page.getByRole('heading', {name: /Access/})).toBeVisible();
+  await expect(page.getByText('Role and branch authorization for every ERP sign-in.')).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Your authorization'})).toBeVisible();
+
+  await page.getByLabel('Co-owner sign-in email').fill('coowner@example.test');
+  await page.getByRole('button', {name: 'Add Co-owner', exact: true}).click();
+  await expect(page.getByRole('cell', {name: /coowner@example.test/})).toBeVisible();
+
+  await page.getByLabel('Admin sign-in email').fill('admin@example.test');
+  await page.getByRole('group', {name: 'New Admin branches'}).getByLabel('Nerul', {exact: true}).check();
+  await page.getByRole('button', {name: 'Grant Admin access'}).click();
+  const adminRow = page.getByRole('row', {name: /admin@example.test/});
+  await expect(adminRow).toBeVisible();
+  await expect(adminRow.getByLabel('Nerul for admin@example.test')).toBeChecked();
+
+  await page.getByRole('row', {name: /Isha Rao/}).getByRole('button', {name: 'Sign-in access'}).click();
+  const instructorDialog = page.getByRole('dialog', {name: 'Instructor sign-in access'});
+  await instructorDialog.getByLabel('Instructor sign-in email').fill('instructor-login@example.test');
+  await instructorDialog.getByLabel('Nerul for Isha Rao').check();
+  await instructorDialog.getByRole('button', {name: 'Grant access'}).click();
+  await expect(page.getByRole('row', {name: /Isha Rao.*instructor-login@example.test/})).toBeVisible();
+
+  expect(roleCalls).toEqual([
+    {name: 'erp_grant_co_owner_access', body: {p_email: 'coowner@example.test'}},
+    {name: 'erp_grant_admin_access', body: {p_email: 'admin@example.test', p_branch_ids: [BRANCH2]}},
+    {name: 'erp_grant_instructor_access', body: {p_instructor_id: INSTRUCTOR_RECORD, p_email: 'instructor-login@example.test', p_branch_ids: [BRANCH, BRANCH2]}},
+  ]);
+
+  await page.getByRole('row', {name: /Isha Rao/}).getByRole('button', {name: 'Sign-in access'}).click();
+  await instructorDialog.getByRole('button', {name: 'Remove access'}).click();
+  await instructorDialog.getByRole('button', {name: 'Yes, remove access'}).click();
+  await expect(page.getByRole('row', {name: /Isha Rao.*Suspended/})).toBeVisible();
+  expect(roleCalls.at(-1)).toEqual({name: 'erp_revoke_instructor_access', body: {p_instructor_id: INSTRUCTOR_RECORD}});
+});
+
+test('branch Admin access page hides organization roles and owner-only setup actions', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+  const server = emptySnapshot();
+  server.branches.push({id: BRANCH, name: 'Panvel', city: 'Panvel', address: '', phone: '', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  server.instructors.push({id: INSTRUCTOR_RECORD, branchId: BRANCH, fullName: 'Isha Rao', phone: '', email: 'isha-record@example.test', specialties: [], status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  server.plans.push({id: '77777777-7777-4777-8777-777777777777', name: 'Monthly', amountPaise: 150000, durationMonths: 1, status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  const accessState = {
+    actor: {
+      userId: account.id, email: account.email, roles: ['admin'], primaryRole: 'admin', orgRole: null,
+      branchIds: [BRANCH], adminBranchIds: [BRANCH],
+      canManageCoOwners: false, canManageAdmins: false, canManageInstructors: true, canManageStudents: true,
+    },
+    orgMembers: [], adminAssignments: [],
+    instructors: [{instructorId: INSTRUCTOR_RECORD, fullName: 'Isha Rao', contactEmail: 'isha-record@example.test', phone: '', branchId: BRANCH, recordStatus: 'active', accessStatus: 'none', accessEmail: '', accessUserId: null, accessBranchIds: [], batchBranchIds: [BRANCH]}],
+  };
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    const reply = value => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(value)});
+    if (name === 'erp_get_context') return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['admin'], primaryRole: 'admin', adminBranchIds: [BRANCH], instructorId: null, studentId: null});
+    if (name === 'erp_get_snapshot') return reply(structuredClone(server));
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    if (name === 'erp_list_role_access') return reply(structuredClone(accessState));
+    return route.fulfill({status: 404, contentType: 'application/json', body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'})});
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await page.getByRole('button', {name: 'Access', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Instructor sign-ins'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Owner & Co-owners'})).toHaveCount(0);
+  await expect(page.getByRole('heading', {name: 'Branch Admins'})).toHaveCount(0);
+
+  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await expect(page.getByRole('heading', {name: /Fees & payments/})).toBeVisible();
+  await page.getByRole('tab', {name: 'Plans'}).click();
+  await expect(page.getByRole('heading', {name: 'Plans', exact: true})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Add plan'})).toHaveCount(0);
+  await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
+});
+
+test('signed-in instructor is locked to their linked instructor record', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+  const server = emptySnapshot();
+  server.branches.push({id: BRANCH, name: 'Panvel', city: 'Panvel', address: '', phone: '', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  server.instructors.push({id: INSTRUCTOR_RECORD, branchId: BRANCH, fullName: 'Isha Rao', phone: '', email: 'isha-record@example.test', specialties: [], status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  server.batches.push({id: '88888888-8888-4888-8888-888888888888', branchId: BRANCH, name: 'Morning Hatha', instructorId: INSTRUCTOR_RECORD, days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20, status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    const reply = value => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(value)});
+    if (name === 'erp_get_context') return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['instructor'], primaryRole: 'instructor', adminBranchIds: [], instructorId: INSTRUCTOR_RECORD, studentId: null});
+    if (name === 'erp_get_snapshot') return reply(structuredClone(server));
+    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    return route.fulfill({status: 404, contentType: 'application/json', body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'})});
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await expect(page.getByRole('button', {name: 'Access', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Fees', exact: true})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Attendance', exact: true}).click();
+  const instructorPicker = page.getByLabel('Signed-in instructor');
+  await expect(instructorPicker).toBeDisabled();
+  await expect(instructorPicker).toHaveValue(INSTRUCTOR_RECORD);
+  await expect(page.getByRole('combobox', {name: 'Attendance batch'})).toHaveValue('88888888-8888-4888-8888-888888888888');
 });
 
 test('signed-in student sees a view-only portal for their own records', async ({page}) => {

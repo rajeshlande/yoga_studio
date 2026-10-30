@@ -275,8 +275,8 @@ export function ErpBlockingState({erp, mode, setMode}) {
         Open your Supabase project → <b>SQL Editor</b> → paste the full contents of <b>supabase/erp_setup.sql</b> from this repository → <b>Run</b>. Then retry. Your existing login keeps working either way.
       </> : noOrg ? <>
         <strong>This account is not connected to a studio yet.</strong><br/>
-        <b>Studio owner?</b> Create your organization below; this one step makes your signed-in account the Owner, and you can add branches right after.<br/>
-        <b>Student?</b> Do not create an organization. Ask the studio Owner/Admin to open <b>Students → Portal access</b> and link the exact email you used to sign in. Then press <b>Retry</b>.
+        <b>Studio owner?</b> Create your organization below; this one step makes your signed-in account the primary Owner, and you can add branches right after.<br/>
+        <b>Co-owner, Admin, Instructor or Student?</b> Do not create an organization. Ask an Owner/Co-owner to link your exact sign-in email in <b>Access</b> (Students use <b>Students → Portal access</b>). Then press <b>Retry</b>.
         <div className="erp-actions" style={{marginTop: 10}}>
           <span className="erp-search"><Building2 size={15}/><input aria-label="Organization name" value={orgName} onChange={e => setOrgName(e.target.value)}/></span>
           <button className="primary-button" onClick={async () => { if (await erp.act(c => c.bootstrapOrganization(orgName.trim() || 'Yoga Studio'), 'Organization created. Add your first branch.')) erp.load(); }}>Create organization</button>
@@ -436,12 +436,20 @@ export function ErpToolbar({data, ctx, setCtx, mode, remoteContext, erp}) {
         {data.branches.filter(b => b.status !== 'archived').map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
       </select>
     </label>
-    {ctx.role === 'instructor' && <label>Acting instructor
+    {ctx.role === 'instructor' && (mode === 'supabase' ? <label>Signed-in instructor
+      <select aria-label="Signed-in instructor" value={remoteContext?.instructorId || ctx.instructorId || ''} disabled>
+        <option value={remoteContext?.instructorId || ctx.instructorId || ''}>
+          {(remoteContext?.instructorId || ctx.instructorId)
+            ? (data.instructors.find(i => i.id === (remoteContext?.instructorId || ctx.instructorId))?.fullName || 'Your instructor record')
+            : 'Waiting for the studio to link your account'}
+        </option>
+      </select>
+    </label> : <label>Acting instructor
       <select aria-label="Acting instructor" value={ctx.instructorId || ''} onChange={e => set({instructorId: e.target.value})}>
         <option value="">Choose instructor…</option>
         {data.instructors.filter(i => i.status !== 'inactive').map(i => <option key={i.id} value={i.id}>{i.fullName}</option>)}
       </select>
-    </label>}
+    </label>)}
     {ctx.role === 'student' && (mode === 'supabase' ? <label>Signed-in student
       <select aria-label="Signed-in student" value={remoteContext?.studentId || ctx.studentId || ''} disabled>
         <option value={remoteContext?.studentId || ctx.studentId || ''}>
@@ -460,7 +468,9 @@ export function ErpToolbar({data, ctx, setCtx, mode, remoteContext, erp}) {
   </div>;
 }
 
-const canManage = ctx => ctx.role === 'owner' || ctx.role === 'admin';
+const canManage = ctx => ctx.role === 'owner' || ctx.role === 'co_owner' || ctx.role === 'admin';
+const canManageOrg = ctx => ctx.role === 'owner' || ctx.role === 'co_owner';
+const canManageAccess = ctx => canManage(ctx);
 
 /* ---------------- dashboard ---------------- */
 
@@ -494,7 +504,7 @@ export function ErpDashboardSection(props) {
     {done: data.batches.length > 0, title: 'Create a batch & enroll', text: 'Set days and time, then enroll students into the batch.', page: 'batches'},
     {done: data.plans.length > 0 && data.memberships.length > 0, title: 'Add a plan & membership', text: 'Monthly plans drive fees, dues and receipts.', page: 'fees'},
   ];
-  const showSetup = canManage(ctx) && checks.some(c => !c.done);
+  const showSetup = canManageOrg(ctx) && checks.some(c => !c.done);
 
   return <>
     <ErpBlockingState {...props}/>
@@ -542,7 +552,7 @@ export function BranchesPage(props) {
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Branches <span className="flower">✳</span></h1><p>Every location of your studio, in one place.</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <section className="erp-panel"><div className="erp-panel-head"><div><h2>All branches</h2><p>{data.branches.length} branch(es)</p></div>
-      {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', city: '', address: '', phone: ''})}><Plus size={16}/> Add branch</button>}</div>
+      {canManageOrg(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', city: '', address: '', phone: ''})}><Plus size={16}/> Add branch</button>}</div>
       {data.branches.length === 0 ? <Empty icon={Building2} title="No branch yet" text="Add your first studio location to start adding students and batches."/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Branch</th><th>Students</th><th>Batches</th><th>Status</th><th>Actions</th></tr></thead><tbody>
         {data.branches.map(b => <tr key={b.id}><td><strong>{b.name}</strong><br/><small style={{color: '#9b92a4'}}>{[b.city, b.phone].filter(Boolean).join(' · ') || b.address || '—'}</small></td>
@@ -634,7 +644,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v4) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v5) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
@@ -721,6 +731,388 @@ export function StudentsPage(props) {
   </>;
 }
 
+/* ---------------- role access ---------------- */
+
+const ROLE_LABELS = {
+  owner: 'Owner',
+  co_owner: 'Co-owner',
+  admin: 'Admin',
+  instructor: 'Instructor',
+  student: 'Student',
+};
+
+function BranchAccessChecks({branches, value, onChange, legend, disabled = false, subject = ''}) {
+  const selected = new Set(value || []);
+  const toggle = (branchId, checked) => {
+    const next = new Set(selected);
+    if (checked) next.add(branchId); else next.delete(branchId);
+    onChange([...next]);
+  };
+  return <fieldset className="erp-access-branches">
+    <legend>{legend}</legend>
+    {branches.length === 0 ? <p>No active branch is available in your scope.</p> : <div>
+      {branches.map(branch => <label key={branch.id}>
+        <input
+          type="checkbox"
+          aria-label={`${branch.name}${subject ? ` for ${subject}` : ''}`}
+          checked={selected.has(branch.id)}
+          disabled={disabled}
+          onChange={e => toggle(branch.id, e.target.checked)}
+        />
+        <span>{branch.name}</span>
+      </label>)}
+    </div>}
+  </fieldset>;
+}
+
+function groupedAdminAssignments(assignments) {
+  const groups = new Map();
+  for (const assignment of assignments || []) {
+    const current = groups.get(assignment.userId) || {
+      userId: assignment.userId,
+      email: assignment.email || '',
+      isSelf: Boolean(assignment.isSelf),
+      activeBranchIds: [],
+      suspendedBranchIds: [],
+      status: 'suspended',
+    };
+    if (assignment.status === 'active') {
+      current.activeBranchIds.push(assignment.branchId);
+      current.status = 'active';
+    } else {
+      current.suspendedBranchIds.push(assignment.branchId);
+    }
+    current.email = current.email || assignment.email || '';
+    current.isSelf = current.isSelf || Boolean(assignment.isSelf);
+    groups.set(assignment.userId, current);
+  }
+  return [...groups.values()].sort((a, b) => a.email.localeCompare(b.email));
+}
+
+function InstructorAccessDialog({instructor, branches, erp, ctx, onClose, onSaved}) {
+  const authorizedBranchIds = new Set(branches.map(branch => branch.id));
+  const initialBranches = [...new Set([
+    ...(instructor.accessBranchIds || []),
+    ...(instructor.batchBranchIds || []),
+    instructor.branchId,
+  ].filter(branchId => branchId && authorizedBranchIds.has(branchId)))];
+  const [email, setEmail] = useState(instructor.accessEmail || instructor.contactEmail || '');
+  const [branchIds, setBranchIds] = useState(initialBranches);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const isActive = instructor.accessStatus === 'active';
+  const grantBlocked = busy || instructor.recordStatus !== 'active' || Boolean(instructor.syncPending) || branchIds.length === 0;
+  const revokeBlocked = busy || Boolean(instructor.syncPending);
+
+  const run = async (action, successMessage) => {
+    setBusy(true);
+    setError('');
+    try {
+      await action(erp.client);
+      await onSaved(successMessage);
+      onClose();
+      return true;
+    } catch (err) {
+      setError(err?.message || 'Instructor access could not be updated.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const grant = event => {
+    event.preventDefault();
+    return run(
+      client => client.grantInstructorAccess({instructorId: instructor.instructorId, email, branchIds}),
+      `Instructor access saved for ${instructor.fullName}. They can sign in now and press Retry/Sync if the app is already open.`,
+    );
+  };
+  const revoke = () => run(
+    client => client.revokeInstructorAccess(instructor.instructorId),
+    ctx.role === 'admin'
+      ? `Instructor access removed in your branch scope for ${instructor.fullName}.`
+      : `Instructor access removed for ${instructor.fullName}.`,
+  );
+
+  return <Dialog title="Instructor sign-in access" sub={`${instructor.fullName} will see only assigned batches, their rosters and attendance in the selected branches. Fees and payments stay hidden.`} onClose={onClose}>
+    <div style={{display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16}}>
+      <span className={`erp-badge ${isActive ? 'green' : instructor.accessStatus === 'suspended' ? 'amber' : 'grey'}`}>
+        {isActive ? 'Sign-in active' : instructor.accessStatus === 'suspended' ? 'Sign-in suspended' : 'No sign-in access'}
+      </span>
+      {instructor.accessEmail && <span style={{fontSize: 13}}>Linked sign-in: <b>{instructor.accessEmail}</b></span>}
+    </div>
+
+    <form className="erp-form" onSubmit={grant}>
+      <label className="erp-field full">Instructor sign-in email
+        <input type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="instructor@example.com"/>
+      </label>
+      <div style={{gridColumn: '1 / -1'}}>
+        <BranchAccessChecks
+          branches={branches}
+          value={branchIds}
+          onChange={setBranchIds}
+          legend="Branches where this instructor may sign in"
+          subject={instructor.fullName}
+          disabled={busy}
+        />
+      </div>
+      <div className="erp-banner blue" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+        <KeyRound size={18}/>
+        <div><b>Before granting access</b>
+          <ol style={{margin: '6px 0 0 18px', padding: 0}}>
+            <li>The instructor creates a Yoga Studio account with this exact email.</li>
+            <li>The instructor opens the confirmation link sent to that email.</li>
+            <li>The instructor must <b>not</b> create their own organization.</li>
+          </ol>
+          <span>One account has one ERP role. Changing the email replaces the previous sign-in for this instructor. Access changes require internet and are not saved in the offline queue.</span>
+        </div>
+      </div>
+      {instructor.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+        <AlertCircle size={18}/><span>This instructor record is still waiting to sync. Connect to the internet and finish syncing before changing sign-in access.</span>
+      </div>}
+      {instructor.recordStatus !== 'active' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+        <AlertCircle size={18}/><span>This instructor is inactive, so sign-in is blocked. Reactivate the instructor record before granting access.</span>
+      </div>}
+      {error && <div className="erp-banner" role="alert" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><span>{error}</span></div>}
+      <div className="erp-form-actions">
+        <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
+        <button className="primary-button" disabled={grantBlocked}>{busy ? 'Saving…' : isActive ? 'Update access' : 'Grant access'}</button>
+      </div>
+    </form>
+
+    {isActive && <div style={{borderTop: '1px solid var(--border, #e7dff0)', marginTop: 20, paddingTop: 16}}>
+      {!confirmRemove ? <div style={{display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap'}}>
+        <span style={{fontSize: 13}}>{ctx.role === 'admin' ? 'Remove this instructor’s sign-in from branches you manage. Access in other branches is not changed.' : 'Remove this instructor’s sign-in without deleting their account or instructor record.'}</span>
+        <button type="button" className="secondary-button erp-danger" disabled={revokeBlocked} onClick={() => setConfirmRemove(true)}>Remove access</button>
+      </div> : <div className="erp-banner" role="alert" style={{margin: 0}}>
+        <AlertCircle size={18}/>
+        <div style={{flex: 1}}><b>Remove instructor access for {instructor.fullName}?</b><br/>
+          {ctx.role === 'admin' ? 'Their account will stop loading batches in your branches on the next online Retry/Sync. Other branch access remains.' : 'Their account will stop loading this studio on the next online Retry/Sync. Batches and attendance history are not deleted.'}
+          <div className="erp-actions" style={{marginTop: 10}}>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => setConfirmRemove(false)}>Keep access</button>
+            <button type="button" className="primary-button" disabled={revokeBlocked} onClick={revoke}>{busy ? 'Removing…' : 'Yes, remove access'}</button>
+          </div>
+        </div>
+      </div>}
+    </div>}
+  </Dialog>;
+}
+
+export function RoleAccessPage(props) {
+  const {erp, ctx, go} = props;
+  const {data} = erp;
+  const online = useOnline();
+  const [access, setAccess] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busyKey, setBusyKey] = useState('');
+  const [coOwnerEmail, setCoOwnerEmail] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [newAdminBranches, setNewAdminBranches] = useState([]);
+  const [adminEdits, setAdminEdits] = useState({});
+  const [instructorQuery, setInstructorQuery] = useState('');
+  const [instructorAccess, setInstructorAccess] = useState(null);
+  const [removeTarget, setRemoveTarget] = useState(null);
+
+  const load = useCallback(async (showLoading = true) => {
+    if (props.mode !== 'supabase' || !erp.client?.listRoleAccess) return;
+    if (showLoading) setLoading(true);
+    setError('');
+    try {
+      setAccess(await erp.client.listRoleAccess());
+    } catch (err) {
+      setError(err?.message || 'Role access could not be loaded.');
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, [erp.client, props.mode]);
+
+  useEffect(() => { load(); }, [load, online]);
+
+  const actor = access?.actor || {};
+  const primaryOwner = actor.canManageCoOwners ?? ctx.role === 'owner';
+  const manageAdmins = actor.canManageAdmins ?? canManageOrg(ctx);
+  const manageInstructors = actor.canManageInstructors ?? canManageAccess(ctx);
+  const authorizedBranchIds = new Set(actor.branchIds || data.branches.map(branch => branch.id));
+  const authorizedBranches = data.branches.filter(branch => branch.status === 'active' && authorizedBranchIds.has(branch.id));
+  const adminGroups = groupedAdminAssignments(access?.adminAssignments || []);
+  const snapshotInstructors = new Map(data.instructors.map(instructor => [instructor.id, instructor]));
+  const instructors = (access?.instructors || []).map(instructor => ({
+    ...instructor,
+    syncPending: Boolean(snapshotInstructors.get(instructor.instructorId)?.syncPending),
+  })).filter(instructor => `${instructor.fullName} ${instructor.contactEmail || ''} ${instructor.accessEmail || ''}`
+    .toLowerCase().includes(instructorQuery.toLowerCase()));
+
+  const run = async (key, action, successMessage, after) => {
+    setBusyKey(key);
+    setError('');
+    setNotice('');
+    try {
+      await action(erp.client);
+      await load(false);
+      setNotice(successMessage);
+      props.notify?.(successMessage);
+      after?.();
+      return true;
+    } catch (err) {
+      setError(err?.message || 'Role access could not be updated.');
+      return false;
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const removeAccess = async () => {
+    if (!removeTarget) return;
+    const key = `remove-${removeTarget.kind}-${removeTarget.userId}`;
+    const action = removeTarget.kind === 'co_owner'
+      ? client => client.revokeCoOwnerAccess(removeTarget.userId)
+      : client => client.revokeAdminAccess(removeTarget.userId);
+    if (await run(key, action, `${removeTarget.label} access removed for ${removeTarget.email}.`)) {
+      setRemoveTarget(null);
+    }
+  };
+
+  const roleMatrix = [
+    ['Owner', 'All branches', 'Everything, including Co-owner access and organization ownership safeguards', 'Primary Owner cannot be removed here'],
+    ['Co-owner', 'All branches', 'All operations, payment setup, and Admin/Instructor/Student access', 'Cannot add/remove Owner or Co-owner'],
+    ['Admin', 'Selected branches', 'Branch operations and Instructor/Student access in assigned branches', 'Cannot manage Admins, Co-owners, plans, payment setup or other branches'],
+    ['Instructor', 'Assigned batches', 'Own schedule, rosters and attendance marking', 'No fees, payments, student editing or access administration'],
+    ['Student', 'Own records', 'View own batches, attendance, membership, dues, payments and PDFs', 'No ERP writes'],
+  ];
+
+  return <>
+    <ErpBlockingState {...props}/>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Access <span className="flower">✳</span></h1><p>Role and branch authorization for every ERP sign-in.</p></div>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
+
+    {!canManageAccess(ctx) ? <section className="erp-panel">
+      <Empty icon={KeyRound} title="Access administration is restricted" text="Only the Owner, Co-owner or a branch Admin can view and change ERP sign-in access."/>
+    </section> : <>
+      <section className="erp-panel">
+        <div className="erp-panel-head"><div><h2>Your authorization</h2>
+          <p>{props.mode === 'supabase'
+            ? `${ROLE_LABELS[actor.primaryRole || ctx.role] || 'Manager'}${actor.email ? ` · ${actor.email}` : ''} · ${authorizedBranches.length} active branch(es) in scope`
+            : 'Local-device role switching is presentation-only; real account access requires Supabase mode.'}</p></div>
+          {props.mode === 'supabase' && <button className="secondary-button" onClick={() => load()} disabled={loading || !online}><RefreshCw size={15}/> Refresh access</button>}
+        </div>
+        <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Role</th><th>Scope</th><th>Authorized</th><th>Restricted</th></tr></thead><tbody>
+          {roleMatrix.map(([role, scope, allowed, restricted]) => <tr key={role}><td><strong>{role}</strong></td><td>{scope}</td><td>{allowed}</td><td>{restricted}</td></tr>)}
+        </tbody></table></div>
+      </section>
+
+      {props.mode !== 'supabase' ? <section className="erp-panel">
+        <Empty icon={KeyRound} title="Use Supabase mode for real accounts" text="Switch Data mode to Supabase in Settings, run the latest supabase/erp_setup.sql, then grant each confirmed account exactly one role here."/>
+      </section> : <>
+        {!online && <div className="erp-banner" role="alert"><WifiOff size={18}/><span>You are offline. Role access changes are online-only and are never placed in the offline sync queue.</span></div>}
+        {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><div style={{flex: 1}}>{error}<div className="erp-actions" style={{marginTop: 8}}><button className="secondary-button" onClick={() => load()} disabled={!online || loading}>Try again</button></div></div></div>}
+        {notice && <div className="erp-banner blue" role="status"><Check size={18}/><span>{notice}</span></div>}
+        {loading && <section className="erp-panel"><p style={{fontSize: 13}}>Loading role access…</p></section>}
+
+        {!loading && access && <>
+          {(manageAdmins || primaryOwner || ctx.role === 'co_owner') && <section className="erp-panel">
+            <div className="erp-panel-head"><div><h2>Owner & Co-owners</h2><p>The primary Owner is protected. Co-owners operate all branches but cannot change ownership.</p></div></div>
+            {(access.orgMembers || []).length === 0 ? <p style={{fontSize: 13}}>No organization members were returned.</p> :
+            <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+              {access.orgMembers.map(member => <tr key={`${member.userId}-${member.role}`}>
+                <td><strong>{member.email || 'Account'}</strong>{member.isSelf ? <><br/><small>Your account</small></> : null}</td>
+                <td>{ROLE_LABELS[member.role] || member.role}</td>
+                <td><span className={`erp-badge ${member.status === 'active' ? 'green' : 'grey'}`}>{member.status}</span></td>
+                <td>{member.role === 'owner'
+                  ? <span className="erp-badge lavender">Primary Owner protected</span>
+                  : primaryOwner && member.status === 'active'
+                    ? <button className="erp-link-btn erp-danger" disabled={!online || Boolean(busyKey)} onClick={() => setRemoveTarget({kind: 'co_owner', userId: member.userId, email: member.email, label: 'Co-owner'})}>Remove Co-owner</button>
+                    : <span style={{fontSize: 12}}>Owner only</span>}</td>
+              </tr>)}
+            </tbody></table></div>}
+            {primaryOwner ? <form className="erp-form" style={{marginTop: 16}} onSubmit={event => {
+              event.preventDefault();
+              run('grant-co-owner', client => client.grantCoOwnerAccess({email: coOwnerEmail}), `Co-owner access granted for ${coOwnerEmail.trim().toLowerCase()}.`, () => setCoOwnerEmail(''));
+            }}>
+              <label className="erp-field">Co-owner sign-in email<input type="email" required autoComplete="email" value={coOwnerEmail} onChange={e => setCoOwnerEmail(e.target.value)} placeholder="partner@example.com"/></label>
+              <div className="erp-form-actions"><button className="primary-button" disabled={!online || busyKey === 'grant-co-owner'}>{busyKey === 'grant-co-owner' ? 'Granting…' : 'Add Co-owner'}</button></div>
+            </form> : <p style={{fontSize: 13, marginTop: 12}}>Only the primary Owner can add or remove a Co-owner.</p>}
+          </section>}
+
+          {manageAdmins && <section className="erp-panel">
+            <div className="erp-panel-head"><div><h2>Branch Admins</h2><p>An Admin can operate and grant Instructor/Student access only in the selected branches.</p></div></div>
+            <form className="erp-form" onSubmit={event => {
+              event.preventDefault();
+              run('grant-admin', client => client.grantAdminAccess({email: adminEmail, branchIds: newAdminBranches}), `Admin access saved for ${adminEmail.trim().toLowerCase()}.`, () => { setAdminEmail(''); setNewAdminBranches([]); });
+            }}>
+              <label className="erp-field">Admin sign-in email<input type="email" required autoComplete="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} placeholder="desk@example.com"/></label>
+              <div style={{gridColumn: '1 / -1'}}><BranchAccessChecks branches={authorizedBranches} value={newAdminBranches} onChange={setNewAdminBranches} legend="New Admin branches" disabled={Boolean(busyKey)}/></div>
+              <div className="erp-form-actions"><button className="primary-button" disabled={!online || busyKey === 'grant-admin' || newAdminBranches.length === 0}>{busyKey === 'grant-admin' ? 'Saving…' : 'Grant Admin access'}</button></div>
+            </form>
+
+            {adminGroups.length === 0 ? <p style={{fontSize: 13, marginTop: 16}}>No branch Admin account has been granted yet.</p> :
+            <div className="erp-table-wrap" style={{marginTop: 16}}><table className="erp-table"><thead><tr><th>Admin account</th><th>Status</th><th>Authorized branches</th><th>Actions</th></tr></thead><tbody>
+              {adminGroups.map(group => {
+                const selectedBranches = adminEdits[group.userId] ?? group.activeBranchIds;
+                const busy = busyKey === `admin-${group.userId}`;
+                return <tr key={group.userId}>
+                  <td><strong>{group.email || 'Admin account'}</strong>{group.isSelf ? <><br/><small>Your account</small></> : null}</td>
+                  <td><span className={`erp-badge ${group.status === 'active' ? 'green' : 'grey'}`}>{group.status}</span></td>
+                  <td><BranchAccessChecks branches={authorizedBranches} value={selectedBranches} onChange={branchIds => setAdminEdits(prev => ({...prev, [group.userId]: branchIds}))} legend={`Branches for ${group.email || 'Admin'}`} subject={group.email || 'Admin'} disabled={busy}/></td>
+                  <td><button className="erp-link-btn" disabled={!online || busy || selectedBranches.length === 0} onClick={() => run(`admin-${group.userId}`, client => client.grantAdminAccess({email: group.email, branchIds: selectedBranches}), `Branch access updated for ${group.email}.`)}>{busy ? 'Saving…' : 'Save branches'}</button>
+                    {group.status === 'active' && <button className="erp-link-btn erp-danger" disabled={!online || Boolean(busyKey)} onClick={() => setRemoveTarget({kind: 'admin', userId: group.userId, email: group.email, label: 'Admin'})}>Remove Admin</button>}</td>
+                </tr>;
+              })}
+            </tbody></table></div>}
+          </section>}
+
+          {manageInstructors && <section className="erp-panel">
+            <div className="erp-panel-head"><div><h2>Instructor sign-ins</h2><p>Each instructor account is linked to one instructor record and sees only that instructor’s batches in authorized branches.</p></div>
+              <span className="erp-search"><Search size={16}/><input aria-label="Search instructors" placeholder="Search instructor or email…" value={instructorQuery} onChange={e => setInstructorQuery(e.target.value)}/></span>
+            </div>
+            {instructors.length === 0 ? <Empty icon={Users} title="No instructors in your scope" text="Add an instructor in Batches, sync the record, then grant sign-in access here."/> :
+            <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Instructor</th><th>Branches</th><th>Sign-in</th><th>Actions</th></tr></thead><tbody>
+              {instructors.map(instructor => {
+                const accessBranchNames = (instructor.accessBranchIds || []).map(branchId => branchName(data, branchId)).filter(name => name !== '—');
+                const batchBranchNames = (instructor.batchBranchIds || []).map(branchId => branchName(data, branchId)).filter(name => name !== '—');
+                return <tr key={instructor.instructorId}>
+                  <td><span className="erp-person"><span className="avatar">{initials(instructor.fullName)}</span><span><strong>{instructor.fullName}</strong><small>{instructor.contactEmail || instructor.phone || 'No contact email'}</small></span></span></td>
+                  <td>{instructor.branchId ? `Home: ${branchName(data, instructor.branchId)}` : 'No home branch'}{batchBranchNames.length ? <><br/><small>Teaches: {batchBranchNames.join(', ')}</small></> : null}</td>
+                  <td><span className={`erp-badge ${instructor.accessStatus === 'active' ? 'green' : instructor.accessStatus === 'suspended' ? 'amber' : 'grey'}`}>{instructor.accessStatus === 'active' ? 'Active' : instructor.accessStatus === 'suspended' ? 'Suspended' : 'No access'}</span>
+                    {instructor.accessEmail && <><br/><small>{instructor.accessEmail}</small></>}
+                    {accessBranchNames.length ? <><br/><small>{accessBranchNames.join(', ')}</small></> : null}
+                    {instructor.syncPending && <><br/><span className="erp-badge amber">Waiting to sync</span></>}</td>
+                  <td><button className="erp-link-btn" disabled={!online} onClick={() => setInstructorAccess(instructor)}><KeyRound size={13}/> Sign-in access</button></td>
+                </tr>;
+              })}
+            </tbody></table></div>}
+          </section>}
+
+          <section className="erp-panel">
+            <div className="erp-panel-head"><div><h2>Student portal access</h2><p>Student accounts stay with the student record so branch moves and inactivation stay synchronized.</p></div>
+              <button className="primary-button" onClick={() => go('students')}><Users size={15}/> Open Students</button></div>
+            <p style={{fontSize: 13}}>Use <b>Students → Portal access</b> on a student row to grant, replace or remove that student’s own-record portal sign-in.</p>
+          </section>
+        </>}
+      </>}
+    </>}
+
+    {instructorAccess && <InstructorAccessDialog
+      instructor={instructorAccess}
+      branches={authorizedBranches}
+      erp={erp}
+      ctx={ctx}
+      onClose={() => setInstructorAccess(null)}
+      onSaved={async message => { await load(false); setNotice(message); props.notify?.(message); }}
+    />}
+
+    {removeTarget && <Dialog title={`Remove ${removeTarget.label} access`} sub="The person’s account and studio records are not deleted. Access stops on the next online Retry/Sync." onClose={() => setRemoveTarget(null)}>
+      <p style={{fontSize: 14}}>Remove <b>{removeTarget.label}</b> access for <b>{removeTarget.email}</b>?</p>
+      {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{error}</span></div>}
+      <div className="erp-form-actions">
+        <button className="secondary-button" disabled={Boolean(busyKey)} onClick={() => setRemoveTarget(null)}>Keep access</button>
+        <button className="primary-button" disabled={!online || Boolean(busyKey)} onClick={removeAccess}>{busyKey ? 'Removing…' : `Yes, remove ${removeTarget.label} access`}</button>
+      </div>
+    </Dialog>}
+  </>;
+}
+
 /* ---------------- batches & instructors ---------------- */
 
 export function BatchesPage(props) {
@@ -762,7 +1154,7 @@ export function BatchesPage(props) {
     </section>
     {newInstructor && <Dialog title="Add instructor" onClose={() => setNewInstructor(null)}><form className="erp-form" onSubmit={saveInstructor}>
       <label className="erp-field">Instructor name<input required value={newInstructor.fullName} onChange={e => setNewInstructor({...newInstructor, fullName: e.target.value})}/></label>
-      <label className="erp-field">Branch<select value={newInstructor.branchId} onChange={e => setNewInstructor({...newInstructor, branchId: e.target.value})}><option value="">All branches</option>{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+      <label className="erp-field">Branch<select required={!canManageOrg(ctx)} value={newInstructor.branchId} onChange={e => setNewInstructor({...newInstructor, branchId: e.target.value})}>{canManageOrg(ctx) ? <option value="">All branches</option> : <option value="">Choose branch…</option>}{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
       <label className="erp-field">Phone<input type="tel" value={newInstructor.phone} onChange={e => setNewInstructor({...newInstructor, phone: e.target.value})}/></label>
       <label className="erp-field">Email<input type="email" value={newInstructor.email} onChange={e => setNewInstructor({...newInstructor, email: e.target.value})}/></label>
       <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setNewInstructor(null)}>Cancel</button><button className="primary-button">Save instructor</button></div></form></Dialog>}
@@ -1144,7 +1536,7 @@ function InvoiceDialog({data, invoice, onClose}) {
                   : <div className="erp-invoice-qr-placeholder">UPI QR</div>}
                 <span>Scan to pay {formatInvoiceINR(payablePaise)}</span>
               </div>}
-            </div> : <div className="erp-invoice-warning">Payment instructions are not configured yet. Please contact the studio, or ask an Admin to complete Fees → Payment setup.</div>}
+            </div> : <div className="erp-invoice-warning">Payment instructions are not configured yet. Please contact the studio, or ask an Owner/Co-owner to complete Fees → Payment setup.</div>}
             <p className="erp-invoice-note">
               {settings.gatewayProvider === 'none'
                 ? 'Manual payment only. The studio will record the payment after verifying receipt.'
@@ -1239,7 +1631,7 @@ export function FeesPage(props) {
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Fees & payments <span className="flower">✳</span></h1><p>Plans, memberships, dues, themed invoice PDFs and payment setup in ₹.</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <div className="erp-seg" role="tablist" aria-label="Fees sections" style={{marginBottom: 16}}>
-      {[['memberships', 'Memberships & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : []), ...(canManage(ctx) ? [['setup', 'Payment setup']] : [])].map(([id, label]) =>
+      {[['memberships', 'Memberships & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : []), ...(canManageOrg(ctx) ? [['setup', 'Payment setup']] : [])].map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
     </div>
 
@@ -1269,15 +1661,15 @@ export function FeesPage(props) {
           : <button className="erp-link-btn erp-danger" onClick={async () => { const reason = window.prompt('Reason for voiding this payment (required for audit):', ''); if (reason === null) return; if (!reason.trim()) return props.notify('Enter a reason to void this payment.'); await erp.act(c => c.voidPayment({id: p.id, reason: reason.trim()}), 'Payment voided. The original receipt remains in history.'); }}>Void</button>)}</td></tr>)}
       </tbody></table></div>}</section>}
 
-    {tab === 'plans' && !isStudent && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Plans</h2><p>{data.plans.length} plan(s)</p></div>
-      {canManage(ctx) && <button className="primary-button" onClick={() => setPlanForm({name: '', amountRupees: '', durationMonths: 1})}><Plus size={16}/> Add plan</button>}</div>
+    {tab === 'plans' && !isStudent && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Plans</h2><p>{data.plans.length} plan(s){!canManageOrg(ctx) ? ' · Organization plans are maintained by Owner/Co-owner.' : ''}</p></div>
+      {canManageOrg(ctx) && <button className="primary-button" onClick={() => setPlanForm({name: '', amountRupees: '', durationMonths: 1})}><Plus size={16}/> Add plan</button>}</div>
       {data.plans.length === 0 ? <Empty icon={Wallet} title="No plans yet" text="Example: “Monthly — All Batches” at ₹1,500 for 1 month. You decide the names and prices."/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Plan</th><th>Price</th><th>Duration</th><th>Members</th><th>Actions</th></tr></thead><tbody>
         {data.plans.map(p => <tr key={p.id}><td><strong>{p.name}</strong></td><td>{formatINR(p.amountPaise)}{billing.gstEnabled && !billing.priceIncludesGst ? ' + GST' : ''}</td><td>{p.durationMonths} month(s)</td><td>{data.memberships.filter(m => m.planId === p.id && m.status === 'active').length}</td>
-        <td>{canManage(ctx) && <button className="erp-link-btn" onClick={() => setPlanForm({...p, amountRupees: paiseToRupees(p.amountPaise)})}><Pencil size={13}/> Edit</button>}</td></tr>)}
+        <td>{canManageOrg(ctx) && <button className="erp-link-btn" onClick={() => setPlanForm({...p, amountRupees: paiseToRupees(p.amountPaise)})}><Pencil size={13}/> Edit</button>}</td></tr>)}
       </tbody></table></div>}</section>}
 
-    {tab === 'setup' && canManage(ctx) && <PaymentSetupPanel data={data} erp={erp} mode={props.mode}/>}
+    {tab === 'setup' && canManageOrg(ctx) && <PaymentSetupPanel data={data} erp={erp} mode={props.mode}/>}
 
     {planForm && <Dialog title={planForm.id ? 'Edit plan' : 'Add plan'} sub="Price changes apply to new memberships; existing memberships keep their agreed amount." onClose={() => setPlanForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); if (await erp.act(c => c.savePlan({id: planForm.id, name: planForm.name, amountPaise: rupeesToPaise(planForm.amountRupees), durationMonths: planForm.durationMonths}), 'Plan saved.')) setPlanForm(null); }}>
@@ -1306,7 +1698,7 @@ export function FeesPage(props) {
         <label className="erp-field">Method<select value={paymentForm.method} onChange={e => setPaymentForm({...paymentForm, method: e.target.value})}>{PAYMENT_METHODS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></label>
         <label className="erp-field">Paid on<input type="date" required value={paymentForm.paidOn} onChange={e => setPaymentForm({...paymentForm, paidOn: e.target.value})}/></label>
         <label className="erp-field">Note / transaction reference<input value={paymentForm.note} onChange={e => setPaymentForm({...paymentForm, note: e.target.value})} placeholder="UPI/bank/card reference (recommended)"/></label>
-        {(paymentConfigWarning || paymentGstWarning) && <div className="erp-banner" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><div>{paymentConfigWarning || paymentGstWarning}{paymentConfigWarning && paymentGstWarning ? <> {paymentGstWarning}</> : null}{paymentConfigWarning && canManage(ctx) ? <> <button type="button" className="erp-link-btn" onClick={() => { setPaymentForm(null); setTab('setup'); }}>Open Payment setup</button></> : null}</div></div>}
+        {(paymentConfigWarning || paymentGstWarning) && <div className="erp-banner" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><div>{paymentConfigWarning || paymentGstWarning}{paymentConfigWarning && paymentGstWarning ? <> {paymentGstWarning}</> : null}{paymentConfigWarning && canManageOrg(ctx) ? <> <button type="button" className="erp-link-btn" onClick={() => { setPaymentForm(null); setTab('setup'); }}>Open Payment setup</button></> : null}</div></div>}
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPaymentForm(null)}>Cancel</button><button className="primary-button">Save payment</button></div></form></Dialog>}
 
     {invoice && <InvoiceDialog data={data} invoice={invoice} onClose={() => setInvoice(null)}/>}

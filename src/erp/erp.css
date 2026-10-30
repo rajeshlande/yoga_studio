@@ -54,6 +54,12 @@
 .erp-days{display:flex;flex-wrap:wrap;gap:6px}
 .erp-day{padding:9px 12px;border:1px solid #e7e0ed;border-radius:999px;font-size:12px;font-weight:600;color:#8d7d99;background:#fdfcfe;min-height:40px}
 .erp-day.on{background:#8664ba;border-color:#8664ba;color:#fff}
+.erp-access-branches{border:1px solid #e7e0ed;border-radius:12px;padding:12px;min-width:0;margin:0}
+.erp-access-branches legend{padding:0 6px;font-size:11px;font-weight:700;color:#8d7d99;letter-spacing:.03em}
+.erp-access-branches>div{display:flex;flex-wrap:wrap;gap:8px}
+.erp-access-branches label{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:8px 10px;border:1px solid #e7e0ed;border-radius:999px;background:#fdfcfe;color:#514559;font-size:12px;font-weight:600;cursor:pointer}
+.erp-access-branches input{width:18px;height:18px;min-height:18px;accent-color:#8664ba;flex-shrink:0}
+.erp-access-branches p{font-size:12px;color:#9b92a4;margin:2px 0}
 .erp-seg{display:inline-flex;max-width:100%;overflow-x:auto;background:#f4eff8;border-radius:10px;padding:3px;gap:2px;vertical-align:top;scrollbar-width:none}
 .erp-seg::-webkit-scrollbar{display:none}
 .erp-seg button{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;padding:8px 13px;border-radius:8px;font-size:12px;font-weight:600;color:#8d7d99;min-height:38px;line-height:1.2;white-space:nowrap}
@@ -238,6 +244,10 @@
 :root[data-theme="dark"] .erp-seg button.on{background:#3a2f52;color:#f0e8f7;box-shadow:0 2px 8px #00000060}
 :root[data-theme="dark"] .erp-att-row{border-bottom-color:#2d253f}
 :root[data-theme="dark"] .erp-check{background:#251f34;border-color:#342a49}
+:root[data-theme="dark"] .erp-access-branches{border-color:#3a304d}
+:root[data-theme="dark"] .erp-access-branches legend{color:#c3b2d4}
+:root[data-theme="dark"] .erp-access-branches label{background:#251f34;border-color:#3a304d;color:#ddd2e9}
+:root[data-theme="dark"] .erp-access-branches p{color:#aa99bd}
 :root[data-theme="dark"] .erp-check-num{background:#312649;color:#cdb1eb}
 :root[data-theme="dark"] .erp-banner{background:#3d3020;border-color:#5c4825;color:#f0d3a0}
 :root[data-theme="dark"] .erp-banner.blue{background:#2d2344;border-color:#493761;color:#d8c7f1}

@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, memberships,
 INR fees, payment setup and themed invoice PDFs.
 
-> **Current source release:** 1.5.0 · **Database setup:** SQL v4 in
+> **Current source release:** 1.6.0 · **Database setup:** SQL v5 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -34,8 +34,8 @@ INR fees, payment setup and themed invoice PDFs.
 ## Overview
 
 Yoga Studio is a React + Vite PWA backed by Supabase Auth and PostgreSQL.
-It provides a role-scoped studio ERP for Owner, Admin, Instructor and Student
-users. All prices and fee calculations are in Indian rupees (INR), stored as
+It provides a role-scoped studio ERP for Owner, Co-owner, Admin, Instructor
+and Student users. All prices and fee calculations are in Indian rupees (INR), stored as
 integer paise to avoid floating-point money errors.
 
 The application supports two clearly separated data modes:
@@ -68,15 +68,25 @@ into the application.
   payment exports.
 - Append-only payments. A synced payment is corrected with an audited void
   and a required reason; it is never silently edited or deleted.
-- Role portals:
-  - **Owner/Admin:** manage the ERP and payment/invoice configuration.
-  - **Instructor:** view assigned batches and manage/view attendance in scope.
-  - **Student:** view their own batches, attendance, membership, dues,
-    payments and invoices.
-- **In-app Student portal access:** after a student creates and confirms a
-  Supabase account, an Owner or Admin of the student's branch opens
-  **Students → Portal access**, enters the exact sign-in email, and can later
-  replace or remove the link. No manual SQL is needed for student access.
+- Fixed, server-enforced role portals (Odoo-inspired security groups plus
+  branch/record rules; no custom permission editor):
+  - **Owner:** protected primary account; all branches and operations,
+    including Co-owner management. Ownership cannot be transferred or the
+    primary Owner removed in the app.
+  - **Co-owner:** all-branch operations, plans/payment setup, and
+    Admin/Instructor/Student access; cannot add/remove Owner or Co-owner.
+  - **Admin:** operations plus Instructor/Student access only in explicitly
+    selected branches; cannot manage Admins/Co-owners, plans, payment setup
+    or other branches.
+  - **Instructor:** own linked batches, rosters and attendance only; no
+    fees, payments, student editing or access administration.
+  - **Student:** view-only access to their own batches, attendance,
+    membership, dues, payments and invoices.
+- **In-app role access:** after a person creates and confirms a Supabase
+  account and does not create their own organization, an authorized manager
+  links that exact sign-in email. Use **Access** for Co-owner, branch Admin
+  and Instructor roles, and **Students → Portal access** for a Student.
+  Manual membership SQL is an emergency-repair fallback only.
 
 ### Experience and platform
 
@@ -154,7 +164,7 @@ uploads its data automatically.
 
 ## Payments, GST and invoice PDFs
 
-Open **Fees → Payment setup** as an Owner/Admin to configure:
+Open **Fees → Payment setup** as an Owner or Co-owner to configure:
 
 - billing legal name, address, city, state/PIN, email, phone, invoice prefix,
   due-days and invoice terms;
@@ -227,7 +237,7 @@ invoice-numbering policy.
 
 ```mermaid
 flowchart LR
-    User[Owner / Admin / Instructor / Student] --> PWA[React + Vite PWA]
+    User[Owner / Co-owner / Admin / Instructor / Student] --> PWA[React + Vite PWA]
     PWA --> Auth[Supabase Auth]
     PWA --> RPC[Approved typed erp_* RPCs]
     RPC --> DB[(Supabase PostgreSQL + RLS)]
@@ -278,17 +288,18 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v4 without deleting business rows.
+   earlier ERP installs to SQL v5 without deleting business rows.
 3. Configure the production Site URL and allowed redirect URL for
    `https://rajeshlande.github.io/yoga_studio/`; add your local development
    origin separately.
 4. Sign up/sign in through the app, select **Settings → Data mode:
    Supabase**, create the organization once and wait for **Online · synced**.
-5. For a student, have the student create and confirm their own account
-   first (they must not create an organization), then use **Students →
-   Portal access** in the app to link that exact sign-in email. Co-owner,
-   branch Admin and Instructor account links still use the reviewed examples
-   at the bottom of the SQL file.
+5. For every additional user, have that person create and confirm their own
+   account first (they must not create an organization). Then link the exact
+   sign-in email in **Access** for Co-owner/Admin/Instructor roles, selecting
+   branches for Admin/Instructor access, or in **Students → Portal access**
+   for a Student. Access changes are online-only and never enter the offline
+   outbox.
 
 ## Configuration
 
@@ -322,10 +333,12 @@ them. `.env.local` is ignored by Git.
    confirm the QR/payment instructions are hidden.
 8. Before relying on offline work, open every ERP area once while online so
    the initial role-scoped snapshot is downloaded.
-9. With a separate student test account, grant access from **Students →
-   Portal access**, sign in as the student, verify only that student's data
-   is visible, then remove access and verify the studio no longer loads on
-   the next online Retry/Sync.
+9. With separate confirmed test accounts, verify each role: Owner grants a
+   Co-owner; Co-owner grants an Admin to one selected branch; that Admin
+   grants an Instructor and Student only in that branch; Instructor sees
+   only their batches/attendance; Student sees only their own records. Then
+   remove each test link and verify the studio no longer loads for that
+   account on the next online Retry/Sync.
 
 ## Testing and quality gates
 
@@ -345,9 +358,12 @@ The suite includes:
 - Playwright tests for authenticated UI flows, the separate local-device ERP
   flow (including GST invoice, dynamic QR and real PDF generation), and a
   mocked-Supabase offline → conflict → resolution flow;
-- mocked-Supabase student-access tests proving Owner grant/remove by
-  registered email, a waiting student's Retry flow, the student's view-only
-  portal, and cleared studio display after online revocation;
+- mocked-Supabase role-access tests proving Owner grant/remove for Student,
+  Co-owner, selected-branch Admin and Instructor accounts by registered
+  email; branch-Admin hiding of organization roles/plans/payment setup;
+  signed-in Instructor identity locking; a waiting student's Retry flow;
+  the student's view-only portal; and cleared studio display after online
+  revocation;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
   browser-close guard and automatic sync after reconnect.
 
@@ -375,10 +391,11 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v4 in the real Supabase project, test a real sign-in, a separate
-student account confirmation + **Students → Portal access** grant/revoke,
-an offline attendance/payment cycle, a billing-settings sync, and a
-two-account conflict resolution before operational sign-off.
+running SQL v5 in the real Supabase project, test real Owner, Co-owner,
+branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
+confirmed email; verify branch and own-record scoping; run an offline
+attendance/payment cycle and billing-settings sync as an authorized manager;
+and resolve a two-account conflict before operational sign-off.
 
 ## Build and deployment
 
@@ -398,21 +415,24 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.5.0:
+Recommended go-live order for 1.6.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` to install **SQL v4**.
-   This is required for in-app Student portal access and is additive/
+2. Run the complete current `supabase/erp_setup.sql` to install **SQL v5**.
+   This is required for fixed Role Access management and is additive/
    idempotent for existing ERP data.
-3. Deploy the 1.5.0 web build with the two public Actions secrets.
-4. Sign in online, wait for **Online · synced**, and complete the UAT checks,
-   including a separate confirmed student account.
-5. Configure and verify Payment setup before issuing unpaid invoices.
+3. Deploy the 1.6.0 web build with the two public Actions secrets.
+4. Sign in online as the Owner, wait for **Online · synced**, open
+   **Access**, and complete the five-role UAT checks with separate confirmed
+   accounts before granting production staff/student access.
+5. Configure and verify Payment setup as Owner/Co-owner before issuing
+   unpaid invoices.
 
 If the new app reaches an older database, a billing-settings change remains
 queued with a setup-needed message rather than becoming a false conflict,
-and **Students → Portal access** reports that SQL v4 is required; run the
-complete current SQL file and reopen/focus the app to resume.
+and **Access** / **Students → Portal access** report that SQL v5 is
+required; run the complete current SQL file and reopen/focus the app to
+resume.
 
 ## Versioning and releases
 
@@ -503,7 +523,7 @@ choose a side. Do not clear site data first.
 
 ### An unpaid invoice has no QR code
 
-An Owner/Admin must add a valid receiving UPI ID in **Fees → Payment setup**.
+An Owner or Co-owner must add a valid receiving UPI ID in **Fees → Payment setup**.
 Bank details can be shown without UPI, but there is no QR until a UPI ID is
 configured. Paid and void invoices intentionally hide the QR.
 
