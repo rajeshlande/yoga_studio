@@ -96,13 +96,20 @@ security-group and record-rule ideas to this ERP:
 | **Co-owner** | All branches | Admin, Instructor, Student | Cannot add/remove Owner or Co-owner |
 | **Admin** | Explicitly selected branches | Instructor and Student in those branches | Cannot manage Admins/Co-owners, plans, Payment setup or unassigned branches |
 | **Instructor** | Own linked instructor record and batches in authorized branches | Nobody | No fees, payments, student editing or access administration |
-| **Student** | Own student record | Nobody | View-only portal; no ERP writes |
+| **Student** | Own student record and assigned batches | Nobody | Personal view-only dashboard; no ERP writes, studio roster/class counts, sync badges/controls or **Studio ERP data** settings |
 
 The matrix is deliberately fixed. This release does not provide custom
 security groups, per-user permission matrices or module-level
 None/View/Manage permission editors. The SQL snapshot, direct RPCs and
 `erp_sync_push` all re-check organization, role and branch/record scope;
 hiding a screen in React is not treated as authorization.
+
+The **Settings → Studio ERP data** panel—data-mode selection, Supabase
+connection status, offline-copy reset and local-device backup import/export
+or clearing—is shown only to **Owner** and **Admin** accounts. Co-owner,
+Instructor and Student accounts do not see that panel. Automatic background
+refresh remains available internally; the Student portal simply does not
+display **Online · synced**, **Supabase · Synced** or **Sync now**.
 
 For Co-owner, Admin and Instructor accounts, the person first creates and
 confirms a normal Yoga Studio account with **Join an existing studio**
@@ -137,8 +144,8 @@ Student sign-in provisioning remains a two-person, server-checked flow:
 2. In Supabase mode, the Owner, a Co-owner or an Admin assigned to that
    student's branch opens **Students → Portal access**, enters the
    exact confirmed sign-in email and grants access. The student can then use
-   **Retry** or **Sync now** if the app was already open on the
-   **Waiting for studio access** screen.
+   **Retry** if the app was already open on the **Waiting for studio access**
+   screen, or reload/sign in again.
 3. **Students → Portal access** can replace the sign-in email or remove
    access. Replacement suspends the previous link; removal suspends the
    active link without deleting the Auth account, student record or payment
@@ -173,12 +180,19 @@ and the linked `studentId`; the snapshot contains only that student's own
 record/classes/attendance/membership/payments plus the plans and billing
 profile needed to label dues and generate PDFs. The UI fixes the signed-in
 student selector in Supabase mode and exposes no ERP edit/payment actions.
+Its dashboard is a personal Student dashboard—assigned batches, next class,
+classes today, attendance rate/recent history, membership progress, dues and
+recent payments—rather than the studio operations dashboard. The Batches
+screen lists only active assigned batches and does not offer a roster or
+class-size/capacity view. Student screens hide the staff sync badge and
+**Sync now** control in the top bar, ERP toolbar and Settings.
 Local-device mode's Student role remains only a presentation preview and
 has no **Portal access** control.
 
 Access removal is effective on the server immediately. When the student's
-already-open app next performs an online Retry/Sync, it stops presenting the
-downloaded studio snapshot. As with any offline-first app, revocation while
+already-open app next refreshes online—on focus/reconnect, reload or the
+waiting screen's **Retry**—it stops presenting the downloaded studio
+snapshot. As with any offline-first app, revocation while
 the device is offline cannot remotely erase a copy already downloaded to
 that browser, but the account receives no further server refresh and cannot
 push ERP changes; the Student role has no ERP write operations in the first
@@ -325,7 +339,7 @@ rule), keeping it idempotent and non-destructive.
   inclusive/exclusive and CGST/SGST/IGST calculations, UPI URI construction,
   payment-setup validation, corrupt-primary sync-state recovery, and proof
   that student portal metadata never enters an offline student upsert.
-- `npm test` also runs fifteen Playwright tests: the existing auth suite,
+- `npm test` also runs sixteen Playwright tests: the existing auth suite,
   `tests/erp-local.spec.js` for separate local mode (including GST Payment
   setup, dynamic UPI QR, unpaid vs paid invoice behaviour and generation of a
   real `%PDF` through Chromium), and `tests/erp-sync.spec.js`, which mocks
@@ -336,8 +350,9 @@ rule), keeping it idempotent and non-destructive.
   branch-Admin hiding of organization-role and Owner/Co-owner setup actions,
   signed-in Instructor identity locking, a waiting student's dedicated
   no-access screen and Retry after grant, an explicit prospective-Owner
-  organization-creation path, and the signed-in student's view-only portal
-  plus online revocation display clearing.
+  organization-creation path, the signed-in student's personal dashboard,
+  assigned-batch-only/no-roster portal, hidden sync controls, Owner/Admin-only
+  **Studio ERP data** settings, and online revocation display clearing.
 - During development the full SQL file was also executed twice (idempotent
   rerun) in an ephemeral PGlite Postgres with stub Auth users/`auth.uid()`.
   In addition to the prior sync, billing, payment and Student-access checks,
@@ -358,7 +373,7 @@ rule), keeping it idempotent and non-destructive.
   conflict both ways; then use separate confirmed Co-owner, Admin,
   Instructor and Student accounts to grant/revoke access and verify each
   role's branch/own-record visibility, including that revoked accounts stop
-  loading fresh studio data on online Retry/Sync. Mocked tests are not
+  loading fresh studio data on their next successful online refresh. Mocked tests are not
   proof of live Auth, RLS, email delivery or role revocation behaviour.
 
 ## Known limits of this release

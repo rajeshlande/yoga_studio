@@ -51,6 +51,29 @@ test('signup validates names; login errors are safe; forgot password calls provi
  expect(await page.evaluate(()=>Object.values(localStorage).some(v=>v.includes('valid-test-password')))).toBeFalsy();
 });
 
+test('studio ERP data settings are limited to Owner and Admin',async({page})=>{
+ await page.goto('/');
+ await signIn(page);
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Studio ERP data'})).toBeVisible();
+
+ await page.getByRole('button',{name:'Dashboard',exact:true}).click();
+ await page.getByLabel('Portal role').selectOption('admin');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Studio ERP data'})).toBeVisible();
+
+ await page.getByRole('button',{name:'Dashboard',exact:true}).click();
+ await page.getByLabel('Portal role').selectOption('co_owner');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Studio ERP data'})).toHaveCount(0);
+
+ await page.getByRole('button',{name:'Dashboard',exact:true}).click();
+ await page.getByLabel('Portal role').selectOption('student');
+ await expect(page.getByText(/Supabase · Synced|Online · synced/)).toHaveCount(0);
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Studio ERP data'})).toHaveCount(0);
+});
+
 test('recovery session updates password through provider, with mismatch validation',async({page})=>{
  await page.goto(`/#access_token=${accessToken()}&refresh_token=test-only-refresh-token&expires_in=3600&token_type=bearer&type=recovery`);
  await expect(page.getByRole('heading',{name:'A fresh start for your password.'})).toBeVisible();

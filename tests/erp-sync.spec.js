@@ -427,6 +427,7 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await mockAuth(page);
 
   const BATCH = '33333333-3333-4333-8333-333333333333';
+  const OTHER_BATCH = '99999999-9999-4999-8999-999999999999';
   const ENROLLMENT = '44444444-4444-4444-8444-444444444444';
   const PLAN = '55555555-5555-4555-8555-555555555555';
   const MEMBERSHIP = '66666666-6666-4666-8666-666666666666';
@@ -445,6 +446,10 @@ test('signed-in student sees a view-only portal for their own records', async ({
     batches: [{
       id: BATCH, branchId: BRANCH, name: 'Morning Yoga', instructorId: '', days: [1, 3, 5],
       startTime: '07:00', durationMins: 60, capacity: 20, status: 'active',
+      createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+    }, {
+      id: OTHER_BATCH, branchId: BRANCH, name: 'Evening Yoga', instructorId: '', days: [2, 4],
+      startTime: '18:00', durationMins: 60, capacity: 15, status: 'active',
       createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
     }],
     enrollments: [{
@@ -508,15 +513,24 @@ test('signed-in student sees a view-only portal for their own records', async ({
 
   await page.goto('/');
   await signIn(page);
-  await expect(page.getByText('Supabase · Synced')).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Branches', exact: true})).toHaveCount(0);
   await expect(page.getByLabel('Signed-in student')).toBeDisabled();
   await expect(page.getByLabel('Signed-in student')).toHaveValue(STUDENT);
+  await expect(page.getByText(/Supabase · Synced|Online · synced/)).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Sync now'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Branches', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('heading', {name: 'My assigned batches'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'My membership & fees'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Recent attendance'})).toBeVisible();
+  await expect(page.getByText('Morning Yoga').first()).toBeVisible();
+  await expect(page.getByText('Evening Yoga')).toHaveCount(0);
   await expect(page.getByText('My dues')).toBeVisible();
+  await expect(page.getByText(/Less rush|Collected this month|Active students|Set up your studio/)).toHaveCount(0);
 
   await page.getByRole('button', {name: 'Batches', exact: true}).click();
   await expect(page.getByRole('cell', {name: /Morning Yoga/})).toBeVisible();
+  await expect(page.getByText('Evening Yoga')).toHaveCount(0);
+  await expect(page.getByRole('button', {name: /Roster/})).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Add batch/})).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Edit/})).toHaveCount(0);
 
@@ -532,10 +546,16 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByText('YS-2026-0001')).toBeVisible();
   await expect(page.getByRole('button', {name: /Invoice PDF/})).toBeVisible();
 
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Your settings'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Studio ERP data'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Sync now'})).toHaveCount(0);
+  await expect(page.getByText(/Supabase · Synced|Online · synced/)).toHaveCount(0);
+
   // Simulate an admin removing access while this student tab is open. The
-  // next online sync must stop presenting the downloaded studio snapshot.
+  // next online load must stop presenting the downloaded studio snapshot.
   accessGranted = false;
-  await page.getByRole('button', {name: 'Sync now'}).click();
+  await page.reload();
   await expect(page.getByText('This account is not connected to a studio yet.')).toBeVisible();
   await expect(page.getByText('YS-2026-0001')).toHaveCount(0);
 });

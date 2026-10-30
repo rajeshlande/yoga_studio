@@ -85,6 +85,36 @@
 .erp-check strong{display:block;font-size:14px;color:#3d3547}
 .erp-check small{font-size:12px;color:#9b92a4;line-height:1.6}
 .erp-check-num{width:28px;height:28px;border-radius:50%;background:#eee7f7;color:#8664ba;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.erp-student-hero{display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:linear-gradient(120deg,#eee7f8,#f5edf7);border:1px solid #ded1ef;border-radius:16px;padding:22px;margin:18px 0}
+.erp-student-avatar{width:58px;height:58px;border-radius:50%;background:#8664ba;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Manrope',sans-serif;font-size:19px;font-weight:800;flex-shrink:0;box-shadow:0 8px 22px #8664ba25}
+.erp-student-hero-copy{flex:1;min-width:220px}
+.erp-student-hero-copy small,.erp-student-next small{display:block;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#8664ba}
+.erp-student-hero-copy h2{font-size:24px;color:#3d3547;margin-top:5px}
+.erp-student-hero-copy p{font-size:12px;color:#8d7d99;margin-top:5px}
+.erp-student-next{margin-left:auto;background:#ffffffa8;border:1px solid #ffffff;border-radius:14px;padding:15px 17px;min-width:min(280px,100%)}
+.erp-student-next strong{display:block;font-size:16px;color:#3d3547;margin-top:5px}
+.erp-student-next span{display:block;font-size:12px;color:#8d7d99;margin-top:4px;line-height:1.55}
+.erp-student-batch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.erp-student-batch-card{border:1px solid #f0e9f5;background:#fdfcfe;border-radius:14px;padding:17px}
+.erp-student-batch-card>div{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.erp-student-batch-card strong{font-size:15px;color:#3d3547}
+.erp-student-batch-card p{font-size:12px;color:#8d7d99;line-height:1.65;margin-top:8px}
+.erp-student-batch-card small{display:block;font-size:11px;color:#a295ae;line-height:1.6;margin-top:10px}
+.erp-student-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0}
+.erp-student-columns>.erp-panel{margin:0}
+.erp-student-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.erp-student-detail-grid>div{border:1px solid #f0e9f5;background:#fdfcfe;border-radius:12px;padding:13px}
+.erp-student-detail-grid small{display:block;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#a295ae}
+.erp-student-detail-grid strong{display:block;font-size:13px;color:#3d3547;line-height:1.55;margin-top:5px;overflow-wrap:anywhere}
+.erp-student-progress{height:9px;border-radius:999px;background:#eee7f7;overflow:hidden;margin-top:15px}
+.erp-student-progress span{display:block;height:100%;border-radius:inherit;background:#8664ba;transition:width .25s ease}
+.erp-student-note{font-size:12px;color:#8d7d99;line-height:1.65;margin-top:10px}
+.erp-student-list{display:grid}
+.erp-student-list>div{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid #f4eff8}
+.erp-student-list>div:last-child{border-bottom:0}
+.erp-student-list strong{display:block;font-size:13px;color:#3d3547}
+.erp-student-list small{display:block;font-size:11px;color:#9b92a4;line-height:1.55;margin-top:3px}
+.erp-student-list b{font-size:13px;color:#3d3547;white-space:nowrap}
 .erp-banner{display:flex;gap:12px;align-items:flex-start;background:#fbecde;border:1px solid #f3dcbd;color:#7a5527;border-radius:12px;padding:14px 16px;font-size:13px;line-height:1.7;margin:16px 0}
 .erp-banner.blue{background:#eee7f7;border-color:#ded1ef;color:#5c4377}
 .erp-link-btn{color:#8664ba;font-weight:700;font-size:12px;display:inline-flex;gap:5px;align-items:center;padding:6px 4px;min-height:36px}
@@ -187,6 +217,9 @@
 }
 .auth-local{margin-top:22px;border-top:1px solid #f0e9f5;padding-top:18px;text-align:center}
 .auth-local p{font-size:11px;color:#ae9eb8;line-height:1.7;margin:9px 0 0}
+@media(max-width:850px){
+ .erp-student-columns{grid-template-columns:1fr}
+}
 @media(max-width:650px){
  .erp-form{grid-template-columns:1fr}
  .erp-dialog{padding:22px 18px}
@@ -195,6 +228,9 @@
  .erp-toolbar select{min-width:0;width:100%}
  .erp-toolbar label{flex:1;min-width:140px}
  .erp-panel{padding:16px}
+ .erp-student-hero{align-items:flex-start;padding:18px}
+ .erp-student-next{margin-left:0;width:100%}
+ .erp-student-detail-grid{grid-template-columns:1fr 1fr}
  .erp-form-actions .primary-button,.erp-form-actions .secondary-button{flex:1}
  .erp-panel-head.align-end .erp-actions{width:100%}
  .erp-panel-head.align-end .erp-field{flex:1 1 100%;max-width:none}
@@ -263,6 +299,12 @@
 :root[data-theme="dark"] .account-intent strong{color:#f0e8f7}
 :root[data-theme="dark"] .account-intent small{color:#aa99bd}
 :root[data-theme="dark"] .erp-check-num{background:#312649;color:#cdb1eb}
+:root[data-theme="dark"] .erp-student-hero{background:linear-gradient(120deg,#2d2344,#33264a);border-color:#493761}
+:root[data-theme="dark"] .erp-student-hero-copy h2,:root[data-theme="dark"] .erp-student-next strong,:root[data-theme="dark"] .erp-student-batch-card strong,:root[data-theme="dark"] .erp-student-detail-grid strong,:root[data-theme="dark"] .erp-student-list strong,:root[data-theme="dark"] .erp-student-list b{color:#f0e8f7}
+:root[data-theme="dark"] .erp-student-hero-copy p,:root[data-theme="dark"] .erp-student-next span,:root[data-theme="dark"] .erp-student-batch-card p,:root[data-theme="dark"] .erp-student-batch-card small,:root[data-theme="dark"] .erp-student-note,:root[data-theme="dark"] .erp-student-list small{color:#aa99bd}
+:root[data-theme="dark"] .erp-student-next,:root[data-theme="dark"] .erp-student-batch-card,:root[data-theme="dark"] .erp-student-detail-grid>div{background:#251f34;border-color:#3a304d}
+:root[data-theme="dark"] .erp-student-progress{background:#342a49}
+:root[data-theme="dark"] .erp-student-list>div{border-bottom-color:#2d253f}
 :root[data-theme="dark"] .erp-banner{background:#3d3020;border-color:#5c4825;color:#f0d3a0}
 :root[data-theme="dark"] .erp-banner.blue{background:#2d2344;border-color:#493761;color:#d8c7f1}
 :root[data-theme="dark"] .erp-link-btn{color:#c5a9e4}

@@ -43,7 +43,7 @@ The application supports two clearly separated data modes:
 | Mode | Purpose | Synchronization |
 |---|---|---|
 | **Supabase mode** | Shared, multi-user studio data | Offline-first. After an online sign-in and initial download, changes are saved in a per-user/per-organization device outbox and automatically pushed when a connection is available. |
-| **This-device mode** | A standalone browser-local studio copy | Never syncs and never becomes Supabase data automatically. It starts empty and offers JSON export/import/clear in Settings. |
+| **This-device mode** | A standalone browser-local studio copy | Never syncs and never becomes Supabase data automatically. It starts empty; JSON export/import/clear is in the Owner/Admin-only **Settings → Studio ERP data** panel. |
 
 There is **no demo account, seeded business data, offline sign-in bypass or
 sample-data mode**. Test fixtures live only under `tests/` and are not bundled
@@ -80,8 +80,10 @@ into the application.
     or other branches.
   - **Instructor:** own linked batches, rosters and attendance only; no
     fees, payments, student editing or access administration.
-  - **Student:** view-only access to their own batches, attendance,
-    membership, dues, payments and invoices.
+  - **Student:** a personal, view-only dashboard for their assigned batches,
+    next classes, attendance, membership, dues, payments and invoices. The
+    Student portal does not show studio rosters/class counts, sync badges or
+    **Sync now**, or the **Studio ERP data** settings panel.
 - **In-app role access:** after a person creates and confirms a Supabase
   account and does not create their own organization, an authorized manager
   links that exact sign-in email. Use **Access** for Co-owner, branch Admin
@@ -94,15 +96,19 @@ into the application.
 - Installable PWA with an offline app shell after the first successful visit.
 - Light, Dark and System themes with a top-bar quick toggle, a Settings
   picker, pre-paint theme bootstrap and persistent per-device preference.
-- Always-visible **Online/Offline** status in the top bar, including whether
-  signed-in changes are synced, waiting, saved locally or need review.
+- Always-visible **Online/Offline** status in the top bar for studio staff,
+  including whether signed-in changes are synced, waiting, saved locally or
+  need review. The view-only Student portal hides sync badges and controls.
 - Supabase email/password sign-up, sign-in, password recovery and profile
   management.
 - Visible semantic app version sourced from `package.json`.
 
 ## Online, offline and automatic sync
 
-The top bar is the quickest way to understand the current data state:
+For Owner, Co-owner, Admin and Instructor accounts, the top bar is the
+quickest way to understand the current data state. Student accounts use the
+same automatic refresh internally, but do not display sync badges or a
+**Sync now** button:
 
 | Badge | Meaning |
 |---|---|
@@ -367,8 +373,10 @@ The suite includes:
   email; branch-Admin hiding of organization roles/plans/payment setup;
   signed-in Instructor identity locking; a waiting student's dedicated
   no-access screen and Retry flow; an explicit prospective-Owner creation
-  path; the student's view-only portal; and cleared studio display after
-  online revocation;
+  path; the student's personal view-only dashboard/assigned-batch portal
+  without sync controls or **Studio ERP data** settings; Owner/Admin-only
+  visibility of that settings panel; and cleared studio display after online
+  revocation;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
   browser-close guard and automatic sync after reconnect.
 

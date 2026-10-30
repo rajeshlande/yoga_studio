@@ -31,5 +31,5 @@ export async function signIn(page){
  await page.getByLabel('Email address').fill(account.email);
  await page.getByLabel('Password',{exact:true}).fill('valid-test-password');
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await page.getByRole('heading',{name:'Welcome back, Test.'}).waitFor();
+ await page.getByRole('heading',{name:/Welcome back, Test\.|My dashboard/}).waitFor();
 }

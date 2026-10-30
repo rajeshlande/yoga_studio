@@ -41,6 +41,14 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   explicitly chooses **Create my own studio** is routed to organization
   creation; the choice is onboarding routing only and does not itself grant
   an ERP role.
+- **Personal Student dashboard and settings boundary:** the Student
+  dashboard now shows only that student's assigned batches, next class,
+  classes today, attendance, membership progress, dues and recent payments.
+  Student screens no longer display **Online · synced**, **Supabase ·
+  Synced** or **Sync now**; the Batches screen does not expose an unassigned
+  batch, studio roster or class size. **Settings → Studio ERP data** is
+  limited to Owner and Admin accounts and is not shown to Co-owner,
+  Instructor or Student accounts.
 
 ### Security and behavior
 
@@ -67,7 +75,9 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   missing role row.
 - Browser coverage adds Owner Co-owner/Admin/Instructor management,
   branch-Admin UI restrictions, signed-in Instructor locking, the waiting
-  joining-account screen and the explicit prospective-Owner creation path.
+  joining-account screen, the explicit prospective-Owner creation path,
+  the personal Student dashboard/assigned-batch portal without sync
+  controls, and Owner/Admin-only visibility of **Studio ERP data**.
   PGlite
   validation exercises the RPC surface as `authenticated`; live Supabase
   Auth/RLS UAT with five real accounts remains required after deployment.

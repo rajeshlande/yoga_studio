@@ -486,7 +486,7 @@ export function ErpToolbar({data, ctx, setCtx, mode, remoteContext, erp}) {
         {data.students.filter(s => s.status === 'active').map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
       </select>
     </label>)}
-    <SyncControls data={data} erp={erp} mode={mode}/>
+    {ctx.role !== 'student' && <SyncControls data={data} erp={erp} mode={mode}/>}
   </div>;
 }
 
@@ -496,7 +496,137 @@ const canManageAccess = ctx => canManage(ctx);
 
 /* ---------------- dashboard ---------------- */
 
+function StudentDashboardSection(props) {
+  const {erp, ctx, go} = props;
+  const {data} = erp;
+  const today = toISODate();
+  const student = data.students.find(s => s.id === ctx.studentId);
+  const myEnrollments = data.enrollments.filter(e => e.studentId === ctx.studentId && e.status === 'active');
+  const enrollmentByBatch = new Map(myEnrollments.map(e => [e.batchId, e]));
+  const myBatches = data.batches
+    .filter(b => b.status === 'active' && enrollmentByBatch.has(b.id) && inBranch(ctx, b.branchId))
+    .sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || '')) || a.name.localeCompare(b.name));
+  const nextClassFor = batch => {
+    for (let offset = 0; offset <= 7; offset += 1) {
+      const date = addDaysISO(today, offset);
+      if (isBatchOnDate(batch, date)) return date;
+    }
+    return '';
+  };
+  const upcoming = myBatches
+    .flatMap(batch => Array.from({length: 7}, (_, offset) => ({batch, date: addDaysISO(today, offset)}))
+      .filter(item => isBatchOnDate(item.batch, item.date)))
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || '')));
+  const todayBatches = myBatches.filter(b => isBatchOnDate(b, today));
+  const myAttendance = data.attendance
+    .filter(a => a.studentId === ctx.studentId && enrollmentByBatch.has(a.batchId))
+    .sort((a, b) => b.classDate.localeCompare(a.classDate));
+  const attendance = attendanceSummary(myAttendance);
+  const billing = billingSettingsOf(data);
+  const membershipEntries = data.memberships
+    .filter(m => m.studentId === ctx.studentId && inBranch(ctx, m.branchId))
+    .map(m => ({m, bal: payableBalance(m, data.payments, billing, today)}))
+    .sort((a, b) => String(b.m.endDate || '').localeCompare(String(a.m.endDate || '')));
+  const activeMemberships = membershipEntries.filter(({m}) => m.status === 'active');
+  const currentMembership = activeMemberships.find(({bal}) => !bal.expired) || activeMemberships[0] || membershipEntries[0];
+  const dueTotal = activeMemberships.reduce((sum, {bal}) => sum + bal.due, 0);
+  const myPayments = data.payments
+    .filter(p => p.studentId === ctx.studentId && inBranch(ctx, p.branchId))
+    .sort((a, b) => String(b.paidOn || '').localeCompare(String(a.paidOn || '')));
+  const membershipCashTotal = currentMembership?.bal.grossTotalPaise || currentMembership?.bal.total || 0;
+  const paidPercent = membershipCashTotal
+    ? Math.min(100, Math.round((currentMembership.bal.paid / membershipCashTotal) * 100))
+    : 0;
+  const nextClass = upcoming[0];
+
+  return <>
+    <ErpBlockingState {...props}/>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
+    {erp.loading && <p style={{color: '#9b92a4', fontSize: 13}}>Loading your student data…</p>}
+    {!ctx.studentId ? <section className="erp-panel">
+      <Empty icon={Users} title="Your student record is not linked yet" text={props.mode === 'supabase' ? 'Ask the studio to grant portal access to your sign-in email. Your assigned batches will appear here after the account is linked.' : 'Choose “Acting student” above to preview that student’s assigned batches and records.'}/>
+    </section> : <>
+      <section className="erp-student-hero" aria-label="Student summary">
+        <span className="erp-student-avatar" aria-hidden="true">{initials(student?.fullName || 'Student')}</span>
+        <div className="erp-student-hero-copy">
+          <small>MY PRACTICE</small>
+          <h2>{student?.fullName || 'Your classes'}</h2>
+          <p>{student ? `${branchName(data, student.branchId)} branch · ` : ''}{myBatches.length} assigned batch(es)</p>
+        </div>
+        <div className="erp-student-next">
+          <small>{nextClass?.date === today ? "TODAY'S NEXT CLASS" : 'NEXT CLASS'}</small>
+          <strong>{nextClass ? nextClass.batch.name : 'No class scheduled'}</strong>
+          <span>{nextClass ? `${formatDate(nextClass.date)} · ${batchTimeLabel(nextClass.batch)}` : 'Your next assigned class will appear here.'}</span>
+        </div>
+      </section>
+
+      <div className="erp-grid" aria-label="My student summary">
+        <div className="erp-kpi"><small>My assigned batches</small><strong>{myBatches.length}</strong><p>Only batches you are enrolled in</p></div>
+        <div className="erp-kpi"><small>Classes today</small><strong>{todayBatches.length}</strong><p>{formatDate(today)}</p></div>
+        <div className="erp-kpi"><small>My attendance</small><strong>{attendance.rate === null ? '—' : `${attendance.rate}%`}</strong><p>{attendance.present + attendance.late} attended · {attendance.absent} absent</p></div>
+        <div className="erp-kpi"><small>My dues</small><strong>{formatINR(dueTotal)}</strong><p>{dueTotal ? 'Please contact the studio to pay.' : 'All clear. Thank you!'}</p></div>
+      </div>
+
+      <section className="erp-panel">
+        <div className="erp-panel-head"><div><h2>My assigned batches</h2><p>Your enrolled batches only — no studio roster or other-batch information.</p></div>
+          <button className="secondary-button" onClick={() => go('batches')}><Clock size={15}/> View my batches</button></div>
+        {myBatches.length === 0 ? <Empty icon={Clock} title="No assigned batches yet" text="When the studio enrolls you in a batch, its schedule and instructor will appear here."/> :
+        <div className="erp-student-batch-grid">{myBatches.map(batch => {
+          const enrollment = enrollmentByBatch.get(batch.id);
+          const nextDate = nextClassFor(batch);
+          return <article className="erp-student-batch-card" key={batch.id}>
+            <div><strong>{batch.name}</strong><span className="erp-badge green">Enrolled</span></div>
+            <p>{branchName(data, batch.branchId)} · {instructorName(data, batch.instructorId)}</p>
+            <p>{batch.days.map(day => DAY_LABELS[day]).join(' ')} · {batchTimeLabel(batch)}</p>
+            <small>{nextDate ? `Next class: ${formatDate(nextDate)}` : 'No upcoming class in the next week'}{enrollment?.joinedOn ? ` · Joined ${formatDate(enrollment.joinedOn)}` : ''}</small>
+          </article>;
+        })}</div>}
+      </section>
+
+      <div className="erp-student-columns">
+        <section className="erp-panel">
+          <div className="erp-panel-head"><div><h2>My membership & fees</h2><p>Your current plan, balance and recent payments.</p></div>
+            <button className="secondary-button" onClick={() => go('fees')}><Wallet size={15}/> View fees</button></div>
+          {!currentMembership ? <Empty icon={Wallet} title="No membership yet" text="Your membership and fee balance will appear here when the studio assigns a plan."/> : <>
+            <div className="erp-student-detail-grid">
+              <div><small>Plan</small><strong>{planName(data, currentMembership.m.planId)}</strong></div>
+              <div><small>Period</small><strong>{formatDate(currentMembership.m.startDate)} → {formatDate(currentMembership.m.endDate)}</strong></div>
+              <div><small>Paid</small><strong>{formatINR(currentMembership.bal.paid)}</strong></div>
+              <div><small>Due</small><strong>{formatINR(currentMembership.bal.due)}</strong></div>
+            </div>
+            <div className="erp-student-progress" role="progressbar" aria-label="Membership amount paid" aria-valuemin={0} aria-valuemax={100} aria-valuenow={paidPercent}><span style={{width: `${paidPercent}%`}}/></div>
+            <p className="erp-student-note">{currentMembership.bal.expired ? 'This membership has expired. Please contact the studio to renew.' : currentMembership.bal.daysLeft !== null ? `${currentMembership.bal.daysLeft} day(s) left · ${paidPercent}% paid` : `${paidPercent}% paid`}</p>
+            {myPayments.length > 0 && <div className="erp-student-list" aria-label="Recent payments">
+              {myPayments.slice(0, 3).map(payment => <div key={payment.id}><span><strong>{payment.receiptNo || 'Payment'}</strong><small>{formatDate(payment.paidOn)}</small></span><b>{formatINR(payment.amountPaise)}</b></div>)}
+            </div>}
+          </>}
+        </section>
+
+        <section className="erp-panel">
+          <div className="erp-panel-head"><div><h2>Recent attendance</h2><p>{attendance.total} recorded class(es)</p></div>
+            <button className="secondary-button" onClick={() => go('attendance')}><CalendarCheck size={15}/> My attendance</button></div>
+          {myAttendance.length === 0 ? <Empty icon={CalendarCheck} title="No attendance yet" text="Your present, late and absent classes will appear here after attendance is marked."/> :
+          <div className="erp-student-list">{myAttendance.slice(0, 5).map(record => <div key={record.id}>
+            <span><strong>{data.batches.find(b => b.id === record.batchId)?.name || 'Class'}</strong><small>{formatDate(record.classDate)}</small></span>
+            <span className={`erp-badge ${record.status === 'present' ? 'green' : record.status === 'late' ? 'amber' : 'red'}`}>{record.status}</span>
+          </div>)}</div>}
+        </section>
+      </div>
+
+      <section className="erp-panel">
+        <div className="erp-panel-head"><div><h2>Upcoming classes</h2><p>Next seven days from your assigned batches.</p></div></div>
+        {upcoming.length === 0 ? <Empty icon={Clock} title="No upcoming classes" text="No assigned batch is scheduled in the next seven days."/> :
+        <div className="erp-student-list">{upcoming.slice(0, 7).map(({batch, date}) => <div key={`${batch.id}-${date}`}>
+          <span><strong>{batch.name}</strong><small>{formatDate(date)} · {batchTimeLabel(batch)} · {instructorName(data, batch.instructorId)}</small></span>
+          <span className={`erp-badge ${date === today ? 'green' : 'lavender'}`}>{date === today ? 'Today' : 'Upcoming'}</span>
+        </div>)}</div>}
+      </section>
+    </>}
+  </>;
+}
+
 export function ErpDashboardSection(props) {
+  if (props.ctx.role === 'student') return <StudentDashboardSection {...props}/>;
   const {erp, ctx, go} = props;
   const {data} = erp;
   const today = toISODate();
@@ -1151,7 +1281,7 @@ export function BatchesPage(props) {
   const addable = roster ? data.students.filter(s => s.status === 'active' && s.branchId === roster.branchId && !rosterList.some(e => e.studentId === s.id)) : [];
   return <>
     <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Batches <span className="flower">✳</span></h1><p>Recurring class groups, instructors and rosters.</p></div>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{ctx.role === 'student' ? 'My batches' : 'Batches'} <span className="flower">✳</span></h1><p>{ctx.role === 'student' ? 'Only the batches assigned to you.' : 'Recurring class groups, instructors and rosters.'}</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     {canManage(ctx) && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Instructors</h2><p>{data.instructors.length} instructor(s)</p></div>
       <button className="secondary-button" onClick={() => setNewInstructor({fullName: '', phone: '', email: '', branchId: data.branches[0]?.id || ''})}><Plus size={15}/> Add instructor</button></div>
@@ -1161,17 +1291,17 @@ export function BatchesPage(props) {
     <section className="erp-panel"><div className="erp-panel-head"><div><h2>{ctx.role === 'instructor' ? 'My batches' : ctx.role === 'student' ? 'My batches' : 'All batches'}</h2><p>{batches.length} batch(es)</p></div>
       {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), instructorId: '', days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20})}><Plus size={16}/> Add batch</button>}</div>
       {data.branches.length === 0 && canManage(ctx) ? <Empty icon={Building2} title="Add a branch first" text="Batches run at a branch." action={<button className="primary-button" onClick={() => go('branches')}>Go to Branches</button>}/> :
-      batches.length === 0 ? <Empty icon={Clock} title="No batches here" text={ctx.role === 'instructor' && !ctx.instructorId ? 'Choose “Acting instructor” above to see assigned batches.' : 'Create a batch with days and a start time, then enroll students.'}/> :
-      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Batch</th><th>Instructor</th><th>Schedule</th><th>Students</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      batches.length === 0 ? <Empty icon={Clock} title={ctx.role === 'student' ? 'No assigned batches yet' : 'No batches here'} text={ctx.role === 'instructor' && !ctx.instructorId ? 'Choose “Acting instructor” above to see assigned batches.' : ctx.role === 'student' && !ctx.studentId ? 'Choose “Acting student” above to see assigned batches.' : ctx.role === 'student' ? 'When the studio enrolls you in a batch, it will appear here.' : 'Create a batch with days and a start time, then enroll students.'}/> :
+      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Batch</th><th>Instructor</th><th>Schedule</th><th>{ctx.role === 'student' ? 'My status' : 'Students'}</th><th>Status</th>{ctx.role !== 'student' && <th>Actions</th>}</tr></thead><tbody>
         {batches.map(b => { const count = data.enrollments.filter(e => e.batchId === b.id && e.status === 'active').length; return <tr key={b.id}>
           <td><strong>{b.name}</strong><br/><small style={{color: '#9b92a4'}}>{branchName(data, b.branchId)}</small></td>
           <td>{instructorName(data, b.instructorId)}</td>
           <td>{b.days.map(d => DAY_LABELS[d]).join(' ')}<br/><small style={{color: '#9b92a4'}}>{batchTimeLabel(b)}</small></td>
-          <td><span className={`erp-badge ${count >= b.capacity ? 'red' : 'green'}`}>{count}/{b.capacity}</span></td>
+          <td>{ctx.role === 'student' ? <span className="erp-badge green">Enrolled</span> : <span className={`erp-badge ${count >= b.capacity ? 'red' : 'green'}`}>{count}/{b.capacity}</span>}</td>
           <td><span className={`erp-badge ${b.status === 'archived' ? 'grey' : 'green'}`}>{b.status}</span></td>
-          <td><button className="erp-link-btn" onClick={() => { setRoster(b); setAddStudentId(''); }}><Users size={13}/> Roster</button>
+          {ctx.role !== 'student' && <td><button className="erp-link-btn" onClick={() => { setRoster(b); setAddStudentId(''); }}><Users size={13}/> Roster</button>
           {canManage(ctx) && <><button className="erp-link-btn" onClick={() => setEditing({...b})}><Pencil size={13}/> Edit</button>
-          <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveBatch(b.id), b.status === 'archived' ? 'Batch restored.' : 'Batch archived.')}>{b.status === 'archived' ? 'Restore' : 'Archive'}</button></>}</td></tr>; })}
+          <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveBatch(b.id), b.status === 'archived' ? 'Batch restored.' : 'Batch archived.')}>{b.status === 'archived' ? 'Restore' : 'Archive'}</button></>}</td>}</tr>; })}
       </tbody></table></div>}
     </section>
     {newInstructor && <Dialog title="Add instructor" onClose={() => setNewInstructor(null)}><form className="erp-form" onSubmit={saveInstructor}>
@@ -1191,7 +1321,7 @@ export function BatchesPage(props) {
         <div className="erp-field full"><span>Class days</span><div className="erp-days">{DAY_LABELS.map((label, day) => <button type="button" key={label} className={`erp-day ${editing.days.includes(day) ? 'on' : ''}`} aria-pressed={editing.days.includes(day)} onClick={() => toggleDay(day)}>{label}</button>)}</div></div>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button">Save batch</button></div>
       </form></Dialog>}
-    {roster && <Dialog title={`${roster.name} — roster`} sub={`${branchName(data, roster.branchId)} · ${rosterList.length}/${roster.capacity} enrolled`} onClose={() => setRoster(null)}>
+    {roster && ctx.role !== 'student' && <Dialog title={`${roster.name} — roster`} sub={`${branchName(data, roster.branchId)} · ${rosterList.length}/${roster.capacity} enrolled`} onClose={() => setRoster(null)}>
       {rosterList.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No students enrolled yet.</p> :
       rosterList.map(e => <div className="erp-att-row" key={e.id}><span className="erp-person"><span className="avatar">{initials(studentName(data, e.studentId))}</span><strong>{studentName(data, e.studentId)}</strong></span>
         {canManage(ctx) && <button className="erp-link-btn erp-danger" onClick={() => erp.act(c => c.endEnrollment(e.id), 'Removed from batch.')}>Remove</button>}</div>)}
@@ -1650,7 +1780,7 @@ export function FeesPage(props) {
   const openPayment = m => { const bal = m ? payableBalance(m, data.payments, billing, today) : null; setPaymentForm({membershipId: m?.id || memberships[0]?.id || '', amountRupees: bal ? paiseToRupees(bal.due) : '', method: 'upi', paidOn: today, note: ''}); };
   return <>
     <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Fees & payments <span className="flower">✳</span></h1><p>Plans, memberships, dues, themed invoice PDFs and payment setup in ₹.</p></div>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{isStudent ? 'My fees & payments' : 'Fees & payments'} <span className="flower">✳</span></h1><p>{isStudent ? 'Your membership, dues, payments and invoice PDFs in ₹.' : 'Plans, memberships, dues, themed invoice PDFs and payment setup in ₹.'}</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <div className="erp-seg" role="tablist" aria-label="Fees sections" style={{marginBottom: 16}}>
       {[['memberships', 'Memberships & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : []), ...(canManageOrg(ctx) ? [['setup', 'Payment setup']] : [])].map(([id, label]) =>
