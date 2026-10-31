@@ -1,16 +1,20 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {
-  AlertCircle, Building2, CalendarCheck, CalendarClock, Check, CirclePause, CirclePlay, Clock,
-  Copy, Download, IndianRupee, KeyRound, LayoutGrid, Leaf, List, MapPin, Pencil, Phone, Plus,
-  Printer, RefreshCw, Repeat, Search, Users, Wallet, WifiOff, X,
+  AlertCircle, ArrowLeft, ArrowRight, BadgeCheck, Building2, CalendarCheck, CalendarClock, CalendarDays, Check, CirclePause,
+  CirclePlay, Clock, Copy, Download, ExternalLink, IndianRupee, KeyRound, LayoutGrid,
+  Leaf, List, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, Printer, QrCode,
+  RefreshCw, Repeat, Search, Share2, Sparkles, UserPlus, Users, Wallet, WifiOff, X,
 } from 'lucide-react';
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
+import {ErrorNotice} from '../components/ErrorNotice.jsx';
 import QRCode from 'qrcode';
 import {
-  ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, PLAN_TYPES, ROLES, attendanceSummary,
+  ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, PLAN_TYPES, ROLES,
+  admissionWaitingDays, attendanceSummary,
   batchEndMinutes, batchFill, batchOverlapDays, batchTimeLabel, emptySnapshot,
-  findInstructorScheduleConflicts, formatDate, formatINR, initials, isBatchOnDate,
+  findInstructorScheduleConflicts, formatDate, formatINR, initials,
+  instructorFinanceStudentIds, isBatchOnDate,
   isOneMonthMembership, membershipEnd, membershipOfferingType, monthlyRecurringRevenuePaise,
   nextBatchDate, nextRenewalDate, normalizeInstructorProfile, normalizePlanTemplate,
   normalizePlanType, paiseToRupees, pauseDaysBetween, planBillingPeriodLabel, payableBalance,
@@ -107,7 +111,7 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
         } catch { /* Keep the sync error message below. */ }
       }
       if (client.getSyncState) setSyncState(client.getSyncState());
-      notify(err?.message || 'Sync could not be completed.');
+      notify(err, {type: 'error', context: 'Sync studio data', fallbackMessage: 'Sync could not be completed.', onRetry: () => syncNow()});
       return false;
     }
   }, [client, enabled, mode, notify]);
@@ -176,7 +180,7 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
 
   useEffect(() => {
     if (syncState.conflictCount > previousConflictCount.current) {
-      notify(`${syncState.conflictCount} sync conflict(s) need review. No change was overwritten.`);
+      notify(`${syncState.conflictCount} sync conflict(s) need review. Open “Review sync conflicts” to compare versions; no change was overwritten.`);
     }
     previousConflictCount.current = syncState.conflictCount;
   }, [notify, syncState.conflictCount]);
@@ -194,9 +198,7 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
       }
       return true;
     } catch (err) {
-      notify(isMissingRpcError(err)
-        ? 'Supabase ERP setup is not installed yet. Run supabase/erp_setup.sql, then try again.'
-        : (err?.message || 'Could not save. Please try again.'));
+      notify(err, {type: 'error', context: 'Save studio data', fallbackMessage: 'Could not save. Please try again.'});
       return false;
     }
   }, [client, mode, notify]);
@@ -209,7 +211,7 @@ export function useErpData(mode, notify, enabled, onRemoteContext, userId = '') 
       notify(choice === 'mine' ? 'Your version was queued to sync.' : 'The Supabase version was kept.');
       return true;
     } catch (err) {
-      notify(err?.message || 'That conflict could not be resolved.');
+      notify(err, {type: 'error', context: 'Resolve sync conflict', fallbackMessage: 'That conflict could not be resolved.'});
       return false;
     }
   }, [client, notify]);
@@ -266,6 +268,28 @@ function membershipKindLabel(data, membership) {
   return isOneMonthMembership(membership, plan) ? 'One-month pass' : 'Subscription';
 }
 function inBranch(ctx, branchId) { return !ctx.branchId || ctx.branchId === 'all' || ctx.branchId === branchId; }
+function newClientUuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+function whatsappPhone(value = '') {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+  if (digits.length === 10) digits = `91${digits}`;
+  return digits.length >= 11 && digits.length <= 15 ? digits : '';
+}
+function whatsappUrl(value = '', message = '') {
+  const phone = whatsappPhone(value);
+  if (!phone) return '';
+  const text = message ? `?text=${encodeURIComponent(message)}` : '';
+  return `https://wa.me/${phone}${text}`;
+}
 
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const FULL_DAY_LABELS = {
@@ -426,7 +450,7 @@ export function ErpBlockingState({erp, mode, setMode, accountIntent = '', onAcco
         </> : <>
           <b>Waiting for your studio to grant access.</b> Ask an Owner or Co-owner to link your exact sign-in email in <b>Access</b>. For a Student account, they use <b>Students → Portal access</b>. You will receive only the role and records your studio grants to this account. Press <b>Retry</b> after they grant access.
         </>}
-      </> : <><strong>Could not load studio data.</strong><br/>{erp.error.message || 'Please check your connection and try again.'}</>}
+      </> : <ErrorNotice error={erp.error} context="Load studio data"/>}
       <div className="erp-actions" style={{marginTop: 10}}>
         <button className="secondary-button" onClick={erp.load}>Retry</button>
         {mode === 'supabase' && !(noOrg && effectiveIntent === 'member') && <button className="secondary-button" onClick={() => setMode('local')}>Use this device only (offline)</button>}
@@ -442,7 +466,8 @@ const SYNC_ENTITY_LABELS = {
 };
 const SYNC_FIELD_LABELS = {
   name: 'Name', fullName: 'Full name', branchId: 'Branch', studentId: 'Student',
-  instructorId: 'Instructor', batchId: 'Batch', planId: 'Plan', membershipId: 'Subscription',
+  instructorId: 'Instructor', batchId: 'Batch', walkInBatchId: 'Initial batch',
+  planId: 'Plan', membershipId: 'Subscription',
   city: 'City', address: 'Address', phone: 'Phone', email: 'Email', gender: 'Gender',
   dob: 'Date of birth', joiningDate: 'Joining date', joinedOn: 'Joined on', status: 'Status',
   notes: 'Notes', days: 'Days', startTime: 'Start time', durationMins: 'Duration (mins)',
@@ -654,6 +679,9 @@ const canEditBatchRoster = (ctx, batch) => Boolean(batch) && (
   || (ctx.role === 'instructor' && ctx.instructorId
     && batch.instructorId === ctx.instructorId && batch.status === 'active')
 );
+const canUseEnrollmentWizard = ctx => canManage(ctx)
+  || (ctx.role === 'instructor' && Boolean(ctx.instructorId));
+const canCollectPayments = ctx => canManage(ctx) || ctx.role === 'instructor';
 
 /* ---------------- dashboard ---------------- */
 
@@ -1121,7 +1149,7 @@ const emptyAdmissionForm = (profile = {}, admission = null) => {
   };
 };
 
-export function PublicAdmissionPanel({erp, admissionCode, profile = {}, notify}) {
+export function PublicAdmissionPanel({erp, admissionCode, admissionBranchId = '', profile = {}, notify}) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [target, setTarget] = useState(null);
@@ -1136,7 +1164,7 @@ export function PublicAdmissionPanel({erp, admissionCode, profile = {}, notify})
     setLoading(true);
     setLoadError('');
     try {
-      const result = await erp.client.getMyAdmission(admissionCode);
+      const result = await erp.client.getMyAdmission(admissionCode, admissionBranchId);
       const nextAdmission = result.admission || null;
       setTarget(result.target || null);
       setAdmission(nextAdmission);
@@ -1146,27 +1174,31 @@ export function PublicAdmissionPanel({erp, admissionCode, profile = {}, notify})
       ));
       setSubmitted(nextAdmission?.status === 'pending');
     } catch (error) {
-      setLoadError(error?.message || 'The admission form could not be loaded.');
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
-  }, [admissionCode, erp.client, profile.email, profile.name]);
+  }, [admissionBranchId, admissionCode, erp.client, profile.email, profile.name]);
 
   useEffect(() => { load(); }, [load]);
 
   const setField = (field, value) => setForm(current => ({...current, [field]: value}));
+  const preferredBranchId = admissionBranchId || target?.branchId || admission?.branchId || '';
+  const preferredBranchName = target?.branchName || admission?.branchName || '';
   const submit = async event => {
     event.preventDefault();
     setBusy(true);
     setSubmitError('');
     try {
-      const saved = await erp.client.submitAdmission({code: admissionCode, ...form});
+      const saved = await erp.client.submitAdmission({
+        code: admissionCode, branchId: preferredBranchId, ...form,
+      });
       setAdmission(saved);
       setForm(emptyAdmissionForm(profile, saved));
       setSubmitted(true);
       notify?.('Admission submitted. The studio will review and confirm it.');
     } catch (error) {
-      setSubmitError(error?.message || 'The admission could not be submitted.');
+      setSubmitError(error);
     } finally {
       setBusy(false);
     }
@@ -1177,8 +1209,7 @@ export function PublicAdmissionPanel({erp, admissionCode, profile = {}, notify})
   }
   if (loadError) {
     return <section className="erp-panel admission-panel">
-      <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{loadError}</span></div>
-      <button className="secondary-button" onClick={load}>Retry</button>
+      <ErrorNotice error={loadError} context="Load admission form" onRetry={load}/>
     </section>;
   }
   if (admission?.status === 'confirmed') {
@@ -1193,8 +1224,14 @@ export function PublicAdmissionPanel({erp, admissionCode, profile = {}, notify})
   return <section className="erp-panel admission-panel">
     <div className="erp-panel-head"><div>
       <h2>Your details</h2>
-      <p>{target?.organizationName ? `Apply to ${target.organizationName}. ` : ''}Complete this form for studio review. A manager selects your branch and joining date when confirming the admission.</p>
+      <p>{target?.organizationName ? `Apply to ${target.organizationName}. ` : ''}Complete this form for studio review. {preferredBranchId
+        ? 'This branch link pre-selects your preferred branch; a manager confirms the final branch and joining date.'
+        : 'A manager selects your branch and joining date when confirming the admission.'}</p>
     </div>{admission?.status && <span className={`erp-badge ${admission.status === 'pending' ? 'amber' : 'red'}`}>{admission.status}</span>}</div>
+
+    {preferredBranchId && <div className="erp-banner blue" role="status">
+      <MapPin size={18}/><span><b>Preferred branch:</b> {preferredBranchName || 'Selected by this branch admission link'}. The studio will see this preference with your request.</span>
+    </div>}
 
     {submitted && admission?.status === 'pending' && <div className="erp-banner blue" role="status">
       <Check size={18}/><span><b>Admission submitted — pending studio confirmation.</b><br/>You may update the details below until the studio confirms or rejects the request.</span>
@@ -1202,7 +1239,7 @@ export function PublicAdmissionPanel({erp, admissionCode, profile = {}, notify})
     {admission?.status === 'rejected' && <div className="erp-banner" role="status">
       <AlertCircle size={18}/><span><b>The studio could not confirm this admission.</b>{admission.reviewNote ? ` ${admission.reviewNote}` : ''} You may correct the form and submit it again.</span>
     </div>}
-    {submitError && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{submitError}</span></div>}
+    {submitError && <ErrorNotice error={submitError} context="Submit admission"/>}
 
     <form className="erp-form admission-form" onSubmit={submit}>
       <label className="erp-field">First Name *
@@ -1284,7 +1321,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
       onClose();
       return true;
     } catch (err) {
-      notify(err?.message || 'Student portal access could not be updated.');
+      notify(err, {type: 'error', context: 'Update student portal access', fallbackMessage: 'Student portal access could not be updated.'});
       return false;
     } finally {
       setBusy(false);
@@ -1324,7 +1361,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v10) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v11) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
@@ -1356,13 +1393,850 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
   </Dialog>;
 }
 
-function AdmissionReviewDialog({admission, branches, erp, online, notify, onClose, onReviewed}) {
+function AdmissionQrDialog({item, onClose}) {
+  const [qrUrl, setQrUrl] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    QRCode.toDataURL(item.url, {width: 420, margin: 2, errorCorrectionLevel: 'M'})
+      .then(url => { if (active) setQrUrl(url); })
+      .catch(qrError => { if (active) setError({
+        title: 'QR code could not be generated',
+        message: 'The admission link itself is still valid, but this browser could not create its QR image.',
+        solution: 'Use Copy, Share or WhatsApp for the same link. You can also close and reopen the QR dialog to try generating it again.',
+        technical: qrError?.message || 'QR generation failed.',
+      }); });
+    return () => { active = false; };
+  }, [item.url]);
+
+  return <Dialog title={`${item.label} QR code`} sub="Print this QR code or show it at the studio. It opens the account-first admission form; it does not grant access by itself." onClose={onClose}>
+    <div className="admission-qr-box">
+      {qrUrl
+        ? <img src={qrUrl} alt={`QR code for ${item.label}`}/>
+        : error ? <ErrorNotice error={error} context="Generate admission QR code"/> : <p>Generating QR code…</p>}
+      <strong>{item.label}</strong>
+      <small>{item.url}</small>
+    </div>
+    <div className="erp-form-actions">
+      {qrUrl && <a className="secondary-button" href={qrUrl} download={`${item.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-admission-qr.png`}>
+        <Download size={15}/> Download QR
+      </a>}
+      <button type="button" className="primary-button" onClick={onClose}>Done</button>
+    </div>
+  </Dialog>;
+}
+
+function EnrollmentWizardDialog({
+  erp, ctx, notify, onClose, initialBatch = null, fixedStudent = null, onComplete,
+}) {
+  const {data} = erp;
+  const today = toISODate();
+  const isInstructor = ctx.role === 'instructor';
+  const billing = billingSettingsOf(data);
+  const eligibleBatches = data.batches
+    .filter(batch => batch.status === 'active' && inBranch(ctx, batch.branchId)
+      && (!isInstructor || batch.instructorId === ctx.instructorId))
+    .sort((a, b) => branchName(data, a.branchId).localeCompare(branchName(data, b.branchId))
+      || String(a.startTime || '').localeCompare(String(b.startTime || ''))
+      || a.name.localeCompare(b.name));
+  const eligibleStudents = data.students
+    .filter(student => student.status === 'active' && inBranch(ctx, student.branchId))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const planOptions = data.plans
+    .filter(plan => plan.status !== 'archived')
+    .sort((a, b) => normalizePlanType(a.planType).localeCompare(normalizePlanType(b.planType))
+      || a.name.localeCompare(b.name));
+  const setupVersion = Number(erp.remoteContext?.setupVersion || 0);
+  const instructorPlanSetupOutdated = isInstructor
+    && erp.client?.mode === 'supabase'
+    && Boolean(erp.remoteContext)
+    && setupVersion < 11;
+  const firstExistingStudent = eligibleStudents.find(student => (
+    !initialBatch || student.branchId === initialBatch.branchId
+  )) || eligibleStudents[0] || null;
+  const firstPlan = planOptions[0] || null;
+  const firstTemplate = normalizePlanTemplate(firstPlan || {});
+
+  const grossDueFor = (plan, amountPaise = plan?.amountPaise || 0) => payableBalance(
+    {id: 'enrollment-preview', amountPaise: Number(amountPaise) || 0, startDate: today, endDate: today},
+    [], billing, today,
+  ).due;
+
+  const [studentMode, setStudentMode] = useState(fixedStudent ? 'fixed' : (firstExistingStudent ? 'existing' : 'new'));
+  const [studentId, setStudentId] = useState(fixedStudent?.id || firstExistingStudent?.id || '');
+  const [existingQuery, setExistingQuery] = useState('');
+  const [newStudent, setNewStudent] = useState({
+    firstName: '', lastName: '', phone: '', email: '', gender: '', dob: '',
+    branchId: fixedStudent?.branchId || initialBatch?.branchId
+      || (ctx.branchId !== 'all' ? ctx.branchId : (data.branches.find(branch => branch.status !== 'archived')?.id || '')),
+    joiningDate: fixedStudent?.joiningDate || today,
+  });
+  const [assignBatch, setAssignBatch] = useState(true);
+  const [batchId, setBatchId] = useState(
+    initialBatch?.id
+    || eligibleBatches.find(batch => !fixedStudent || batch.branchId === fixedStudent.branchId)?.id
+    || eligibleBatches[0]?.id
+    || '',
+  );
+  const [enrollmentDate, setEnrollmentDate] = useState(fixedStudent?.joiningDate || today);
+  const [createPlan, setCreatePlan] = useState(Boolean(firstPlan));
+  const [planId, setPlanId] = useState(firstPlan?.id || '');
+  const [planStartDate, setPlanStartDate] = useState(fixedStudent?.joiningDate || today);
+  const [billingCycle, setBillingCycle] = useState(firstTemplate.billingCycle);
+  const [autoRenew, setAutoRenew] = useState(firstTemplate.renewalEnabledDefault);
+  const [planAmountRupees, setPlanAmountRupees] = useState(firstPlan ? paiseToRupees(firstPlan.amountPaise) : '');
+  const [collectNow, setCollectNow] = useState(Boolean(firstPlan));
+  const [paymentAmountRupees, setPaymentAmountRupees] = useState(
+    firstPlan ? paiseToRupees(grossDueFor(firstPlan)) : '',
+  );
+  const [paymentMethod, setPaymentMethod] = useState('upi');
+  const [paidOn, setPaidOn] = useState(today);
+  const [paymentNote, setPaymentNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [progress, setProgress] = useState({
+    studentId: fixedStudent?.id || '',
+    membershipId: '',
+    paymentId: '',
+    steps: fixedStudent ? ['Student confirmed'] : [],
+  });
+  const [completed, setCompleted] = useState(false);
+  const [invoice, setInvoice] = useState(null);
+  const [wizardStep, setWizardStep] = useState(0);
+  const [stepError, setStepError] = useState('');
+
+  const fixedRecord = fixedStudent
+    ? (data.students.find(student => student.id === fixedStudent.id) || fixedStudent)
+    : null;
+  const selectedExistingStudent = studentMode === 'existing'
+    ? data.students.find(student => student.id === studentId) || null
+    : null;
+  const existingStudentOptions = eligibleStudents.filter(student => {
+    const needle = existingQuery.trim().toLocaleLowerCase('en-IN');
+    return !needle || `${student.fullName} ${student.phone || ''} ${student.email || ''}`
+      .toLocaleLowerCase('en-IN').includes(needle);
+  });
+  const selectedBatch = data.batches.find(batch => batch.id === batchId) || null;
+  const studentBranchId = fixedRecord?.branchId || selectedExistingStudent?.branchId
+    || (assignBatch && selectedBatch ? selectedBatch.branchId : newStudent.branchId);
+  const batchOptions = eligibleBatches.filter(batch => (
+    !studentBranchId || studentMode === 'new' || batch.branchId === studentBranchId
+  ));
+  const effectiveBatch = batchOptions.find(batch => batch.id === batchId) || batchOptions[0] || null;
+  const resolvedStudentId = progress.studentId || fixedRecord?.id || selectedExistingStudent?.id || '';
+  const alreadyEnrolled = Boolean(resolvedStudentId && effectiveBatch && data.enrollments.some(enrollment => (
+    enrollment.studentId === resolvedStudentId && enrollment.batchId === effectiveBatch.id
+      && enrollment.status === 'active'
+  )));
+  const fill = effectiveBatch ? batchFill(effectiveBatch, data.enrollments) : null;
+  const selectedPlan = planOptions.find(plan => plan.id === planId) || planOptions[0] || null;
+  const selectedTemplate = normalizePlanTemplate(selectedPlan || {});
+  const planAmountPaise = isInstructor
+    ? (selectedPlan?.amountPaise || 0)
+    : rupeesToPaise(planAmountRupees);
+  const suggestedGrossDue = selectedPlan ? grossDueFor(selectedPlan, planAmountPaise) : 0;
+  const currentPeriod = resolvedStudentId ? data.memberships.find(membership => (
+    membership.studentId === resolvedStudentId && membership.status !== 'cancelled'
+      && ['active', 'paused', 'scheduled'].includes(subscriptionLifecycle(membership, today).id)
+  )) : null;
+  const started = progress.steps.length > (fixedStudent ? 1 : 0);
+  const completedStudent = progress.studentId
+    ? data.students.find(student => student.id === progress.studentId) || fixedRecord
+    : fixedRecord || selectedExistingStudent;
+  const completedMembership = progress.membershipId
+    ? data.memberships.find(membership => membership.id === progress.membershipId) || null
+    : null;
+  const completedPayment = progress.paymentId
+    ? data.payments.find(payment => payment.id === progress.paymentId) || null
+    : null;
+
+  useEffect(() => {
+    if (!started && batchOptions.length > 0 && !batchOptions.some(batch => batch.id === batchId)) {
+      setBatchId(batchOptions[0].id);
+    }
+  }, [batchId, batchOptions, started]);
+
+  const mustAssignBatch = isInstructor || assignBatch;
+  const displayStudentName = studentMode === 'new'
+    ? [newStudent.firstName.trim(), newStudent.lastName.trim()].filter(Boolean).join(' ')
+    : (fixedRecord?.fullName || selectedExistingStudent?.fullName || '');
+  const displayStudentBranchId = fixedRecord?.branchId || selectedExistingStudent?.branchId
+    || (mustAssignBatch ? effectiveBatch?.branchId : newStudent.branchId) || '';
+  const planEndDate = selectedPlan
+    ? membershipEnd(planStartDate, selectedTemplate.durationMonths, isInstructor ? selectedTemplate.billingCycle : billingCycle)
+    : '';
+  const paymentAmountPaise = rupeesToPaise(paymentAmountRupees);
+  const balanceAfterPayment = collectNow
+    ? Math.max(0, suggestedGrossDue - paymentAmountPaise)
+    : suggestedGrossDue;
+  const overpaymentPaise = collectNow ? Math.max(0, paymentAmountPaise - suggestedGrossDue) : 0;
+  const nextBatchClassDate = effectiveBatch
+    ? nextUpcomingBatchDate(effectiveBatch, enrollmentDate > today ? enrollmentDate : today)
+    : '';
+  const selectedExistingBatchNames = selectedExistingStudent
+    ? data.enrollments
+      .filter(enrollment => enrollment.studentId === selectedExistingStudent.id && enrollment.status === 'active')
+      .map(enrollment => data.batches.find(batch => batch.id === enrollment.batchId)?.name)
+      .filter(Boolean)
+    : [];
+  const normalizePhoneForMatch = value => {
+    const digits = String(value || '').replace(/\D/g, '');
+    return digits.length > 10 ? digits.slice(-10) : digits;
+  };
+  const possibleDuplicateStudent = studentMode === 'new' ? data.students.find(student => {
+    if (student.status !== 'active') return false;
+    const email = newStudent.email.trim().toLocaleLowerCase('en-IN');
+    const phone = normalizePhoneForMatch(newStudent.phone);
+    return (email && String(student.email || '').trim().toLocaleLowerCase('en-IN') === email)
+      || (phone.length >= 10 && normalizePhoneForMatch(student.phone) === phone);
+  }) || null : null;
+
+  const validateStudentStep = () => {
+    if (fixedStudent) return '';
+    if (studentMode === 'existing') {
+      return selectedExistingStudent ? '' : 'Choose an existing active student to continue.';
+    }
+    if (!newStudent.firstName.trim()) return 'Enter the new student’s first name.';
+    const phone = newStudent.phone.trim();
+    if (phone && !/^[+0-9][0-9 ()-]{6,24}$/.test(phone)) return 'Enter a valid phone number, or leave Phone Number blank.';
+    const email = newStudent.email.trim();
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return 'Enter a valid email address, or leave Email blank.';
+    if (newStudent.dob && (newStudent.dob < '1900-01-01' || newStudent.dob > today)) return 'Enter a valid date of birth, or leave it blank.';
+    if (!newStudent.joiningDate) return 'Choose the student joining date.';
+    if (!mustAssignBatch && !newStudent.branchId) return 'Choose the student branch, or assign a batch in the next step.';
+    return '';
+  };
+  const validateBatchStep = () => {
+    if (!mustAssignBatch) return '';
+    if (!effectiveBatch) {
+      return isInstructor
+        ? 'Choose one of your active batches before enrolling a student.'
+        : 'Choose a batch, or turn off “Assign a batch now”.';
+    }
+    if (!enrollmentDate) return 'Choose the batch joining date.';
+    if (studentBranchId && effectiveBatch.branchId !== studentBranchId) return 'The student and batch must belong to the same branch.';
+    if (!alreadyEnrolled && fill?.seatsLeft <= 0) return `${effectiveBatch.name} is full. Choose another batch.`;
+    return '';
+  };
+  const validatePlanStep = () => {
+    if (!createPlan) return '';
+    if (!selectedPlan) return 'Choose an active plan, or turn off the plan step.';
+    if (!planStartDate) return 'Choose the plan start date.';
+    if (planAmountPaise < 0) return 'Enter a valid plan amount.';
+    return '';
+  };
+  const validatePaymentStep = () => {
+    if (!collectNow) return '';
+    if (!createPlan || !selectedPlan) return 'Payment in this guided flow needs the new subscription/pass step. Use Payments for an existing due.';
+    if (suggestedGrossDue <= 0) return 'This plan has no amount due. Turn off “Collect payment now” to finish without a payment.';
+    if (paymentAmountPaise <= 0) return 'Enter the actual amount received.';
+    if (!paidOn) return 'Choose the payment date.';
+    return '';
+  };
+  const stepValidators = [validateStudentStep, validateBatchStep, validatePlanStep, validatePaymentStep];
+  const stepValidity = stepValidators.map(validate => !validate());
+  const wizardSteps = [
+    {id: 'student', label: 'Student', caption: displayStudentName || 'Choose or create', icon: Users},
+    {id: 'batch', label: 'Batch', caption: mustAssignBatch ? (effectiveBatch?.name || 'Choose batch') : 'No batch now', icon: Clock},
+    {id: 'plan', label: 'Plan', caption: createPlan && selectedPlan ? selectedPlan.name : 'No new plan', icon: Repeat},
+    {id: 'payment', label: 'Payment & review', caption: collectNow ? `Collect ${formatINR(paymentAmountPaise)}` : 'Review & finish', icon: IndianRupee},
+  ];
+
+  const goToStep = nextStep => {
+    if (busy || completed) return;
+    const target = Math.max(0, Math.min(3, nextStep));
+    if (started && target !== 3) return;
+    for (let index = 0; index < target; index += 1) {
+      const validationError = stepValidators[index]();
+      if (validationError) {
+        setWizardStep(index);
+        setStepError(validationError);
+        return;
+      }
+    }
+    setStepError('');
+    setWizardStep(target);
+  };
+  const goNextStep = () => goToStep(wizardStep + 1);
+  const goBackStep = () => {
+    if (busy || started) return;
+    setStepError('');
+    setWizardStep(current => Math.max(0, current - 1));
+  };
+  const usePossibleDuplicateStudent = () => {
+    if (!possibleDuplicateStudent || started) return;
+    setStudentMode('existing');
+    setExistingQuery('');
+    chooseExistingStudent(possibleDuplicateStudent.id);
+    setStepError('');
+  };
+
+  const choosePlan = nextPlanId => {
+    const plan = planOptions.find(item => item.id === nextPlanId) || null;
+    const template = normalizePlanTemplate(plan || {});
+    setPlanId(nextPlanId);
+    setBillingCycle(template.billingCycle);
+    setAutoRenew(template.renewalEnabledDefault);
+    setPlanAmountRupees(plan ? paiseToRupees(plan.amountPaise) : '');
+    setPaymentAmountRupees(plan ? paiseToRupees(grossDueFor(plan)) : '');
+  };
+
+  // Plans can arrive after this dialog has mounted (first snapshot/sync),
+  // or the initially selected plan can be archived by a refresh. Keep the
+  // controlled select pointed at a real active plan instead of leaving the
+  // Step 3 toggle permanently disabled with an empty planId.
+  useEffect(() => {
+    if (started || planOptions.length === 0 || planOptions.some(plan => plan.id === planId)) return;
+    const hadNoPlanSelected = !planId;
+    choosePlan(planOptions[0].id);
+    if (hadNoPlanSelected) {
+      setCreatePlan(true);
+      setCollectNow(true);
+    }
+  }, [planId, planOptions, started]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const chooseExistingStudent = nextStudentId => {
+    setStudentId(nextStudentId);
+    setProgress(current => ({...current, studentId: '', membershipId: '', paymentId: '', steps: []}));
+    const student = data.students.find(item => item.id === nextStudentId);
+    if (student && effectiveBatch && effectiveBatch.branchId !== student.branchId) {
+      const nextBatch = eligibleBatches.find(batch => batch.branchId === student.branchId);
+      setBatchId(nextBatch?.id || '');
+    }
+  };
+
+  const chooseBatch = nextBatchId => {
+    setBatchId(nextBatchId);
+    const batch = data.batches.find(item => item.id === nextBatchId);
+    if (!batch) return;
+    if (studentMode === 'new') setNewStudent(current => ({...current, branchId: batch.branchId}));
+    if (studentMode === 'existing' && selectedExistingStudent?.branchId !== batch.branchId) {
+      const nextStudent = eligibleStudents.find(student => student.branchId === batch.branchId);
+      setStudentId(nextStudent?.id || '');
+    }
+  };
+
+  const applySnapshot = next => { if (next) erp.setData(next); };
+
+  const submit = async event => {
+    event.preventDefault();
+    if (wizardStep < 3) {
+      goNextStep();
+      return;
+    }
+    setError('');
+    setStepError('');
+    for (let index = 0; index < stepValidators.length; index += 1) {
+      const validationError = stepValidators[index]();
+      if (validationError) {
+        setWizardStep(index);
+        setStepError(validationError);
+        return;
+      }
+    }
+
+    setBusy(true);
+    let workingProgress = {...progress, steps: [...progress.steps]};
+    const markStep = step => {
+      if (!workingProgress.steps.includes(step)) {
+        workingProgress = {...workingProgress, steps: [...workingProgress.steps, step]};
+      }
+      setProgress(workingProgress);
+    };
+    try {
+      let finalStudentId = workingProgress.studentId || fixedRecord?.id || selectedExistingStudent?.id || '';
+      const finalBranchId = effectiveBatch?.branchId || studentBranchId;
+      if (studentMode === 'new' && !finalStudentId) {
+        finalStudentId = newClientUuid();
+        const firstName = newStudent.firstName.trim();
+        const lastName = newStudent.lastName.trim();
+        applySnapshot(await erp.client.saveStudent({
+          id: finalStudentId,
+          branchId: finalBranchId,
+          firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '),
+          phone: newStudent.phone.trim(), email: newStudent.email.trim(),
+          gender: newStudent.gender, dob: newStudent.dob,
+          joiningDate: newStudent.joiningDate || today, status: 'active',
+          notes: '', address: '', pinCode: '', admissionSubject: '', referredBy: '',
+          yogaExperience: '', medicalPhysicalIssue: '', reasonToJoin: '',
+          ...(isInstructor && effectiveBatch ? {walkInBatchId: effectiveBatch.id} : {}),
+        }));
+        workingProgress = {...workingProgress, studentId: finalStudentId};
+        setProgress(workingProgress);
+        markStep('Student created');
+      }
+
+      if (mustAssignBatch && effectiveBatch && !alreadyEnrolled
+          && !workingProgress.steps.includes('Batch assigned')) {
+        applySnapshot(await erp.client.enrollStudent({
+          batchId: effectiveBatch.id, studentId: finalStudentId, joinedOn: enrollmentDate,
+        }));
+        markStep('Batch assigned');
+      }
+
+      let membershipId = workingProgress.membershipId || '';
+      if (createPlan && selectedPlan && !membershipId) {
+        membershipId = newClientUuid();
+        applySnapshot(await erp.client.saveMembership({
+          id: membershipId,
+          studentId: finalStudentId, planId: selectedPlan.id, branchId: finalBranchId,
+          startDate: planStartDate,
+          billingCycle: isInstructor ? selectedTemplate.billingCycle : billingCycle,
+          durationMonths: selectedTemplate.durationMonths,
+          amountPaise: planAmountPaise, status: 'active',
+          offeringType: selectedTemplate.planType,
+          autoRenew: selectedTemplate.planType === 'one_month'
+            ? false
+            : (isInstructor ? selectedTemplate.renewalEnabledDefault : autoRenew),
+          previousMembershipId: '', renewalNumber: 0, totalPausedDays: 0,
+          pausedFrom: '', pausedUntil: '', pauseReason: '', cancelledAt: null, cancelReason: '',
+        }));
+        workingProgress = {...workingProgress, membershipId};
+        setProgress(workingProgress);
+        markStep(selectedTemplate.planType === 'one_month' ? 'One-month pass created' : 'Subscription created');
+      }
+
+      let paymentId = workingProgress.paymentId || '';
+      if (collectNow && membershipId && !workingProgress.steps.includes('Payment recorded')) {
+        paymentId = paymentId || newClientUuid();
+        applySnapshot(await erp.client.recordPayment({
+          id: paymentId, membershipId, studentId: finalStudentId, branchId: finalBranchId,
+          amountPaise: rupeesToPaise(paymentAmountRupees), method: paymentMethod,
+          paidOn, note: paymentNote.trim(),
+        }));
+        workingProgress = {...workingProgress, paymentId};
+        setProgress(workingProgress);
+        markStep('Payment recorded');
+      }
+
+      const summary = workingProgress.steps.length
+        ? `Enrolment complete: ${workingProgress.steps.join(' · ')}.`
+        : 'Enrolment updated.';
+      setProgress(workingProgress);
+      setCompleted(true);
+      notify?.(summary);
+      onComplete?.({studentId: finalStudentId, batchId: effectiveBatch?.id || '', membershipId, paymentId});
+    } catch (submitError) {
+      setProgress(workingProgress);
+      setWizardStep(3);
+      setError(submitError || new Error('The enrolment could not be completed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <>
+  <Dialog
+    title={completed ? 'Enrolment complete' : fixedStudent ? 'Complete enrolment' : 'Enroll student'}
+    sub={completed
+      ? 'The enrolment is saved. Review the student, batch, plan and payment details below.'
+      : isInstructor
+        ? 'A four-step flow for a basic walk-in or existing student in your own batch, with an optional plan-price payment.'
+        : 'Student, batch, plan and payment in one clear four-step flow.'}
+    onClose={onClose}
+    className="erp-dialog-wide enrollment-wizard-dialog enrollment-wizard-v2"
+  >
+    {error && <ErrorNotice error={error} context="Complete enrolment"/>}
+    {progress.steps.length > 0 && <div className="erp-banner blue" role="status">
+      <BadgeCheck size={18}/><span><b>Completed:</b> {progress.steps.join(' · ')}</span>
+    </div>}
+    {!completed && wizardStep === 2 && currentPeriod && createPlan && <div className="erp-banner" role="note">
+      <AlertCircle size={18}/><span>This student already has a current {membershipKindLabel(data, currentPeriod).toLowerCase()} period ({formatDate(currentPeriod.startDate)} → {formatDate(currentPeriod.endDate)}). Create another period only if that is intentional; otherwise turn off the plan step and collect the existing due from Payments.</span>
+    </div>}
+
+    {completed ? <section className="enrollment-complete" aria-label="Enrolment complete">
+      <div className="enrollment-complete-icon"><BadgeCheck size={28}/></div>
+      <h3>Enrolment complete</h3>
+      <p>{completedStudent?.fullName || 'The student'} is ready{effectiveBatch ? ` in ${effectiveBatch.name}` : ''}. Review the final invoice or receipt before closing.</p>
+      <dl className="enrollment-complete-details">
+        <div><dt>Student</dt><dd>{completedStudent?.fullName || 'Student saved'}</dd></div>
+        <div><dt>Batch</dt><dd>{effectiveBatch ? `${effectiveBatch.name} · ${branchName(data, effectiveBatch.branchId)}` : 'No batch assigned'}</dd></div>
+        <div><dt>Plan</dt><dd>{completedMembership ? `${planName(data, completedMembership.planId)} · ${formatDate(completedMembership.startDate)} → ${formatDate(completedMembership.endDate)}` : 'No new plan period'}</dd></div>
+        <div><dt>Payment</dt><dd>{completedPayment
+          ? `${formatINR(completedPayment.amountPaise)} · ${PAYMENT_METHODS.find(method => method.id === completedPayment.method)?.label || completedPayment.method} · ${completedPayment.receiptNo || 'Receipt pending sync'}`
+          : 'No payment collected in this flow'}</dd></div>
+      </dl>
+      {completedPayment && !completedPayment.receiptNo && <p className="enrollment-warning">The payment is saved, but Supabase assigns the final receipt number after sync. Open Payments after the sync finishes to print the numbered receipt.</p>}
+      <div className="erp-form-actions">
+        {completedPayment?.receiptNo && <button type="button" className="secondary-button" onClick={() => setInvoice({type: 'payment', payment: completedPayment})}><Printer size={15}/> View receipt</button>}
+        {completedMembership && payableBalance(completedMembership, data.payments, billing, today).due > 0 && <button type="button" className="secondary-button" onClick={() => setInvoice({type: 'due', membership: completedMembership})}><Printer size={15}/> View invoice</button>}
+        <button type="button" className="primary-button" onClick={onClose}>Done</button>
+      </div>
+    </section> : <form className="enrollment-wizard-form" onSubmit={submit}>
+      <div className="enrollment-wizard-shell">
+        <aside className="enrollment-wizard-sidebar">
+          <ol className="enrollment-progress" aria-label="Enrolment steps">
+            {wizardSteps.map((step, index) => {
+              const StepIcon = step.icon;
+              const completeStep = index < wizardStep && stepValidity[index];
+              return <li key={step.id} className={index === wizardStep ? 'active' : completeStep ? 'complete' : ''}>
+                <button
+                  type="button"
+                  aria-current={index === wizardStep ? 'step' : undefined}
+                  disabled={busy || (started && index !== wizardStep)}
+                  onClick={() => goToStep(index)}
+                >
+                  <span className="enrollment-progress-icon">{completeStep ? <Check size={15}/> : <StepIcon size={15}/>}</span>
+                  <span><strong>{index + 1}. {step.label}</strong><small>{step.caption}</small></span>
+                </button>
+              </li>;
+            })}
+          </ol>
+
+          <div className="enrollment-live-summary" aria-label="Live enrolment summary">
+            <div className="enrollment-live-summary-head">
+              <span className="avatar">{initials(displayStudentName || 'New student')}</span>
+              <div><small>Enrolling</small><strong>{displayStudentName || 'Choose a student'}</strong><span>{displayStudentBranchId ? branchName(data, displayStudentBranchId) : 'Branch to be selected'}</span></div>
+            </div>
+            <dl>
+              <div><dt>Student</dt><dd>{fixedStudent ? 'Confirmed admission' : studentMode === 'new' ? 'New walk-in' : 'Existing student'}</dd></div>
+              <div><dt>Batch</dt><dd>{mustAssignBatch && effectiveBatch ? `${effectiveBatch.name} · ${batchTimeLabel(effectiveBatch)}` : 'No batch now'}</dd></div>
+              <div><dt>Plan</dt><dd>{createPlan && selectedPlan ? `${selectedPlan.name} · ${formatDate(planStartDate)} → ${formatDate(planEndDate)}` : 'No new plan period'}</dd></div>
+              <div><dt>Payment</dt><dd>{collectNow ? `${formatINR(paymentAmountPaise)} by ${PAYMENT_METHODS.find(method => method.id === paymentMethod)?.label || paymentMethod}` : 'Not collecting now'}</dd></div>
+            </dl>
+            <div className="enrollment-live-total"><span>{collectNow ? 'Amount to collect' : createPlan ? 'Gross amount due' : 'Due in this flow'}</span><strong>{formatINR(collectNow ? paymentAmountPaise : createPlan ? suggestedGrossDue : 0)}</strong></div>
+          </div>
+
+          <div className="enrollment-scope-note">
+            <BadgeCheck size={17}/>
+            <p>{isInstructor
+              ? 'Your access stays limited to your own batches. Plan price and terms are fixed by the studio; payment corrections are manager-only.'
+              : 'Nothing is saved until the final step. You can go back and change any choice before finishing.'}</p>
+          </div>
+        </aside>
+
+        <div className="enrollment-wizard-main">
+          {stepError && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{stepError}</span></div>}
+          {wizardStep === 0 && <section className="enrollment-step" aria-labelledby="enrollment-student-heading">
+            <div className="enrollment-step-head">
+              <span className="enrollment-step-icon"><Users size={19}/></span>
+              <div><small>Step 1 of 4</small><h3 id="enrollment-student-heading">Who is enrolling?</h3><p>{fixedStudent ? 'This confirmed student is ready for a batch and plan.' : 'Use an existing active student, or create a basic walk-in record.'}</p></div>
+              {stepValidity[0] && <span className="erp-badge green"><Check size={12}/> Ready</span>}
+            </div>
+        {fixedStudent ? <div className="enrollment-fixed-student">
+          <span className="avatar">{initials(fixedRecord?.fullName || fixedStudent.fullName || 'Student')}</span>
+          <div><strong>{fixedRecord?.fullName || fixedStudent.fullName || 'Confirmed student'}</strong>
+            <small>{branchName(data, fixedRecord?.branchId || fixedStudent.branchId)} · Admission confirmed & portal granted</small></div>
+          <span className="erp-badge green">Student ready</span>
+        </div> : <>
+          <div className="enrollment-choice-grid" role="group" aria-label="Student type">
+            <button type="button" aria-pressed={studentMode === 'existing'} className={`enrollment-choice-card ${studentMode === 'existing' ? 'selected' : ''}`} disabled={started} onClick={() => { setStudentMode('existing'); setStepError(''); }}>
+              <span className="enrollment-choice-icon"><Users size={18}/></span>
+              <span><strong>Existing student</strong><small>Search and select an active student already in Yoga Studio.</small></span>
+              {studentMode === 'existing' && <Check size={17}/>}
+            </button>
+            <button type="button" aria-pressed={studentMode === 'new'} className={`enrollment-choice-card ${studentMode === 'new' ? 'selected' : ''}`} disabled={started} onClick={() => { setStudentMode('new'); setStepError(''); }}>
+              <span className="enrollment-choice-icon"><UserPlus size={18}/></span>
+              <span><strong>New walk-in student</strong><small>Create a basic record now; a manager can complete the full profile later.</small></span>
+              {studentMode === 'new' && <Check size={17}/>}
+            </button>
+          </div>
+          {studentMode === 'existing' ? <div className="erp-form enrollment-fields">
+            <label className="erp-field">Search existing students
+              <input value={existingQuery} disabled={started} onChange={event => setExistingQuery(event.target.value)} placeholder={isInstructor ? 'Search by student name…' : 'Name, phone or email…'}/>
+            </label>
+            <label className="erp-field">Existing student
+              <select required value={studentId} disabled={started} onChange={event => chooseExistingStudent(event.target.value)}>
+                <option value="">Choose student…</option>
+                {existingStudentOptions.map(student => <option key={student.id} value={student.id}>
+                  {student.fullName} · {branchName(data, student.branchId)}
+                </option>)}
+              </select>
+              <small>{isInstructor
+                ? 'Only identity details for students in your teaching branches are loaded.'
+                : 'Only active students in your branch scope are shown.'}</small>
+            </label>
+            {selectedExistingStudent ? <div className="enrollment-selected-card">
+              <span className="avatar">{initials(selectedExistingStudent.fullName)}</span>
+              <div><strong>{selectedExistingStudent.fullName}</strong><small>{branchName(data, selectedExistingStudent.branchId)} · Joined {formatDate(selectedExistingStudent.joiningDate)}{selectedExistingBatchNames.length ? ` · Already in ${selectedExistingBatchNames.join(', ')}` : ' · Not in a batch yet'}</small></div>
+              <span className="erp-badge green">Active</span>
+            </div> : existingQuery && existingStudentOptions.length === 0 ? <p className="enrollment-warning full">No active student matches “{existingQuery}”. Clear the search or create a new walk-in student.</p> : null}
+          </div> : <div className="erp-form enrollment-fields">
+            <p className="enrollment-fields-note"><strong>Basic walk-in details.</strong> First Name and Joining date are required. Contact and personal details below are optional{isInstructor ? '; medical, address and admission details are not collected by Instructors.' : '.'}</p>
+            {possibleDuplicateStudent && <div className="enrollment-duplicate-warning" role="note">
+              <AlertCircle size={18}/>
+              <span><strong>Possible existing student:</strong> {possibleDuplicateStudent.fullName} already uses this phone or email. Use the existing record unless this is a different person.</span>
+              <button type="button" className="secondary-button" disabled={started} onClick={usePossibleDuplicateStudent}>Use existing student</button>
+            </div>}
+            <label className="erp-field">First Name
+              <input required value={newStudent.firstName} disabled={started} onChange={event => setNewStudent({...newStudent, firstName: event.target.value})} autoComplete="given-name"/>
+            </label>
+            <label className="erp-field">Last Name
+              <input value={newStudent.lastName} disabled={started} onChange={event => setNewStudent({...newStudent, lastName: event.target.value})} autoComplete="family-name"/>
+            </label>
+            <label className="erp-field">Phone Number
+              <input type="tel" value={newStudent.phone} disabled={started} onChange={event => setNewStudent({...newStudent, phone: event.target.value})} autoComplete="tel" placeholder="10-digit mobile"/>
+            </label>
+            <label className="erp-field">Email
+              <input type="email" value={newStudent.email} disabled={started} onChange={event => setNewStudent({...newStudent, email: event.target.value})} autoComplete="email"/>
+            </label>
+            <label className="erp-field">Gender
+              <select value={newStudent.gender} disabled={started} onChange={event => setNewStudent({...newStudent, gender: event.target.value})}>
+                <option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Other</option>
+              </select>
+            </label>
+            <label className="erp-field">Date Of Birth
+              <input type="date" value={newStudent.dob} disabled={started} onChange={event => setNewStudent({...newStudent, dob: event.target.value})}/>
+            </label>
+            <label className="erp-field">Joining date
+              <input type="date" required value={newStudent.joiningDate} disabled={started} onChange={event => {
+                const joiningDate = event.target.value;
+                setNewStudent({...newStudent, joiningDate});
+                if (joiningDate) {
+                  setEnrollmentDate(joiningDate);
+                  setPlanStartDate(joiningDate);
+                }
+              }}/>
+              <small>Batch and plan start dates will follow this date; you can adjust them in later steps.</small>
+            </label>
+            {!isInstructor && <label className="erp-field">Student branch
+              <select aria-label="Walk-in student branch" required value={(assignBatch ? effectiveBatch?.branchId : newStudent.branchId) || newStudent.branchId} disabled={started || Boolean(effectiveBatch && assignBatch)} onChange={event => setNewStudent({...newStudent, branchId: event.target.value})}>
+                <option value="">Choose branch…</option>
+                {data.branches.filter(branch => branch.status !== 'archived').map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              </select>
+              {effectiveBatch && assignBatch && <small>Set from the selected batch.</small>}
+            </label>}
+          </div>}
+        </>}
+          </section>}
+
+          {wizardStep === 1 && <section className="enrollment-step" aria-labelledby="enrollment-batch-heading">
+            <div className="enrollment-step-head">
+              <span className="enrollment-step-icon"><Clock size={19}/></span>
+              <div><small>Step 2 of 4</small><h3 id="enrollment-batch-heading">Choose the batch</h3><p>{isInstructor ? 'Only active batches assigned to you can be selected.' : 'Assign the student now, or skip this and add a batch later.'}</p></div>
+              {stepValidity[1] && <span className="erp-badge green"><Check size={12}/> Ready</span>}
+            </div>
+        <label className="erp-toggle-row">
+          <input type="checkbox" checked={isInstructor || assignBatch} disabled={isInstructor || started} onChange={event => {
+            const shouldAssignBatch = event.target.checked;
+            setAssignBatch(shouldAssignBatch);
+            if (!shouldAssignBatch && studentMode === 'new' && effectiveBatch) {
+              setNewStudent(current => ({...current, branchId: effectiveBatch.branchId}));
+            }
+          }}/>
+          <span>{isInstructor ? 'Assign to one of my batches (required for Instructor enrolment)' : 'Assign a batch now'}</span>
+        </label>
+        {(isInstructor || assignBatch) && <div className="erp-form enrollment-fields">
+          <label className="erp-field full">Assign to batch
+            <select required value={batchId} disabled={started} onChange={event => chooseBatch(event.target.value)}>
+              <option value="">Choose batch…</option>
+              {batchOptions.map(batch => {
+                const optionFill = batchFill(batch, data.enrollments);
+                const isAlready = resolvedStudentId && data.enrollments.some(enrollment => enrollment.batchId === batch.id && enrollment.studentId === resolvedStudentId && enrollment.status === 'active');
+                return <option key={batch.id} value={batch.id} disabled={optionFill.seatsLeft <= 0 && !isAlready}>
+                  {batch.name} · {branchName(data, batch.branchId)} · {batchDaySummary(batch)} · {batchTimeLabel(batch)} · {optionFill.enrolled}/{optionFill.capacity}
+                </option>;
+              })}
+            </select>
+            <small>{effectiveBatch
+              ? `${instructorName(data, effectiveBatch.instructorId)} · ${fill?.seatsLeft ?? 0} seat(s) available${alreadyEnrolled ? ' · Student is already enrolled' : ''}`
+              : 'No eligible active batch matches this student branch.'}</small>
+          </label>
+          <label className="erp-field">Batch joining date
+            <input type="date" required value={enrollmentDate} disabled={started} onChange={event => setEnrollmentDate(event.target.value)}/>
+          </label>
+          {effectiveBatch ? <article className="enrollment-batch-preview">
+            <div className="enrollment-batch-preview-head">
+              <span className="enrollment-choice-icon"><Clock size={18}/></span>
+              <div><strong>{effectiveBatch.name}</strong><small>{branchName(data, effectiveBatch.branchId)} · {instructorName(data, effectiveBatch.instructorId)}</small></div>
+              <span className={`erp-badge ${alreadyEnrolled ? 'green' : fill?.seatsLeft <= 0 ? 'rose' : 'blue'}`}>{alreadyEnrolled ? 'Already enrolled' : `${fill?.seatsLeft ?? 0} seat(s) left`}</span>
+            </div>
+            <div className="enrollment-preview-meta">
+              <span><CalendarDays size={14}/> {batchDaySummary(effectiveBatch)}</span>
+              <span><Clock size={14}/> {batchTimeLabel(effectiveBatch)}</span>
+              <span><CalendarClock size={14}/> Next class {nextBatchClassDate ? `${relativeClassDateLabel(nextBatchClassDate, today)} · ${formatDate(nextBatchClassDate)}` : 'not scheduled'}</span>
+            </div>
+            <div className="enrollment-capacity-row"><span>{fill?.enrolled ?? 0} of {fill?.capacity ?? 0} Students enrolled</span><span>{fill?.percent ?? 0}% full</span></div>
+            <div className="erp-progress" aria-label={`${effectiveBatch.name} capacity`}><span className={fill?.seatsLeft <= 0 ? 'full' : ''} style={{width: `${Math.min(100, fill?.percent || 0)}%`}}/></div>
+          </article> : <p className="enrollment-warning full">{isInstructor ? 'No active batch is assigned to you for this student branch.' : 'No eligible active batch matches this student branch.'}</p>}
+        </div>}
+        {!isInstructor && !assignBatch && <p className="enrollment-fields-note">The student will be saved without a batch. You can assign a batch later from Students or Branches &amp; batches. Make sure the Student branch on Step 1 is correct.</p>}
+          </section>}
+
+          {wizardStep === 2 && <section className="enrollment-step" aria-labelledby="enrollment-plan-heading">
+            <div className="enrollment-step-head">
+              <span className="enrollment-step-icon"><Repeat size={19}/></span>
+              <div><small>Step 3 of 4</small><h3 id="enrollment-plan-heading">Choose the plan</h3><p>Start a subscription or one-month pass now, or skip and add it later from Subscriptions.</p></div>
+              {stepValidity[2] && <span className="erp-badge green"><Check size={12}/> Ready</span>}
+            </div>
+        <label className="erp-toggle-row">
+          <input type="checkbox" checked={createPlan} disabled={started || planOptions.length === 0} onChange={event => {
+            const shouldCreatePlan = event.target.checked;
+            setCreatePlan(shouldCreatePlan);
+            if (shouldCreatePlan && selectedPlan && selectedPlan.id !== planId) choosePlan(selectedPlan.id);
+            if (!shouldCreatePlan) setCollectNow(false);
+          }}/>
+          <span>Create subscription or one-month pass now</span>
+        </label>
+        {createPlan && selectedPlan && <div className="erp-form enrollment-fields">
+          <label className="erp-field full">Plan
+            <select required value={selectedPlan?.id || ''} disabled={started} onChange={event => choosePlan(event.target.value)}>
+              <option value="" disabled>Choose plan…</option>
+              {planOptions.map(plan => <option key={plan.id} value={plan.id}>
+                {plan.name} · {planTypeLabel(plan)} · {formatINR(plan.amountPaise)} · {planBillingPeriodLabel(plan)}
+              </option>)}
+            </select>
+          </label>
+          <label className="erp-field">Plan start date
+            <input type="date" required value={planStartDate} disabled={started} onChange={event => setPlanStartDate(event.target.value)}/>
+          </label>
+          <label className="erp-field">Billing cycle
+            <select value={isInstructor ? selectedTemplate.billingCycle : billingCycle} disabled={started || isInstructor} onChange={event => setBillingCycle(event.target.value)}>
+              <option value="joining">Joining date (monthly)</option><option value="calendar">Calendar month</option>
+            </select>
+            {isInstructor && <small>Uses the plan template set by Owner/Co-owner.</small>}
+          </label>
+          <label className="erp-field">Plan amount (₹{billing.gstEnabled && !billing.priceIncludesGst ? ', before GST' : ''})
+            <input type="number" min={0} step="0.01" required readOnly={isInstructor} value={isInstructor ? paiseToRupees(selectedPlan.amountPaise) : planAmountRupees} onChange={event => {
+              setPlanAmountRupees(event.target.value);
+              if (collectNow) setPaymentAmountRupees(paiseToRupees(grossDueFor(selectedPlan, rupeesToPaise(event.target.value))));
+            }}/>
+            {isInstructor && <small>Instructors cannot discount or change plan prices.</small>}
+          </label>
+          <span className="erp-field">Plan ends
+            <span className="enrollment-readonly">{formatDate(membershipEnd(planStartDate, selectedTemplate.durationMonths, isInstructor ? selectedTemplate.billingCycle : billingCycle))}</span>
+          </span>
+          {selectedTemplate.planType !== 'one_month' && <label className="erp-toggle-row full">
+            <input type="checkbox" checked={isInstructor ? selectedTemplate.renewalEnabledDefault : autoRenew} disabled={started || isInstructor} onChange={event => setAutoRenew(event.target.checked)}/>
+            <span>Renewal tracking enabled (manager-confirmed; no automatic charge)</span>
+          </label>}
+        </div>}
+        {createPlan && selectedPlan && <article className="enrollment-plan-preview">
+          <div><span className="enrollment-choice-icon"><Repeat size={18}/></span><div><strong>{selectedPlan.name}</strong><small>{planTypeLabel(selectedPlan)} · {planBillingPeriodLabel(selectedTemplate)}</small></div></div>
+          <div className="enrollment-plan-price"><small>Gross amount due</small><strong>{formatINR(suggestedGrossDue)}</strong>{billing.gstEnabled && !billing.priceIncludesGst && <span>Includes GST added to the plan amount</span>}</div>
+          <dl>
+            <div><dt>Period</dt><dd>{formatDate(planStartDate)} → {formatDate(planEndDate)}</dd></div>
+            <div><dt>Billing cycle</dt><dd>{(isInstructor ? selectedTemplate.billingCycle : billingCycle) === 'calendar' ? 'Calendar month' : 'Joining date (monthly)'}</dd></div>
+            <div><dt>Renewal</dt><dd>{selectedTemplate.planType === 'one_month' ? 'One-month pass · no renewal tracking' : (isInstructor ? selectedTemplate.renewalEnabledDefault : autoRenew) ? 'Manager-confirmed renewal tracking' : 'No renewal tracking'}</dd></div>
+          </dl>
+        </article>}
+        {planOptions.length === 0 && (erp.loading
+          ? <p className="enrollment-fields-note"><strong>Loading plans…</strong> Wait for the studio snapshot to finish loading; the plan list will appear automatically if active plans exist.</p>
+          : <ErrorNotice
+            error={instructorPlanSetupOutdated ? {
+              title: 'Instructor plans need the SQL v11 update',
+              message: 'The connected Supabase setup is older than SQL v11. In the older snapshot, Owners could receive the plan list but Instructors received no plans, so Step 3 is empty for your Instructor account even though the Owner can see the plan.',
+              solution: 'Ask the studio Owner to run the complete current supabase/erp_setup.sql (SQL v11) once in Supabase → SQL Editor. After it finishes, stay online and click “Reload plans” here or Sync now; active plans will then be included in the Instructor snapshot. Instructors still cannot create/edit plan templates.',
+              technical: `Connected setupVersion: ${setupVersion || 'not reported by this older database'}; required: 11. Active/non-archived plans loaded for Instructor: 0`,
+              severity: 'error',
+            } : {
+              title: 'No active plan is available yet',
+              message: 'This studio snapshot does not contain an active subscription or one-month plan that can be selected for this enrolment.',
+              solution: canManageOrg(ctx)
+                ? 'Close this wizard, open Subscriptions → Plans, create or restore an active plan, then reopen Enroll student. If the plan was just created on another device, use Sync now first.'
+                : 'Ask an Owner or Co-owner to create or restore an active plan in Subscriptions → Plans. If it was just created, reconnect and click “Reload plans” here (or Sync now), then continue this enrolment.',
+              technical: 'Active/non-archived plans loaded in this snapshot: 0',
+            }}
+            context="Choose the plan"
+            onRetry={() => erp.load?.()}
+            retryLabel="Reload plans"/>)}
+        {createPlan && !selectedPlan && planOptions.length > 0 && <p className="enrollment-warning">Choose a plan from the list above, or turn off the plan step.</p>}
+        {!createPlan && selectedPlan && <p className="enrollment-fields-note">No new plan period will be created in this flow. Existing dues can be collected later from Payments.</p>}
+          </section>}
+
+          {wizardStep === 3 && <section className="enrollment-step" aria-labelledby="enrollment-payment-heading">
+            <div className="enrollment-step-head">
+              <span className="enrollment-step-icon"><IndianRupee size={19}/></span>
+              <div><small>Step 4 of 4</small><h3 id="enrollment-payment-heading">Payment & review</h3><p>Collect an optional verified payment, then check every detail before saving.</p></div>
+              {stepValidity[3] && <span className="erp-badge green"><Check size={12}/> Ready</span>}
+            </div>
+            {!createPlan && <p className="enrollment-fields-note">No payment can be collected in this guided flow because no new plan period is being created. Use Payments later for an existing due.</p>}
+        <label className="erp-toggle-row">
+          <input type="checkbox" checked={collectNow} disabled={started || !createPlan || !selectedPlan} onChange={event => {
+            setCollectNow(event.target.checked);
+            if (event.target.checked) setPaymentAmountRupees(paiseToRupees(suggestedGrossDue));
+          }}/>
+          <span>Collect payment now</span>
+        </label>
+        {collectNow && createPlan && selectedPlan && <div className="erp-form enrollment-fields payment">
+          <label className="erp-field">Amount received (₹)
+            <input type="number" min="0.01" step="0.01" required value={paymentAmountRupees} disabled={started} onChange={event => setPaymentAmountRupees(event.target.value)}/>
+            <small>Suggested gross due: {formatINR(suggestedGrossDue)}{billing.gstEnabled && !billing.priceIncludesGst ? ' including GST added on top' : ''}.</small>
+          </label>
+          <div className="enrollment-quick-amounts" aria-label="Quick payment amounts">
+            <button type="button" disabled={started || suggestedGrossDue <= 0} onClick={() => setPaymentAmountRupees(paiseToRupees(suggestedGrossDue))}>Full due</button>
+            <button type="button" disabled={started || suggestedGrossDue <= 0} onClick={() => setPaymentAmountRupees(paiseToRupees(Math.ceil(suggestedGrossDue / 2)))}>Half due</button>
+            <button type="button" disabled={started || suggestedGrossDue <= 0} onClick={() => setPaymentAmountRupees(paiseToRupees(Math.min(50000, suggestedGrossDue)))}>₹500</button>
+          </div>
+          <label className="erp-field">Payment method
+            <select value={paymentMethod} disabled={started} onChange={event => setPaymentMethod(event.target.value)}>
+              {PAYMENT_METHODS.map(method => <option key={method.id} value={method.id}>{method.label}</option>)}
+            </select>
+          </label>
+          <label className="erp-field">Paid on
+            <input type="date" required value={paidOn} disabled={started} onChange={event => setPaidOn(event.target.value)}/>
+          </label>
+          <label className="erp-field">Note / transaction reference
+            <input value={paymentNote} disabled={started} onChange={event => setPaymentNote(event.target.value)} placeholder="UPI/bank/card reference (recommended)"/>
+          </label>
+          <p className="enrollment-warning full">Record only after funds are received and verified. Supabase assigns the final receipt number after sync. {isInstructor ? 'You cannot void this payment; ask a manager if a correction is needed.' : ''}</p>
+          <dl className="enrollment-payment-balance" aria-label="Payment balance preview">
+            <div><dt>Gross due</dt><dd>{formatINR(suggestedGrossDue)}</dd></div>
+            <div><dt>Amount received</dt><dd>{formatINR(paymentAmountPaise)}</dd></div>
+            <div className="total"><dt>Balance after payment</dt><dd>{formatINR(balanceAfterPayment)}</dd></div>
+          </dl>
+          {overpaymentPaise > 0 && <p className="enrollment-warning full">This is {formatINR(overpaymentPaise)} more than the new plan’s gross due. Record it only if that full amount was actually received for this student.</p>}
+        </div>}
+      </section>}
+
+          {wizardStep === 3 && <section className="enrollment-review" aria-label="Final enrolment review">
+            <div className="enrollment-review-head">
+              <div><h4>Review before saving</h4><p>{started ? 'Some steps are already saved; continue to finish the remaining work.' : 'Check the student, batch, plan and payment one last time.'}</p></div>
+              <span className={`erp-badge ${started ? 'blue' : 'green'}`}>{started ? 'Partially saved' : 'Not saved yet'}</span>
+            </div>
+            <div className="enrollment-review-list">
+              <div>
+                <span className="enrollment-choice-icon"><Users size={16}/></span>
+                <span><small>Student</small><strong>{displayStudentName || 'Choose a student'}</strong><em>{fixedStudent ? 'Confirmed admission' : studentMode === 'new' ? `New walk-in · joining ${formatDate(newStudent.joiningDate)}` : `Existing student · joined ${formatDate(selectedExistingStudent?.joiningDate)}`} · {displayStudentBranchId ? branchName(data, displayStudentBranchId) : 'branch not selected'}</em></span>
+                <button type="button" className="secondary-button" disabled={busy || started} onClick={() => goToStep(0)}>Edit</button>
+              </div>
+              <div>
+                <span className="enrollment-choice-icon"><Clock size={16}/></span>
+                <span><small>Batch</small><strong>{mustAssignBatch && effectiveBatch ? effectiveBatch.name : 'No batch now'}</strong><em>{mustAssignBatch && effectiveBatch ? `${batchDaySummary(effectiveBatch)} · ${batchTimeLabel(effectiveBatch)} · from ${formatDate(enrollmentDate)}${alreadyEnrolled ? ' · already enrolled; no duplicate will be created' : ''}` : 'Batch can be assigned later'}</em></span>
+                <button type="button" className="secondary-button" disabled={busy || started} onClick={() => goToStep(1)}>Edit</button>
+              </div>
+              <div>
+                <span className="enrollment-choice-icon"><Repeat size={16}/></span>
+                <span><small>Plan</small><strong>{createPlan && selectedPlan ? selectedPlan.name : 'No new plan period'}</strong><em>{createPlan && selectedPlan ? `${formatDate(planStartDate)} → ${formatDate(planEndDate)} · ${formatINR(suggestedGrossDue)} gross due` : 'No subscription/pass will be created now'}</em></span>
+                <button type="button" className="secondary-button" disabled={busy || started} onClick={() => goToStep(2)}>Edit</button>
+              </div>
+              <div>
+                <span className="enrollment-choice-icon"><IndianRupee size={16}/></span>
+                <span><small>Payment</small><strong>{collectNow ? `${formatINR(paymentAmountPaise)} by ${PAYMENT_METHODS.find(method => method.id === paymentMethod)?.label || paymentMethod}` : 'No payment now'}</strong><em>{collectNow ? `Paid on ${formatDate(paidOn)}${paymentNote ? ` · Ref: ${paymentNote}` : ''} · balance after payment ${formatINR(balanceAfterPayment)}` : createPlan ? `${formatINR(suggestedGrossDue)} will remain due` : 'Use Payments later for an existing due'}</em></span>
+              </div>
+            </div>
+            {currentPeriod && createPlan && <p className="enrollment-warning">This student already has a current {membershipKindLabel(data, currentPeriod).toLowerCase()} period ({formatDate(currentPeriod.startDate)} → {formatDate(currentPeriod.endDate)}). Continue only if another period is intentional.</p>}
+          </section>}
+
+          <div className="enrollment-wizard-actions">
+            <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
+            <div>
+              {wizardStep > 0 && <button type="button" className="secondary-button" disabled={busy || started} onClick={goBackStep}><ArrowLeft size={15}/> Back</button>}
+              {wizardStep < 3 ? <button key="enrollment-continue" type="button" className="primary-button" disabled={busy} onClick={goNextStep}>
+                Continue to {wizardSteps[wizardStep + 1].label} <ArrowRight size={15}/>
+              </button> : <button key="enrollment-finish" type="submit" className="primary-button" disabled={busy}>
+                {busy ? 'Saving…' : started ? 'Continue enrolment' : collectNow ? `Enroll & collect ${formatINR(paymentAmountPaise)}` : 'Complete enrolment'}
+              </button>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>}
+  </Dialog>
+  {invoice && <InvoiceDialog data={data} invoice={invoice} onClose={() => setInvoice(null)}/>}
+  </>;
+}
+
+function AdmissionReviewDialog({admission, branches, erp, online, notify, onClose, onReviewed, onConfirmed}) {
   const [branchId, setBranchId] = useState(admission.branchId || branches[0]?.id || '');
   const [joiningDate, setJoiningDate] = useState(toISODate());
   const [reviewNote, setReviewNote] = useState('');
+  const [continueEnrollment, setContinueEnrollment] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const hasDuplicate = Boolean(admission.possibleDuplicateStudentId);
+  const preferredBranch = branches.find(branch => branch.id === admission.branchId) || null;
 
   const review = async action => {
     if (action === 'confirm' && !branchId) return;
@@ -1378,23 +2252,35 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
       });
       try { await erp.syncNow?.({waitForIdle: true}); } catch { /* The review already committed; the next refresh will show the new student. */ }
       onClose();
-      notify?.(action === 'confirm'
-        ? 'Admission confirmed. Student record created and portal access granted.'
-        : 'Admission rejected.');
+      if (action === 'confirm' && continueEnrollment && result?.studentId) {
+        onConfirmed?.({
+          id: result.studentId,
+          branchId,
+          joiningDate,
+          firstName: admission.firstName, lastName: admission.lastName,
+          fullName: admission.fullName || `${admission.firstName} ${admission.lastName}`.trim(),
+        });
+        notify?.('Admission confirmed. Continue with batch, plan and payment.');
+      } else {
+        notify?.(action === 'confirm'
+          ? 'Admission confirmed. Student record created and portal access granted.'
+          : 'Admission rejected.');
+      }
       await onReviewed?.(result);
     } catch (reviewError) {
-      setError(reviewError?.message || 'The admission could not be reviewed.');
+      setError(reviewError);
     } finally {
       setBusy('');
     }
   };
 
-  return <Dialog title="Review admission" onClose={onClose} className="admission-review-dialog">
-    {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{error}</span></div>}
+  return <Dialog title="Review admission" sub="Confirming creates the student and grants portal access to the applicant’s signed-in account. You can continue directly to batch, plan and payment." onClose={onClose} className="admission-review-dialog">
+    {error && <ErrorNotice error={error} context="Review admission"/>}
     {!online && <div className="erp-banner amber" role="status"><WifiOff size={18}/><span>Admissions can be reviewed only while online.</span></div>}
     {hasDuplicate && <div className="erp-banner amber" role="alert"><AlertCircle size={18}/><span>
       <b>Possible duplicate:</b> student “{admission.possibleDuplicateStudentName}” already uses this email. Link that existing student through Portal access or resolve the duplicate before confirming; this protects against a second student record for the same account.
     </span></div>}
+    {preferredBranch && <div className="erp-banner blue" role="status"><MapPin size={18}/><span><b>Branch-link preference:</b> {preferredBranch.name}. You may choose a different branch below if needed.</span></div>}
     <dl className="erp-detail-list admission-details">
       <div><dt>First Name</dt><dd>{admission.firstName}</dd></div>
       <div><dt>Last Name</dt><dd>{admission.lastName}</dd></div>
@@ -1406,6 +2292,7 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
       <div><dt>Pin Code</dt><dd>{admission.pinCode || '—'}</dd></div>
       <div><dt>Reference by</dt><dd>{admission.referredBy || '—'}</dd></div>
       <div><dt>Experience in yoga</dt><dd>{yogaExperienceLabel(admission.yogaExperience)}</dd></div>
+      <div><dt>Preferred branch</dt><dd>{preferredBranch?.name || 'Studio link / not selected'}</dd></div>
       <div><dt>Status</dt><dd>{admission.status}</dd></div>
       <div className="full"><dt>Medical / Physical issue</dt><dd>{admission.medicalPhysicalIssue || '—'}</dd></div>
       <div className="full"><dt>Reasons to join yoga</dt><dd>{admission.reasonToJoin || '—'}</dd></div>
@@ -1414,7 +2301,7 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
       <label className="erp-field">Admission branch
         <select value={branchId} onChange={event => setBranchId(event.target.value)} required>
           <option value="">Select branch</option>
-          {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+          {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}{branch.id === admission.branchId ? ' · preferred' : ''}</option>)}
         </select>
       </label>
       <label className="erp-field">Joining date
@@ -1423,27 +2310,108 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
       <label className="erp-field full">Review note
         <textarea rows={2} maxLength={500} value={reviewNote} onChange={event => setReviewNote(event.target.value)}/>
       </label>
+      <label className="erp-toggle-row full">
+        <input type="checkbox" checked={continueEnrollment} onChange={event => setContinueEnrollment(event.target.checked)}/>
+        <span>Continue to batch, plan &amp; payment after confirmation</span>
+      </label>
       <div className="erp-form-actions">
         <button type="button" className="danger-button" disabled={!online || Boolean(busy)} onClick={() => review('reject')}>
           {busy === 'reject' ? 'Rejecting…' : 'Reject admission'}
         </button>
         <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
         <button className="primary-button" disabled={!online || Boolean(busy) || hasDuplicate}>
-          {busy === 'confirm' ? 'Confirming…' : 'Confirm admission & grant portal'}
+          {busy === 'confirm' ? 'Confirming…' : continueEnrollment ? 'Confirm & continue enrolment' : 'Confirm admission & grant portal'}
         </button>
       </div>
     </form>
   </Dialog>;
 }
 
-function AdmissionsPanel({erp, branches, notify}) {
+function AdmissionLinkCards({linkInfo, branches = [], notify, onQr, emptyText = 'Loading admission links…'}) {
+  const buildAdmissionLink = useCallback((branchId = '') => {
+    if (!linkInfo?.admissionCode || typeof window === 'undefined') return '';
+    const url = new URL(window.location.href);
+    url.searchParams.set('admission', linkInfo.admissionCode);
+    if (branchId) url.searchParams.set('branch', branchId);
+    else url.searchParams.delete('branch');
+    url.hash = '';
+    return url.toString();
+  }, [linkInfo]);
+
+  const linkItems = useMemo(() => {
+    if (!linkInfo?.admissionCode) return [];
+    return [
+      {
+        id: 'studio', label: 'Studio admission link', badge: 'All branches',
+        description: 'General link for your website/social profile. A manager chooses the branch during confirmation.',
+        url: buildAdmissionLink(),
+      },
+      ...branches.map(branch => ({
+        id: branch.id,
+        label: `${branch.name} admission link`, badge: branch.city || 'Branch link',
+        description: 'Applications from this link arrive with this branch pre-selected.',
+        url: buildAdmissionLink(branch.id),
+      })),
+    ];
+  }, [branches, buildAdmissionLink, linkInfo]);
+
+  const copyLink = async item => {
+    try {
+      await navigator.clipboard.writeText(item.url);
+      notify?.(`${item.label} copied.`);
+    } catch {
+      notify?.('Copy the admission link from the field shown.');
+    }
+  };
+
+  const shareLink = async item => {
+    const shareData = {
+      title: 'Yoga Studio admission',
+      text: `Join ${linkInfo?.organizationName || 'our yoga studio'} — create your account and complete the admission form:`,
+      url: item.url,
+    };
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try { await navigator.share(shareData); return; }
+      catch (shareError) { if (shareError?.name === 'AbortError') return; }
+    }
+    await copyLink(item);
+  };
+
+  return <div className="admission-link-grid" aria-label="Public admission links">
+    {linkItems.length === 0 ? <article className="admission-link-card">
+      <strong>Public admission link</strong><p>{emptyText}</p>
+    </article> : linkItems.map(item => <article className="admission-link-card" key={item.id}>
+      <header><div><h3>{item.label}</h3><p>{item.description}</p></div><span className="erp-badge lavender">{item.badge}</span></header>
+      <label className="erp-field">{item.label}
+        <input readOnly value={item.url} aria-label={item.label}/>
+      </label>
+      <footer>
+        <button type="button" className="secondary-button" onClick={() => copyLink(item)}><Copy size={14}/> Copy</button>
+        <button type="button" className="secondary-button" onClick={() => shareLink(item)}><Share2 size={14}/> Share</button>
+        <a className="secondary-button" href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Join ${linkInfo?.organizationName || 'our yoga studio'} — create your account and complete the admission form: ${item.url}`)}`} target="_blank" rel="noreferrer"><MessageCircle size={14}/> WhatsApp</a>
+        <button type="button" className="secondary-button" onClick={() => onQr?.(item)}><QrCode size={14}/> QR</button>
+        <a className="erp-link-btn" href={item.url} target="_blank" rel="noreferrer"><ExternalLink size={13}/> Open</a>
+      </footer>
+    </article>)}
+  </div>;
+}
+
+function AdmissionsPanel(props) {
+  const {erp, ctx, branches, notify} = props;
+  const {data} = erp;
   const [status, setStatus] = useState('pending');
   const [admissions, setAdmissions] = useState([]);
   const [linkInfo, setLinkInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reviewing, setReviewing] = useState(null);
+  const [query, setQuery] = useState('');
+  const [branchFilter, setBranchFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('newest');
+  const [qrItem, setQrItem] = useState(null);
+  const [enrollmentSeed, setEnrollmentSeed] = useState(null);
   const online = useOnline();
+  const today = toISODate();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1456,7 +2424,7 @@ function AdmissionsPanel({erp, branches, notify}) {
       setAdmissions(rows);
       setLinkInfo(info);
     } catch (loadError) {
-      setError(loadError?.message || 'Admission requests could not be loaded.');
+      setError(loadError);
     } finally {
       setLoading(false);
     }
@@ -1464,34 +2432,55 @@ function AdmissionsPanel({erp, branches, notify}) {
 
   useEffect(() => { load(); }, [load]);
 
-  const admissionLink = useMemo(() => {
-    if (!linkInfo?.admissionCode || typeof window === 'undefined') return '';
-    const url = new URL(window.location.href);
-    url.searchParams.set('admission', linkInfo.admissionCode);
-    url.hash = '';
-    return url.toString();
-  }, [linkInfo]);
+  const visibleAdmissions = admissions
+    .filter(admission => {
+      if (branchFilter === 'studio' && admission.branchId) return false;
+      if (branchFilter !== 'all' && branchFilter !== 'studio' && admission.branchId !== branchFilter) return false;
+      const needle = query.trim().toLocaleLowerCase('en-IN');
+      if (!needle) return true;
+      return [
+        admission.fullName, admission.firstName, admission.lastName, admission.email,
+        admission.phone, admission.subject, admission.referredBy,
+        admission.branchId ? branchName(data, admission.branchId) : 'Studio link',
+      ].join(' ').toLocaleLowerCase('en-IN').includes(needle);
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name') return (a.fullName || '').localeCompare(b.fullName || '');
+      if (sortBy === 'oldest') return String(a.submittedAt || '').localeCompare(String(b.submittedAt || ''));
+      return String(b.submittedAt || '').localeCompare(String(a.submittedAt || ''));
+    });
 
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(admissionLink);
-      notify?.('Public admission link copied.');
-    } catch {
-      notify?.('Copy the public admission link from the field shown.');
-    }
+  const summary = {
+    pending: admissions.filter(admission => admission.status === 'pending').length,
+    waiting: admissions.filter(admission => admission.status === 'pending'
+      && (admissionWaitingDays(admission.submittedAt, today) || 0) >= 3).length,
+    duplicates: admissions.filter(admission => admission.possibleDuplicateStudentId).length,
+    branchLinks: admissions.filter(admission => admission.branchId).length,
   };
+
+  const filtersActive = query || branchFilter !== 'all' || sortBy !== 'newest';
 
   return <section className="erp-panel admissions-manager-panel">
     <div className="erp-panel-head"><div>
       <h2>Admission requests</h2>
-      <p>Share the public link with a new student. They first create and confirm an account with “Join an existing studio,” then submit the form. Confirming creates the student and grants portal access to that same account.</p>
+      <p>Share a studio or branch admission link. The applicant first creates and confirms an account with “Join an existing studio,” then submits this form. Confirming creates the student, grants portal access and can continue directly to batch, plan and payment.</p>
     </div><button className="secondary-button" onClick={load} disabled={loading}><RefreshCw size={16}/> Refresh</button></div>
-    <div className="admission-link-row">
-      <label className="erp-field">Public admission link
-        <input readOnly value={admissionLink} placeholder="Loading admission link…"/>
-      </label>
-      <button className="secondary-button" onClick={copyLink} disabled={!admissionLink}>Copy link</button>
-      <label className="erp-field">Admission status
+
+    <AdmissionLinkCards
+      linkInfo={linkInfo} branches={branches} notify={notify} onQr={setQrItem}
+      emptyText={online ? 'Loading admission links…' : 'Reconnect to load the current public admission links.'}/>
+    <p className="admission-link-note">To test a link as a new applicant, open it in a private/incognito window so your manager session does not hide the admission form.</p>
+
+    <div className="erp-grid admission-summary" aria-label="Admission request summary">
+      <div className="erp-kpi"><small>Requests shown</small><strong>{visibleAdmissions.length}</strong><p>{admissions.length} loaded for this status</p></div>
+      <div className="erp-kpi"><small>Pending review</small><strong>{summary.pending}</strong><p>Oldest requests need follow-up first</p></div>
+      <div className="erp-kpi"><small>Waiting 3+ days</small><strong>{summary.waiting}</strong><p>Call or message these applicants</p></div>
+      <div className="erp-kpi"><small>Needs attention</small><strong>{summary.duplicates}</strong><p>{summary.branchLinks} request(s) have a branch selected</p></div>
+    </div>
+
+    <div className="erp-workspace-controls admission-controls" aria-label="Admission request filters">
+      <label className="erp-search"><Search size={16}/><input aria-label="Search admission requests" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search applicant, phone, email or subject…"/></label>
+      <label className="erp-field erp-workspace-field">Admission status
         <select value={status} onChange={event => setStatus(event.target.value)}>
           <option value="pending">Pending</option>
           <option value="confirmed">Confirmed</option>
@@ -1499,32 +2488,246 @@ function AdmissionsPanel({erp, branches, notify}) {
           <option value="all">All</option>
         </select>
       </label>
+      <label className="erp-field erp-workspace-field">Branch / link
+        <select aria-label="Admission branch filter" value={branchFilter} onChange={event => setBranchFilter(event.target.value)}>
+          <option value="all">All branches & studio link</option>
+          <option value="studio">Studio link / no branch yet</option>
+          {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+        </select>
+      </label>
+      <label className="erp-field erp-workspace-field">Sort by
+        <select aria-label="Sort admission requests" value={sortBy} onChange={event => setSortBy(event.target.value)}>
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name">Applicant name</option>
+        </select>
+      </label>
+      {filtersActive && <button type="button" className="secondary-button" onClick={() => { setQuery(''); setBranchFilter('all'); setSortBy('newest'); }}>Clear filters</button>}
     </div>
-    {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{error}</span></div>}
-    {loading ? <p>Loading admission requests…</p> : admissions.length ? <div className="erp-table-wrap"><table className="erp-table">
-      <thead><tr><th>Applicant</th><th>Subject</th><th>Submitted</th><th>Experience</th><th>Status</th><th></th></tr></thead>
-      <tbody>{admissions.map(admission => <tr key={admission.id}>
-        <td><b>{admission.fullName || `${admission.firstName} ${admission.lastName}`.trim()}</b><div className="erp-muted">{admission.email}</div>
-          {admission.possibleDuplicateStudentId && <span className="erp-badge amber">Possible duplicate</span>}</td>
-        <td>{admission.subject}</td>
-        <td>{admission.submittedAt ? formatDate(String(admission.submittedAt).slice(0, 10)) : '—'}</td>
-        <td>{yogaExperienceLabel(admission.yogaExperience)}</td>
-        <td><span className={`erp-badge ${admission.status === 'confirmed' ? 'green' : admission.status === 'rejected' ? 'red' : 'amber'}`}>{admission.status}</span></td>
-        <td>{admission.status === 'pending'
-          ? <button className="erp-link-btn" onClick={() => setReviewing(admission)}>Review</button>
-          : <span className="erp-muted">Reviewed</span>}</td>
-      </tr>)}</tbody>
-    </table></div> : <Empty icon={Users} title="No admission requests" text="New public admission submissions will appear here for manager review."/>}
+
+    {error && <ErrorNotice error={error} context="Load admission requests" onRetry={load}/>}
+    {loading ? <p>Loading admission requests…</p> : admissions.length === 0
+      ? <Empty icon={Users} title="No admission requests" text="New public admission submissions will appear here for manager review."/>
+      : visibleAdmissions.length === 0
+        ? <Empty icon={Search} title="No requests match" text="Try another applicant, status or branch/link filter." action={<button className="secondary-button" onClick={() => { setQuery(''); setBranchFilter('all'); }}>Clear filters</button>}/>
+        : <div className="admission-card-grid">
+          {visibleAdmissions.map(admission => {
+            const waitingDays = admissionWaitingDays(admission.submittedAt, today);
+            const branchLabel = admission.branchId ? branchName(data, admission.branchId) : 'Studio link';
+            const whatsapp = whatsappUrl(admission.phone, `Hello ${admission.firstName}, this is ${linkInfo?.organizationName || 'Yoga Studio'} about your admission request.`);
+            return <article className="erp-admission-card" key={admission.id} aria-label={`${admission.fullName || 'Applicant'} admission request`}>
+              <header>
+                <span className="avatar">{initials(admission.fullName || `${admission.firstName} ${admission.lastName}`)}</span>
+                <div><h3>{admission.fullName || `${admission.firstName} ${admission.lastName}`.trim()}</h3>
+                  <p>{admission.submittedAt ? `Submitted ${formatDate(String(admission.submittedAt).slice(0, 10))}` : 'Submission date unavailable'}</p></div>
+                <span className={`erp-badge ${admission.status === 'confirmed' ? 'green' : admission.status === 'rejected' ? 'red' : 'amber'}`}>{admission.status}</span>
+              </header>
+              <div className="erp-card-badges">
+                {admission.status === 'pending' && waitingDays !== null && <span className={`erp-badge ${waitingDays >= 7 ? 'red' : waitingDays >= 3 ? 'amber' : 'lavender'}`}>{waitingDays === 0 ? 'Submitted today' : `Waiting ${waitingDays} day${waitingDays === 1 ? '' : 's'}`}</span>}
+                <span className="erp-badge grey"><MapPin size={11}/> {branchLabel}</span>
+                {admission.possibleDuplicateStudentId && <span className="erp-badge amber">Possible duplicate</span>}
+                {admission.studentId && <span className="erp-badge green">Student created</span>}
+              </div>
+              <dl>
+                <div><dt>Subject</dt><dd>{admission.subject || '—'}</dd></div>
+                <div><dt>Experience</dt><dd>{yogaExperienceLabel(admission.yogaExperience)}</dd></div>
+                <div><dt>Phone</dt><dd>{admission.phone || '—'}</dd></div>
+                <div><dt>Email</dt><dd>{admission.email || '—'}</dd></div>
+                {admission.referredBy && <div><dt>Reference</dt><dd>{admission.referredBy}</dd></div>}
+                {admission.status === 'rejected' && admission.reviewNote && <div className="full"><dt>Review note</dt><dd>{admission.reviewNote}</dd></div>}
+              </dl>
+              <footer>
+                {admission.status === 'pending'
+                  ? <button type="button" className="primary-button" onClick={() => setReviewing(admission)}>Review &amp; enroll</button>
+                  : <span className="erp-muted">Reviewed{admission.reviewedAt ? ` ${formatDate(String(admission.reviewedAt).slice(0, 10))}` : ''}</span>}
+                {admission.phone && <a className="erp-link-btn" href={`tel:${String(admission.phone).replace(/[^+0-9]/g, '')}`}><Phone size={13}/> Call</a>}
+                {whatsapp && <a className="erp-link-btn" href={whatsapp} target="_blank" rel="noreferrer"><MessageCircle size={13}/> WhatsApp</a>}
+                {admission.email && <a className="erp-link-btn" href={`mailto:${admission.email}`}><Mail size={13}/> Email</a>}
+              </footer>
+            </article>;
+          })}
+        </div>}
+
     {reviewing && <AdmissionReviewDialog
       admission={reviewing} branches={branches} erp={erp} online={online} notify={notify}
-      onClose={() => setReviewing(null)} onReviewed={load}/>}
+      onClose={() => setReviewing(null)} onReviewed={load}
+      onConfirmed={seed => { setEnrollmentSeed(seed); load(); }}/>}
+    {qrItem && <AdmissionQrDialog item={qrItem} onClose={() => setQrItem(null)}/>}
+    {enrollmentSeed && <EnrollmentWizardDialog
+      {...props} fixedStudent={enrollmentSeed}
+      onClose={() => setEnrollmentSeed(null)}
+      onComplete={() => load()}/>}
   </section>;
 }
 
+export function InstructorStudentsPage(props) {
+  const {erp, ctx, go, notify} = props;
+  const {data} = erp;
+  const today = toISODate();
+  const [query, setQuery] = useState('');
+  const [enrollmentOpen, setEnrollmentOpen] = useState(false);
+  const [enrollmentStudent, setEnrollmentStudent] = useState(null);
+  const [linkInfo, setLinkInfo] = useState(null);
+  const [linkLoading, setLinkLoading] = useState(props.mode === 'supabase');
+  const [linkError, setLinkError] = useState('');
+  const [qrItem, setQrItem] = useState(null);
+  const online = useOnline();
+
+  const loadLinks = useCallback(async () => {
+    if (props.mode !== 'supabase') {
+      setLinkLoading(false);
+      return;
+    }
+    setLinkLoading(true);
+    setLinkError('');
+    try {
+      setLinkInfo(await erp.client.getAdmissionLinkInfo());
+    } catch (error) {
+      setLinkError(error);
+    } finally {
+      setLinkLoading(false);
+    }
+  }, [erp.client, props.mode]);
+
+  useEffect(() => { loadLinks(); }, [loadLinks]);
+
+  const ownBatches = data.batches
+    .filter(batch => batch.status === 'active' && batch.instructorId === ctx.instructorId && inBranch(ctx, batch.branchId))
+    .sort((a, b) => branchName(data, a.branchId).localeCompare(branchName(data, b.branchId))
+      || String(a.startTime || '').localeCompare(String(b.startTime || ''))
+      || a.name.localeCompare(b.name));
+  const ownBatchById = new Map(ownBatches.map(batch => [batch.id, batch]));
+  const ownStudentIds = new Set(instructorFinanceStudentIds(data, ctx.instructorId));
+  const ownStudents = data.students
+    .filter(student => student.status === 'active' && ownStudentIds.has(student.id) && inBranch(ctx, student.branchId))
+    .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
+  const visibleStudents = ownStudents.filter(student => {
+    const needle = query.trim().toLocaleLowerCase('en-IN');
+    if (!needle) return true;
+    const batchNames = data.enrollments
+      .filter(enrollment => enrollment.studentId === student.id && enrollment.status === 'active' && ownBatchById.has(enrollment.batchId))
+      .map(enrollment => ownBatchById.get(enrollment.batchId)?.name || '');
+    return [student.fullName, student.firstName, student.lastName, branchName(data, student.branchId), ...batchNames]
+      .join(' ').toLocaleLowerCase('en-IN').includes(needle);
+  });
+  const teachingBranchIds = new Set(ownBatches.map(batch => batch.branchId));
+  const teachingBranches = data.branches.filter(branch => branch.status !== 'archived' && teachingBranchIds.has(branch.id));
+  const batchSeats = ownBatches.reduce((summary, batch) => {
+    const fill = batchFill(batch, data.enrollments);
+    return {
+      enrolled: summary.enrolled + fill.enrolled,
+      capacity: summary.capacity + fill.capacity,
+      seatsLeft: summary.seatsLeft + fill.seatsLeft,
+    };
+  }, {enrolled: 0, capacity: 0, seatsLeft: 0});
+  const classesToday = ownBatches.filter(batch => isBatchOnDate(batch, today)).length;
+
+  const openNewEnrollment = () => {
+    setEnrollmentStudent(null);
+    setEnrollmentOpen(true);
+  };
+  const openStudentEnrollment = student => {
+    setEnrollmentStudent(student);
+    setEnrollmentOpen(true);
+  };
+
+  return <>
+    <ErpBlockingState {...props}/>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>My students <span className="flower">✳</span></h1><p>Students actively enrolled in your batches, new enrollment for your own batches, and public admission links you can share.</p></div>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
+
+    <div className="erp-banner blue" role="note">
+      <BadgeCheck size={18}/>
+      <span>This Students view is limited to your active batches. You can create a basic walk-in student or enroll an existing same-branch student into your batch. Full student profiles, medical details, admission requests and portal access remain manager-only.</span>
+    </div>
+
+    <div className="erp-grid erp-workspace-summary" aria-label="My student summary">
+      <div className="erp-kpi"><small>My students</small><strong>{ownStudents.length}</strong><p>Active in your batches</p></div>
+      <div className="erp-kpi"><small>My active batches</small><strong>{ownBatches.length}</strong><p>{classesToday} scheduled today</p></div>
+      <div className="erp-kpi"><small>Batch seats</small><strong>{batchSeats.enrolled}/{batchSeats.capacity}</strong><p>{batchSeats.seatsLeft} seat(s) available</p></div>
+      <div className="erp-kpi"><small>Teaching branches</small><strong>{teachingBranches.length}</strong><p>Branch links shown for these branches</p></div>
+    </div>
+
+    <section className="erp-panel">
+      <div className="erp-panel-head">
+        <div><h2>New enrollment &amp; public admission URL</h2><p>Use guided enrollment for a walk-in or an existing student in your batch. Or share a public link and a manager will review the submitted admission.</p></div>
+        <div className="erp-actions">
+          <button className="primary-button" onClick={openNewEnrollment} disabled={!ctx.instructorId || ownBatches.length === 0}><Sparkles size={16}/> New enrollment</button>
+          {props.mode === 'supabase' && <button className="secondary-button" onClick={loadLinks} disabled={linkLoading || !online}><RefreshCw size={15}/> Refresh links</button>}
+        </div>
+      </div>
+
+      {props.mode !== 'supabase' ? <div className="erp-banner" role="note">
+        <Share2 size={18}/><span>Public admission URLs are available only in Supabase mode. Guided enrollment still works with the student and batch copy on this device.</span>
+      </div> : linkError ? <ErrorNotice error={linkError} context="Load public admission links" onRetry={loadLinks}/> : <>
+        <AdmissionLinkCards
+          linkInfo={linkInfo} branches={teachingBranches} notify={notify} onQr={setQrItem}
+          emptyText={!online ? 'Reconnect to load the current public admission links.' : linkLoading ? 'Loading public admission links…' : 'Public admission links are not available for this account.'}/>
+        <p className="admission-link-note">Share the studio link anywhere, or use a branch link so the application arrives with your teaching branch pre-selected. The link does not show you the submitted request; an Owner, Co-owner or branch Admin reviews and confirms it.</p>
+      </>}
+      {!ctx.instructorId && <p className="enrollment-warning">Choose your linked instructor record above before starting a new enrollment.</p>}
+      {ctx.instructorId && ownBatches.length === 0 && <p className="enrollment-warning">No active batch is assigned to you in the selected branch, so new enrollment is unavailable. Ask a manager to assign you to a batch.</p>}
+    </section>
+
+    <section className="erp-panel">
+      <div className="erp-panel-head">
+        <span className="erp-search"><Search size={16}/><input aria-label="Search my students" placeholder="Search my students or batches…" value={query} onChange={event => setQuery(event.target.value)}/></span>
+        <div className="erp-actions"><button className="secondary-button" onClick={openNewEnrollment} disabled={!ctx.instructorId || ownBatches.length === 0}><UserPlus size={15}/> New enrollment</button></div>
+      </div>
+      {!ctx.instructorId ? <Empty icon={Users} title="Instructor record not selected" text="Choose the signed-in instructor record above to see only that instructor’s enrolled students."/>
+        : ownBatches.length === 0 ? <Empty icon={Clock} title="No assigned active batches" text="Your students will appear here after a manager assigns an active batch to you and students are enrolled in it."/>
+        : ownStudents.length === 0 ? <Empty icon={Users} title="No students in your batches yet" text="Start a new enrollment to create a basic walk-in student or add an existing same-branch student to one of your batches." action={<button className="primary-button" onClick={openNewEnrollment}><Sparkles size={15}/> New enrollment</button>}/>
+        : visibleStudents.length === 0 ? <Empty icon={Search} title="No matching students" text="Try a different student or batch name."/>
+        : <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Branch</th><th>My batches</th><th>Next class</th><th>Attendance</th><th>Actions</th></tr></thead><tbody>
+          {visibleStudents.map(student => {
+            const studentEnrollments = data.enrollments.filter(enrollment => (
+              enrollment.studentId === student.id && enrollment.status === 'active' && ownBatchById.has(enrollment.batchId)
+            ));
+            const studentBatches = studentEnrollments
+              .map(enrollment => ownBatchById.get(enrollment.batchId))
+              .filter(Boolean)
+              .sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || '')) || a.name.localeCompare(b.name));
+            const nextClass = studentBatches
+              .map(batch => ({batch, date: nextUpcomingBatchDate(batch, today)}))
+              .filter(item => item.date)
+              .sort((a, b) => a.date.localeCompare(b.date) || String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || '')))[0] || null;
+            const rate = attendanceSummary(data.attendance.filter(record => (
+              record.studentId === student.id && ownBatchById.has(record.batchId)
+            ))).rate;
+            return <tr key={student.id}>
+              <td><span className="erp-person"><span className="avatar">{initials(student.fullName)}</span><span><strong>{student.fullName}</strong><small>Joined {formatDate(student.joiningDate)}</small></span></span></td>
+              <td>{branchName(data, student.branchId)}</td>
+              <td>{studentBatches.map(batch => <div key={batch.id}><strong>{batch.name}</strong><br/><small>{batchDaySummary(batch)} · {batchTimeLabel(batch)}</small></div>)}</td>
+              <td>{nextClass ? <>{relativeClassDateLabel(nextClass.date, today)}<br/><small>{nextClass.batch.name}</small></> : '—'}</td>
+              <td>{rate === null ? '—' : `${rate}%`}</td>
+              <td>
+                <button className="erp-link-btn" onClick={() => openStudentEnrollment(student)}><Sparkles size={13}/> Enroll / collect</button>
+                <button className="erp-link-btn" onClick={() => go('payments')}><IndianRupee size={13}/> Payments</button>
+                <button className="erp-link-btn" onClick={() => go('attendance')}><CalendarCheck size={13}/> Attendance</button>
+              </td>
+            </tr>;
+          })}
+        </tbody></table></div>}
+    </section>
+
+    {qrItem && <AdmissionQrDialog item={qrItem} onClose={() => setQrItem(null)}/>}
+    {enrollmentOpen && <EnrollmentWizardDialog
+      {...props} fixedStudent={enrollmentStudent}
+      onClose={() => { setEnrollmentOpen(false); setEnrollmentStudent(null); }}/>}
+  </>;
+}
+
 export function StudentsPage(props) {
+  if (props.ctx?.role === 'instructor') return <InstructorStudentsPage {...props}/>;
+  return <ManagerStudentsPage {...props}/>;
+}
+
+function ManagerStudentsPage(props) {
   const {erp, ctx, go} = props; const {data} = erp;
   const [query, setQuery] = useState(''); const [editing, setEditing] = useState(null);
   const [accessStudent, setAccessStudent] = useState(null);
+  const [enrollmentOpen, setEnrollmentOpen] = useState(false);
+  const [enrollmentStudent, setEnrollmentStudent] = useState(null);
   const showAccess = props.mode === 'supabase' && canManage(ctx);
   const canShowAccess = student => showAccess && student.portalAccessStatus !== 'hidden';
   const list = data.students.filter(s => inBranch(ctx, s.branchId)
@@ -1559,12 +2762,13 @@ export function StudentsPage(props) {
     <ErpBlockingState {...props}/>
     <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Students <span className="flower">✳</span></h1><p>Everyone who practices at your studio.</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
-    {showAccess && <AdmissionsPanel erp={erp} notify={props.notify} branches={data.branches.filter(branch => branch.status !== 'archived')}/>}
+    {showAccess && <AdmissionsPanel {...props} branches={data.branches.filter(branch => branch.status !== 'archived')}/>}
     <section className="erp-panel"><div className="erp-panel-head">
       <span className="erp-search"><Search size={16}/><input aria-label="Search students" placeholder="Search name, phone or email…" value={query} onChange={e => setQuery(e.target.value)}/></span>
       <div className="erp-actions">
         <button className="secondary-button" onClick={() => exportCSV('students.csv', list, [{label: 'Name', value: s => s.fullName}, {label: 'Phone', value: s => s.phone}, {label: 'Email', value: s => s.email}, {label: 'Branch', value: s => branchName(data, s.branchId)}, {label: 'Joined', value: s => s.joiningDate}, {label: 'Status', value: s => s.status}])}><Download size={15}/> CSV</button>
-        {canManage(ctx) && <button className="primary-button" onClick={() => setEditing(empty)}><Plus size={16}/> Add student</button>}
+        {canManage(ctx) && <button className="primary-button" onClick={() => { setEnrollmentStudent(null); setEnrollmentOpen(true); }}><Sparkles size={16}/> Enroll student</button>}
+        {canManage(ctx) && <button className="secondary-button" onClick={() => setEditing(empty)}><Plus size={16}/> Add student</button>}
       </div></div>
       {data.branches.length === 0 ? <Empty icon={Building2} title="Add a branch first" text="Students belong to a branch. Create your studio location, then add students." action={<button className="primary-button" onClick={() => go('branches')}>Go to Branches</button>}/> :
       list.length === 0 ? <Empty icon={Users} title="No students found" text="Add your first student, or try a different search."/> :
@@ -1578,6 +2782,7 @@ export function StudentsPage(props) {
             {canShowAccess(s) && <><br/><span className={`erp-badge ${access.className}`} style={{marginTop: 5}}>{access.label}</span>
             {s.portalAccessEmail && <><br/><small>{s.portalAccessEmail}</small></>}</>}</td>
           <td>{canManage(ctx) && <><button className="erp-link-btn" onClick={() => editStudent(s)}><Pencil size={13}/> Edit</button>
+          {s.status === 'active' && <button className="erp-link-btn" onClick={() => { setEnrollmentStudent(s); setEnrollmentOpen(true); }}><Sparkles size={13}/> Enroll / collect</button>}
           {canShowAccess(s) && <button className="erp-link-btn" onClick={() => setAccessStudent({...s})}><KeyRound size={13}/> Portal access</button>}
           <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveStudent(s.id), s.status === 'active' ? 'Student deactivated.' : 'Student reactivated.')}>{s.status === 'active' ? 'Deactivate' : 'Activate'}</button></>}</td></tr>; })}
       </tbody></table></div>}
@@ -1606,6 +2811,7 @@ export function StudentsPage(props) {
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button">Save student</button></div>
       </form></Dialog>}
     {accessStudent && <StudentAccessDialog student={accessStudent} erp={erp} notify={props.notify} onClose={() => setAccessStudent(null)}/>}
+    {enrollmentOpen && <EnrollmentWizardDialog {...props} fixedStudent={enrollmentStudent} onClose={() => { setEnrollmentOpen(false); setEnrollmentStudent(null); }}/>}
   </>;
 }
 
@@ -1693,7 +2899,7 @@ function InstructorAccessDialog({instructor, branches, erp, ctx, onClose, onSave
       onClose();
       return true;
     } catch (err) {
-      setError(err?.message || 'Instructor access could not be updated.');
+      setError(err);
       return false;
     } finally {
       setBusy(false);
@@ -1713,7 +2919,7 @@ function InstructorAccessDialog({instructor, branches, erp, ctx, onClose, onSave
       : `Instructor access removed for ${instructor.fullName}.`,
   );
 
-  return <Dialog title="Instructor sign-in access" sub={`${instructor.fullName} will see only assigned batches, their rosters and attendance in the selected branches. Subscriptions and Payments stay hidden.`} onClose={onClose}>
+  return <Dialog title="Instructor sign-in access" sub={`${instructor.fullName} will see a Students view limited to students actively enrolled in their assigned batches, plus their schedule, rosters, attendance, new own-batch enrollment, public admission-link sharing, and dues/receipts for those students. Admission requests, full student profiles, subscription management, unrelated finance and payment setup stay hidden.`} onClose={onClose}>
     <div style={{display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16}}>
       <span className={`erp-badge ${isActive ? 'green' : instructor.accessStatus === 'suspended' ? 'amber' : 'grey'}`}>
         {isActive ? 'Sign-in active' : instructor.accessStatus === 'suspended' ? 'Sign-in suspended' : 'No sign-in access'}
@@ -1752,7 +2958,7 @@ function InstructorAccessDialog({instructor, branches, erp, ctx, onClose, onSave
       {instructor.recordStatus !== 'active' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This instructor is inactive, so sign-in is blocked. Reactivate the instructor record before granting access.</span>
       </div>}
-      {error && <div className="erp-banner" role="alert" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><span>{error}</span></div>}
+      {error && <ErrorNotice error={error} context="Update instructor sign-in access" className="erp-form-error"/>}
       <div className="erp-form-actions">
         <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
         <button className="primary-button" disabled={grantBlocked}>{busy ? 'Saving…' : isActive ? 'Update access' : 'Grant access'}</button>
@@ -1801,7 +3007,7 @@ export function RoleAccessPage(props) {
     try {
       setAccess(await erp.client.listRoleAccess());
     } catch (err) {
-      setError(err?.message || 'Role access could not be loaded.');
+      setError(err);
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -1835,7 +3041,7 @@ export function RoleAccessPage(props) {
       after?.();
       return true;
     } catch (err) {
-      setError(err?.message || 'Role access could not be updated.');
+      setError(err);
       return false;
     } finally {
       setBusyKey('');
@@ -1857,7 +3063,7 @@ export function RoleAccessPage(props) {
     ['Owner', 'All branches', 'Everything, including Co-owner access and organization ownership safeguards', 'Primary Owner cannot be removed here'],
     ['Co-owner', 'All branches', 'All operations, payment setup, and Admin/Instructor/Student access', 'Cannot add/remove Owner or Co-owner'],
     ['Admin', 'Selected branches', 'Branch operations and Instructor/Student access in assigned branches', 'Cannot manage Admins, Co-owners, plans, payment setup or other branches'],
-    ['Instructor', 'Assigned batches', 'Own schedule, rosters and attendance marking', 'No subscriptions, payments, student editing or access administration'],
+    ['Instructor', 'Assigned batches', 'Students view for own enrolled students; own schedule/rosters/attendance; new basic walk-in enrolment; public admission-link sharing; verified own-batch payment collection', 'No admission requests/details, full student editing, medical details, subscription lifecycle edits, payment voids, unrelated finance or access administration'],
     ['Student', 'Own records', 'View own batches, attendance, membership, dues, payments and PDFs', 'No ERP writes'],
   ];
 
@@ -1885,7 +3091,7 @@ export function RoleAccessPage(props) {
         <Empty icon={KeyRound} title="Use Supabase mode for real accounts" text="Switch Data mode to Supabase in Settings, run the latest supabase/erp_setup.sql, then grant each confirmed account exactly one role here."/>
       </section> : <>
         {!online && <div className="erp-banner" role="alert"><WifiOff size={18}/><span>You are offline. Role access changes are online-only and are never placed in the offline sync queue.</span></div>}
-        {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><div style={{flex: 1}}>{error}<div className="erp-actions" style={{marginTop: 8}}><button className="secondary-button" onClick={() => load()} disabled={!online || loading}>Try again</button></div></div></div>}
+        {error && <ErrorNotice error={error} context="Load or update role access" onRetry={() => load()}/>}
         {notice && <div className="erp-banner blue" role="status"><Check size={18}/><span>{notice}</span></div>}
         {loading && <section className="erp-panel"><p style={{fontSize: 13}}>Loading role access…</p></section>}
 
@@ -1983,7 +3189,7 @@ export function RoleAccessPage(props) {
 
     {removeTarget && <Dialog title={`Remove ${removeTarget.label} access`} sub="The person’s account and studio records are not deleted. Access stops on the next online Retry/Sync." onClose={() => setRemoveTarget(null)}>
       <p style={{fontSize: 14}}>Remove <b>{removeTarget.label}</b> access for <b>{removeTarget.email}</b>?</p>
-      {error && <div className="erp-banner" role="alert"><AlertCircle size={18}/><span>{error}</span></div>}
+      {error && <ErrorNotice error={error} context="Remove role access"/>}
       <div className="erp-form-actions">
         <button className="secondary-button" disabled={Boolean(busyKey)} onClick={() => setRemoveTarget(null)}>Keep access</button>
         <button className="primary-button" disabled={!online || Boolean(busyKey)} onClick={removeAccess}>{busyKey ? 'Removing…' : `Yes, remove ${removeTarget.label} access`}</button>
@@ -2165,6 +3371,7 @@ function InstructorProfilesSection(props) {
 function BatchesSection(props) {
   const {erp, ctx, go, onShowBranches} = props; const {data} = erp;
   const [editing, setEditing] = useState(null); const [roster, setRoster] = useState(null);
+  const [enrollmentBatch, setEnrollmentBatch] = useState(null);
   const [addStudentId, setAddStudentId] = useState('');
   const [rosterQuery, setRosterQuery] = useState('');
   const [query, setQuery] = useState('');
@@ -2324,7 +3531,10 @@ function BatchesSection(props) {
     </div>}
 
     <section className="erp-panel"><div className="erp-panel-head"><div><h2>{ctx.role === 'instructor' ? 'My batches' : ctx.role === 'student' ? 'My batches' : 'Batch workspace'}</h2><p>{batchRows.length} of {baseBatches.length} batch(es) shown{ctx.role === 'instructor' ? ' · Open Roster to add or remove students in your assigned batches.' : ''}</p></div>
-      {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), instructorId: '', days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20})}><Plus size={16}/> Add batch</button>}</div>
+      <div className="erp-actions">
+        {canUseEnrollmentWizard(ctx) && <button className="secondary-button" onClick={() => setEnrollmentBatch({})}><Sparkles size={15}/> Enroll &amp; collect</button>}
+        {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), instructorId: '', days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20})}><Plus size={16}/> Add batch</button>}
+      </div></div>
 
       {baseBatches.length > 0 && <div className="erp-workspace-controls" aria-label="Batch filters">
         <label className="erp-search"><Search size={16}/><input aria-label="Search batches" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search batch, branch or instructor…"/></label>
@@ -2424,6 +3634,7 @@ function BatchesSection(props) {
 
             {!isStudent && <footer className="erp-card-actions">
               <button type="button" className="secondary-button" onClick={() => openRoster(batch)}><Users size={14}/> Roster</button>
+              {canEditBatchRoster(ctx, batch) && <button type="button" className="erp-link-btn" onClick={() => setEnrollmentBatch(batch)}><Sparkles size={13}/> Enroll</button>}
               {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => duplicateBatch(batch)}><Copy size={13}/> Duplicate</button>}
               {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => setEditing({...batch})}><Pencil size={13}/> Edit</button>}
               {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => erp.act(c => c.archiveBatch(batch.id), archived ? 'Batch restored.' : 'Batch archived.')}>{archived ? 'Restore' : 'Archive'}</button>}
@@ -2452,8 +3663,13 @@ function BatchesSection(props) {
       </form></Dialog>}
     {roster && ctx.role !== 'student' && <Dialog title={`${roster.name} — roster`} sub={`${branchName(data, roster.branchId)} · ${instructorName(data, roster.instructorId)} · ${batchDaySummary(roster)} · ${batchTimeLabel(roster)} · ${rosterList.length}/${roster.capacity} enrolled · ${seatsLeft} seat(s) left`} onClose={closeRoster}>
       {ctx.role === 'instructor' && <p className="erp-roster-scope">{rosterEditable
-        ? 'This is your assigned batch. You may add or remove existing active students from this branch; student records and batch settings remain manager-only.'
+        ? 'This is your assigned batch. You may add or remove existing active students from this branch, or use guided enrolment to create a basic walk-in student, start a plan at its set price and record a verified payment. Full student profiles, medical details, batch settings and payment voids remain manager-only.'
         : 'This batch is read-only because it is not an active batch assigned to you.'}</p>}
+      {rosterEditable && <div className="erp-form-actions" style={{justifyContent: 'flex-start', marginTop: 0}}>
+        <button type="button" className="secondary-button" onClick={() => { const batch = roster; closeRoster(); setEnrollmentBatch(batch); }}>
+          <Sparkles size={15}/> Guided enrolment &amp; payment
+        </button>
+      </div>}
       {rosterFill && <div className="erp-capacity-block erp-roster-capacity">
         <div className="erp-capacity-head"><strong>{rosterFill.enrolled}/{rosterFill.capacity} students</strong><span>{rosterFill.percent}% full</span></div>
         <div className="erp-progress" role="progressbar" aria-label={`${roster.name} roster fill`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.min(100, rosterFill.percent)}>
@@ -2469,6 +3685,9 @@ function BatchesSection(props) {
         <label className="erp-field">Add student to batch<select value={addStudentId} onChange={e => setAddStudentId(e.target.value)} disabled={seatsLeft === 0 || addable.length === 0}><option value="">{seatsLeft === 0 ? 'This batch is full' : addable.length === 0 ? 'No other active students in this branch' : 'Choose student…'}</option>{addable.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select><small>Only existing active students from {branchName(data, roster.branchId)} can be added.</small></label>
         <div className="erp-form-actions"><button className="primary-button" disabled={!addStudentId || seatsLeft === 0}>Enroll student</button></div></form>}
     </Dialog>}
+    {enrollmentBatch && <EnrollmentWizardDialog
+      {...props} initialBatch={enrollmentBatch.id ? enrollmentBatch : null}
+      onClose={() => setEnrollmentBatch(null)}/>}
   </>;
 }
 
@@ -2905,6 +4124,143 @@ function InvoiceDialog({data, invoice, onClose}) {
 
 /* ---------------- subscriptions & payments ---------------- */
 
+export function InstructorPaymentsPage(props) {
+  const {erp, ctx} = props; const {data} = erp;
+  const today = toISODate();
+  const [paymentForm, setPaymentForm] = useState(null);
+  const [invoice, setInvoice] = useState(null);
+  const scopedStudentIds = new Set(instructorFinanceStudentIds(data, ctx.instructorId));
+  const billing = billingSettingsOf(data);
+  const scopedMemberships = data.memberships
+    .filter(membership => scopedStudentIds.has(membership.studentId) && inBranch(ctx, membership.branchId))
+    .sort((a, b) => {
+      const lifecycleRank = {active: 0, paused: 1, scheduled: 2, expired: 3, cancelled: 4};
+      return (lifecycleRank[subscriptionLifecycle(a, today).id] - lifecycleRank[subscriptionLifecycle(b, today).id])
+        || String(a.endDate || '').localeCompare(String(b.endDate || ''))
+        || studentName(data, a.studentId).localeCompare(studentName(data, b.studentId));
+    });
+  const collectableMemberships = scopedMemberships.filter(membership => (
+    membership.status !== 'cancelled'
+      && payableBalance(membership, data.payments, billing, today).due > 0
+  ));
+  const scopedPayments = data.payments
+    .filter(payment => scopedStudentIds.has(payment.studentId) && inBranch(ctx, payment.branchId))
+    .sort((a, b) => String(b.paidOn || '').localeCompare(String(a.paidOn || '')));
+  const outstandingDue = scopedMemberships
+    .filter(membership => membership.status !== 'cancelled')
+    .reduce((sum, membership) => sum + Math.max(0, payableBalance(membership, data.payments, billing, today).due), 0);
+  const collectedShown = scopedPayments
+    .filter(payment => payment.status !== 'void')
+    .reduce((sum, payment) => sum + (payment.amountPaise || 0), 0);
+  const openPayment = membership => {
+    const selected = membership && collectableMemberships.some(item => item.id === membership.id)
+      ? membership
+      : collectableMemberships[0];
+    if (!selected) return;
+    const balance = payableBalance(selected, data.payments, billing, today);
+    setPaymentForm({
+      membershipId: selected.id, amountRupees: paiseToRupees(balance.due),
+      method: 'upi', paidOn: today, note: '',
+    });
+  };
+
+  return <>
+    <ErpBlockingState {...props}/>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>My student payments <span className="flower">✳</span></h1><p>Dues, verified payments and receipts only for students actively enrolled in your assigned batches.</p></div>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
+
+    <div className="erp-banner blue" role="note">
+      <BadgeCheck size={18}/>
+      <span>Record a payment only after checking that the money was received. The server assigns the final receipt number. You cannot change plan prices, edit or void payments, pause/cancel/renew subscriptions, or see students outside your active batches.</span>
+    </div>
+
+    <div className="erp-grid erp-workspace-summary" aria-label="My student payment summary">
+      <div className="erp-kpi"><small>My enrolled students</small><strong>{scopedStudentIds.size}</strong><p>Active enrolments in your batches</p></div>
+      <div className="erp-kpi"><small>Subscriptions / passes</small><strong>{scopedMemberships.length}</strong><p>Only for those students</p></div>
+      <div className="erp-kpi"><small>Outstanding dues</small><strong>{formatINR(outstandingDue)}</strong><p>{collectableMemberships.length} period(s) with a balance</p></div>
+      <div className="erp-kpi"><small>Collected shown</small><strong>{formatINR(collectedShown)}</strong><p>{scopedPayments.length} payment record(s), excluding voids</p></div>
+    </div>
+
+    <section className="erp-panel">
+      <div className="erp-panel-head">
+        <div><h2>Collect a due</h2><p>{collectableMemberships.length} subscription/pass period(s) currently have a payable balance.</p></div>
+        <button className="primary-button" onClick={() => openPayment(null)} disabled={!collectableMemberships.length}><IndianRupee size={16}/> Record payment</button>
+      </div>
+      {scopedMemberships.length === 0
+        ? <Empty icon={IndianRupee} title="No student payments in your scope" text="Subscriptions and one-month passes appear here only after a student is actively enrolled in one of your batches and a manager or guided enrolment creates a plan period."/>
+        : <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan</th><th>Period</th><th>Status</th><th>Due</th><th>Actions</th></tr></thead><tbody>
+          {scopedMemberships.map(membership => {
+            const balance = payableBalance(membership, data.payments, billing, today);
+            const lifecycle = subscriptionLifecycle(membership, today);
+            return <tr key={membership.id}>
+              <td><span className="erp-person"><span className="avatar">{initials(studentName(data, membership.studentId))}</span><span><strong>{studentName(data, membership.studentId)}</strong><small>{branchName(data, membership.branchId)}</small></span></span></td>
+              <td>{planName(data, membership.planId)}<br/><small>{membershipKindLabel(data, membership)}</small></td>
+              <td>{formatDate(membership.startDate)} → {formatDate(membership.endDate)}</td>
+              <td><SubscriptionBadge membership={membership} today={today}/></td>
+              <td><strong>{formatINR(Math.max(0, balance.due))}</strong><br/><small>{formatINR(balance.paid)} paid of {formatINR(balance.total)}</small></td>
+              <td>
+                {balance.due > 0 && membership.status !== 'cancelled'
+                  ? <button className="erp-link-btn" onClick={() => openPayment(membership)}><IndianRupee size={13}/> Collect</button>
+                  : <span className="erp-badge green">Paid</span>}
+                <button className="erp-link-btn" onClick={() => setInvoice({type: 'membership', membership})}><Printer size={13}/> Invoice PDF</button>
+              </td>
+            </tr>;
+          })}
+        </tbody></table></div>}
+    </section>
+
+    <section className="erp-panel">
+      <div className="erp-panel-head"><div><h2>Payment receipts</h2><p>Receipts for your enrolled students only. Corrections must be handled by a manager.</p></div></div>
+      {scopedPayments.length === 0
+        ? <Empty icon={Wallet} title="No payments recorded" text="Verified payments for your batch students will appear here with their server receipt numbers."/>
+        : <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Receipt</th><th>Date</th><th>Student</th><th>Method</th><th>Amount</th><th>Actions</th></tr></thead><tbody>
+          {scopedPayments.map(payment => <tr key={payment.id}>
+            <td><strong>{payment.receiptNo || 'Pending sync'}</strong>{payment.syncPending && <><br/><span className="erp-badge amber">On this device</span></>}{payment.status === 'void' && <><br/><span className="erp-badge red">VOID</span></>}</td>
+            <td>{formatDate(payment.paidOn)}</td>
+            <td>{studentName(data, payment.studentId)}</td>
+            <td>{PAYMENT_METHODS.find(method => method.id === payment.method)?.label || payment.method}</td>
+            <td><strong style={payment.status === 'void' ? {textDecoration: 'line-through'} : undefined}>{formatINR(payment.amountPaise)}</strong></td>
+            <td>{payment.receiptNo && <button className="erp-link-btn" onClick={() => setInvoice({type: 'payment', payment})}><Printer size={13}/> Invoice PDF</button>}</td>
+          </tr>)}
+        </tbody></table></div>}
+    </section>
+
+    {paymentForm && <Dialog title="Record verified payment" sub="For one of your batch students only. Record after funds are received and verified; Supabase assigns the final receipt after sync. You cannot void this payment." onClose={() => setPaymentForm(null)}>
+      <form className="erp-form" onSubmit={async event => {
+        event.preventDefault();
+        const membership = collectableMemberships.find(item => item.id === paymentForm.membershipId);
+        if (!membership) return;
+        if (await erp.act(c => c.recordPayment({
+          membershipId: membership.id, studentId: membership.studentId, branchId: membership.branchId,
+          amountPaise: rupeesToPaise(paymentForm.amountRupees), method: paymentForm.method,
+          paidOn: paymentForm.paidOn, note: paymentForm.note,
+        }), 'Payment recorded. The final receipt appears after sync.')) setPaymentForm(null);
+      }}>
+        <label className="erp-field full">Subscription or one-month pass
+          <select required value={paymentForm.membershipId} onChange={event => {
+            const membership = collectableMemberships.find(item => item.id === event.target.value);
+            setPaymentForm({
+              ...paymentForm, membershipId: event.target.value,
+              amountRupees: membership ? paiseToRupees(payableBalance(membership, data.payments, billing, today).due) : '',
+            });
+          }}>
+            {collectableMemberships.map(membership => <option key={membership.id} value={membership.id}>
+              {studentName(data, membership.studentId)} · {planName(data, membership.planId)} · {membershipKindLabel(data, membership)} · due {formatINR(payableBalance(membership, data.payments, billing, today).due)}
+            </option>)}
+          </select>
+        </label>
+        <label className="erp-field">Amount received (₹)<input type="number" min="0.01" step="0.01" required value={paymentForm.amountRupees} onChange={event => setPaymentForm({...paymentForm, amountRupees: event.target.value})}/></label>
+        <label className="erp-field">Method<select value={paymentForm.method} onChange={event => setPaymentForm({...paymentForm, method: event.target.value})}>{PAYMENT_METHODS.map(method => <option key={method.id} value={method.id}>{method.label}</option>)}</select></label>
+        <label className="erp-field">Paid on<input type="date" required value={paymentForm.paidOn} onChange={event => setPaymentForm({...paymentForm, paidOn: event.target.value})}/></label>
+        <label className="erp-field">Note / transaction reference<input value={paymentForm.note} onChange={event => setPaymentForm({...paymentForm, note: event.target.value})} placeholder="UPI/bank/card reference (recommended)"/></label>
+        <div className="erp-banner" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><span>Record the actual gross amount received after verification. If the amount or reference is wrong, contact an Owner, Co-owner or branch Admin; instructors cannot void payments.</span></div>
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPaymentForm(null)}>Cancel</button><button className="primary-button">Save payment</button></div>
+      </form>
+    </Dialog>}
+    {invoice && <InvoiceDialog data={data} invoice={invoice} onClose={() => setInvoice(null)}/>}
+  </>;
+}
+
 function FinanceWorkspacePage(props) {
   const {erp, ctx, go} = props; const {data} = erp;
   const workspace = props.workspace === 'payments' ? 'payments' : 'subscriptions';
@@ -3249,6 +4605,7 @@ export function SubscriptionsPage(props) {
 }
 
 export function PaymentsPage(props) {
+  if (props.ctx?.role === 'instructor') return <InstructorPaymentsPage {...props}/>;
   return <FinanceWorkspacePage {...props} workspace="payments"/>;
 }
 

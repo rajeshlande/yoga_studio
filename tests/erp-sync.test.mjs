@@ -97,6 +97,29 @@ test('student portal metadata is display-only and never enters the sync payload'
   assert.equal('portalAccessEmail' in payload, false);
 });
 
+test('instructor walk-in student keeps its transient own-batch proof in the sync payload', () => {
+  let state = newState();
+  state.baseSnapshot.branches.push({
+    id: BRANCH, name: 'Panvel', city: '', address: '', phone: '', status: 'active', syncVersion: 1,
+  });
+  state.baseSnapshot.batches.push({
+    id: BATCH, branchId: BRANCH, name: 'Morning Hatha', instructorId: '', days: [1],
+    startTime: '07:00', durationMins: 60, capacity: 20, status: 'active', syncVersion: 1,
+  });
+  state = enqueueUpsert(state, 'students', {
+    id: STUDENT, branchId: BRANCH, firstName: 'Walkin', lastName: 'Student',
+    fullName: 'Walkin Student', phone: '9876543210', email: '', gender: '', dob: '',
+    joiningDate: '2026-10-31', status: 'active', notes: '', address: '', pinCode: '',
+    admissionSubject: '', referredBy: '', yogaExperience: '', medicalPhysicalIssue: '',
+    reasonToJoin: '', walkInBatchId: BATCH,
+  });
+
+  assert.deepEqual(readyOperations(state).map(op => op.entity), ['students']);
+  const payload = serializeOperation(state.outbox[0]).payload;
+  assert.equal(payload.walkInBatchId, BATCH);
+  assert.equal(payload.medicalPhysicalIssue, '');
+});
+
 test('dependent offline creates are not ready until their parent is acknowledged', () => {
   let state = newState();
   state = enqueueUpsert(state, 'branches', {

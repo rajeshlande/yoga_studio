@@ -119,6 +119,34 @@ export function addDaysISO(iso, days) {
   return toISODate(date);
 }
 
+/** Whole calendar days an admission request has been waiting for review. */
+export function admissionWaitingDays(submittedAt, today = toISODate()) {
+  const submitted = parseISODate(String(submittedAt || '').slice(0, 10));
+  const current = parseISODate(today);
+  if (!submitted || !current) return null;
+  return Math.max(0, Math.round((current - submitted) / 86400000));
+}
+
+/**
+ * The only students whose memberships/payments an Instructor may use for
+ * front-desk collection: students with an active enrollment in an active
+ * batch taught by that instructor. SQL repeats this check server-side; this
+ * helper keeps local/device mode and UI lists equally narrow.
+ */
+export function instructorFinanceStudentIds(data = {}, instructorId = '') {
+  if (!instructorId) return [];
+  const ownBatchIds = new Set((data.batches || [])
+    .filter(batch => batch?.status === 'active' && batch?.instructorId === instructorId)
+    .map(batch => batch.id));
+  const studentIds = new Set();
+  for (const enrollment of data.enrollments || []) {
+    if (enrollment?.status === 'active' && ownBatchIds.has(enrollment.batchId)) {
+      studentIds.add(enrollment.studentId);
+    }
+  }
+  return [...studentIds];
+}
+
 export function formatDate(iso) {
   const date = parseISODate(iso);
   if (!date) return '—';

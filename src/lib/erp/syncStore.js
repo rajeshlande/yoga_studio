@@ -33,7 +33,8 @@ const NATURAL_KEYS = {
   attendance: ['batchId', 'studentId', 'classDate'],
 };
 const REFERENCE_FIELDS = [
-  'branchId', 'studentId', 'instructorId', 'batchId', 'planId', 'membershipId', 'previousMembershipId',
+  'branchId', 'studentId', 'instructorId', 'batchId', 'walkInBatchId', 'planId',
+  'membershipId', 'previousMembershipId',
 ];
 
 export const clone = value => (typeof structuredClone === 'function'

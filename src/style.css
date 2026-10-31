@@ -265,3 +265,54 @@ label,.password-label>button,.auth-switch,.auth-switch>button,.back-link,.nav-it
 @media(max-width:420px){
   .profile-detail-grid{grid-template-columns:1fr}
 }
+
+/* Central user-facing error management */
+.app-error-notice{position:relative;display:flex;gap:12px;align-items:flex-start;border:1px solid #f0cbd8;background:#fff7fa;color:#6f4256;border-radius:14px;padding:15px 16px;margin:16px 0;box-shadow:0 8px 28px #7a35520d;text-align:left}
+.app-error-notice.warning{border-color:#f0dcb8;background:#fffaf0;color:#71582e}
+.app-error-notice.compact{padding:12px 13px;margin:10px 0}
+.app-error-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:11px;background:#fbe7ee;color:#ad5271;flex-shrink:0}
+.app-error-notice.warning .app-error-icon{background:#f8ecd2;color:#a87a2b}
+.app-error-body{flex:1;min-width:0}
+.app-error-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+.app-error-head strong{font-size:13px;line-height:1.45;color:#593244}
+.app-error-notice.warning .app-error-head strong{color:#5d4820}
+.app-error-code{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;border:1px solid currentColor;border-radius:999px;padding:3px 7px;opacity:.78;overflow-wrap:anywhere}
+.app-error-body>p{font-size:12px;line-height:1.65;margin:5px 0;overflow-wrap:anywhere}
+.app-error-body>p b{font-weight:800}
+.app-error-details{margin-top:9px;border-top:1px solid #00000010;padding-top:9px}
+.app-error-details summary{cursor:pointer;font-size:11px;font-weight:700;line-height:1.5}
+.app-error-details pre{white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#ffffff80;border:1px solid #0000000d;border-radius:9px;padding:9px;margin:8px 0;max-height:180px;overflow:auto}
+.app-error-copy{min-height:36px;padding:8px 11px;font-size:10px}
+.app-error-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+.app-error-actions .secondary-button{min-height:38px;padding:9px 12px}
+.app-error-close{position:absolute;top:8px;right:8px;width:32px;height:32px;color:currentColor;opacity:.75}
+.app-error-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:130;width:min(680px,calc(100vw - 28px));max-height:min(76svh,720px);overflow-y:auto;animation:fade-in .2s ease}
+.app-error-toast .app-error-notice{margin:0;box-shadow:0 18px 55px #46243a28}
+.app-error-boundary{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#f8f4fc,#fffafa)}
+.app-error-boundary-card{width:min(720px,100%);background:#fff;border:1px solid #eee4f3;border-radius:20px;box-shadow:0 22px 70px #6c4b7d14;padding:30px}
+.app-error-boundary-card h1{font-size:30px;line-height:1.3;color:#49394f;margin:8px 0 10px}
+.app-error-boundary-card>p{font-size:13px;line-height:1.75;color:#927fa0}
+.app-error-boundary-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px}
+.auth-error-notice{margin-top:18px;margin-bottom:0}
+:root[data-theme="dark"] .app-error-notice{background:#2c1d28;border-color:#543044;color:#ecbccd;box-shadow:0 10px 34px #00000045}
+:root[data-theme="dark"] .app-error-notice.warning{background:#33291a;border-color:#5e4a27;color:#eed3a1}
+:root[data-theme="dark"] .app-error-head strong{color:#ffdce9}
+:root[data-theme="dark"] .app-error-notice.warning .app-error-head strong{color:#ffe9ba}
+:root[data-theme="dark"] .app-error-icon{background:#452435;color:#f0a9c1}
+:root[data-theme="dark"] .app-error-notice.warning .app-error-icon{background:#4a3920;color:#f0cd83}
+:root[data-theme="dark"] .app-error-details{border-top-color:#ffffff14}
+:root[data-theme="dark"] .app-error-details pre{background:#1d1828;border-color:#ffffff12;color:#d9cbe8}
+:root[data-theme="dark"] .app-error-boundary{background:linear-gradient(135deg,#171320,#241829)}
+:root[data-theme="dark"] .app-error-boundary-card{background:#211b2f;border-color:#392d4d;box-shadow:0 22px 70px #00000070}
+:root[data-theme="dark"] .app-error-boundary-card h1{color:#f3eafd}
+:root[data-theme="dark"] .app-error-boundary-card>p{color:#b9a6ca}
+@media(max-width:650px){
+  .app-error-notice{gap:9px;padding:13px}
+  .app-error-icon{width:32px;height:32px;border-radius:9px}
+  .app-error-toast{bottom:12px;width:calc(100vw - 18px);max-height:82svh}
+  .app-error-boundary{padding:14px;align-items:flex-start}
+  .app-error-boundary-card{padding:22px 17px}
+  .app-error-boundary-card h1{font-size:25px}
+  .app-error-boundary-actions{align-items:stretch;flex-direction:column-reverse}
+  .app-error-boundary-actions button{justify-content:center}
+}

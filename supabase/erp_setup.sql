@@ -1,13 +1,15 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 10.
--- Matches app version 1.8.1 (safer autosync, GST/UPI invoicing,
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 11.
+-- Matches app version 1.10.0 (safer autosync, GST/UPI invoicing,
 -- Owner/Co-owner payment configuration/readiness checks, Student portal
 -- access, Odoo-style fixed Role Access management for all five roles,
 -- account-first public Student admissions with manager confirmation,
 -- native Odoo-style subscription lifecycle and one-click renewals, and
 -- Odoo-style plan templates with a separate one-month-only offering,
 -- rich Instructor profiles, assigned-batch roster editing for a signed-in
--- Instructor, and SQL v10 least-privilege field/record hardening).
+-- Instructor, SQL v10 least-privilege field/record hardening, and SQL v11
+-- branch-aware admissions plus narrow Instructor walk-in enrolment and
+-- own-batch verified-payment collection).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -27,10 +29,14 @@
 --      branch Admin use Access for Instructors and Students -> Portal
 --      access for Students, entering the exact registered sign-in email.
 --      For a new Student, a manager may instead share Students ->
---      Admission requests -> Public admission link. The applicant signs
---      up/signs in with Join an existing studio, submits the Admission
---      form, and a manager confirms it; confirmation creates the Student
---      and grants that same account Student portal access atomically.
+--      Admission requests -> the studio-wide Public admission link or an
+--      active branch's link/QR. A linked Instructor may share the same
+--      link-only URLs from Students, but cannot list or review requests.
+--      A branch link only pre-selects that branch.
+--      The applicant signs up/signs in with Join an existing studio,
+--      submits the Admission form, and a manager confirms the final branch;
+--      confirmation creates the Student and grants that same account
+--      Student portal access atomically.
 --
 -- SECURITY MODEL
 --   * Tables have Row Level Security enabled with NO direct-access policies
@@ -42,8 +48,11 @@
 --     for mutations. Money is stored as integer paise.
 --   * Fixed roles are Owner (primary, protected), Co-owner
 --     (organization-wide operations + Admin/Instructor/Student access),
---     Admin (selected branches only), Instructor (assigned batches, their
---     rosters/attendance only)
+--     Admin (selected branches only), Instructor (assigned batches,
+--     own enrolled Students, rosters/attendance and link-only public
+--     admission sharing, plus the SQL v11 create-only basic walk-in,
+--     plan-exact initial membership and final verified-payment operations
+--     for a student actively enrolled in the Instructor's own batch)
 --     and Student (own portal records only). One active account has one
 --     ERP role in one organization; Admin/Instructor branch assignments are
 --     explicit branch-member rows. This follows Odoo's two-layer model:
@@ -955,6 +964,160 @@ begin
   raise exception 'FORBIDDEN';
 end $$;
 
+-- SQL v11 keeps the Instructor expansion deliberately narrow. These
+-- helpers express the same assigned-batch record rule for direct RPCs and
+-- for the offline sync door; hiding a control in the browser is never the
+-- authorization check.
+create or replace function public.erp__is_my_active_batch(p_org uuid, p_batch_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(p_batch_id is not null and exists (
+    select 1
+      from public.erp_batches bt
+      join public.erp_branch_members bm
+        on bm.branch_id = bt.branch_id and bm.user_id = auth.uid()
+       and bm.role = 'instructor' and bm.instructor_id = bt.instructor_id
+       and bm.status = 'active'
+      join public.erp_instructors i
+        on i.id = bt.instructor_id and i.org_id = p_org and i.status = 'active'
+     where bt.id = p_batch_id and bt.org_id = p_org and bt.status = 'active'
+  ), false)
+$$;
+
+create or replace function public.erp__student_in_my_active_batch(
+  p_org uuid, p_student_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(p_student_id is not null and exists (
+    select 1
+      from public.erp_students s
+      join public.erp_enrollments e
+        on e.student_id = s.id and e.org_id = p_org and e.status = 'active'
+      join public.erp_batches bt
+        on bt.id = e.batch_id and bt.org_id = p_org and bt.branch_id = s.branch_id
+     where s.id = p_student_id and s.org_id = p_org and s.status = 'active'
+       and public.erp__is_my_active_batch(p_org, bt.id)
+  ), false)
+$$;
+
+create or replace function public.erp__assert_instructor_walk_in_payload(
+  p_org uuid, p_payload jsonb, p_branch uuid)
+returns void language plpgsql stable security definer set search_path = public as $$
+declare
+  v_batch_id uuid := nullif(p_payload->>'walkInBatchId', '')::uuid;
+  v_batch_branch uuid;
+  v_first_name text := btrim(coalesce(p_payload->>'firstName', ''));
+  v_last_name text := btrim(coalesce(p_payload->>'lastName', ''));
+  v_phone text := btrim(coalesce(p_payload->>'phone', ''));
+  v_email text := btrim(coalesce(p_payload->>'email', ''));
+  v_gender text := btrim(coalesce(p_payload->>'gender', ''));
+  v_dob_text text := btrim(coalesce(p_payload->>'dob', ''));
+  v_dob date;
+  v_status text := coalesce(nullif(p_payload->>'status', ''), 'active');
+begin
+  if v_batch_id is null or not public.erp__is_my_active_batch(p_org, v_batch_id) then
+    raise exception 'FORBIDDEN';
+  end if;
+  select branch_id into v_batch_branch
+    from public.erp_batches where id = v_batch_id and org_id = p_org;
+  if v_batch_branch is distinct from p_branch then
+    raise exception 'VALIDATION_FAILED: walkInBatchId/branchId';
+  end if;
+  if length(v_first_name) not between 1 and 80 or length(v_last_name) > 80 then
+    raise exception 'VALIDATION_FAILED: walk-in firstName/lastName';
+  end if;
+  if v_status <> 'active' then
+    raise exception 'VALIDATION_FAILED: walk-in status';
+  end if;
+  if v_phone <> '' and (length(v_phone) not between 7 and 25
+      or v_phone !~ '^[+0-9][0-9 ()-]{6,24}$') then
+    raise exception 'VALIDATION_FAILED: walk-in phone';
+  end if;
+  if v_email <> '' and (length(v_email) > 254
+      or v_email !~* '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$') then
+    raise exception 'VALIDATION_FAILED: walk-in email';
+  end if;
+  if v_gender not in ('', 'Female', 'Male', 'Other') then
+    raise exception 'VALIDATION_FAILED: walk-in gender';
+  end if;
+  if v_dob_text <> '' then
+    if v_dob_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
+      raise exception 'VALIDATION_FAILED: walk-in dob';
+    end if;
+    v_dob := v_dob_text::date;
+    if v_dob < date '1900-01-01' or v_dob > current_date then
+      raise exception 'VALIDATION_FAILED: walk-in dob';
+    end if;
+  end if;
+  -- A walk-in created by an Instructor is a basic identity record only.
+  -- Address/admission history, notes and especially medical details must be
+  -- completed later by a manager (or by the student through admission).
+  if btrim(coalesce(p_payload->>'notes', '')) <> ''
+     or btrim(coalesce(p_payload->>'address', '')) <> ''
+     or btrim(coalesce(p_payload->>'pinCode', '')) <> ''
+     or btrim(coalesce(p_payload->>'admissionSubject', '')) <> ''
+     or btrim(coalesce(p_payload->>'referredBy', '')) <> ''
+     or btrim(coalesce(p_payload->>'yogaExperience', '')) <> ''
+     or btrim(coalesce(p_payload->>'medicalPhysicalIssue', '')) <> ''
+     or btrim(coalesce(p_payload->>'reasonToJoin', '')) <> '' then
+    raise exception 'VALIDATION_FAILED: walk-in basic fields only';
+  end if;
+end $$;
+
+create or replace function public.erp__assert_instructor_initial_membership(
+  p_org uuid, p_student_id uuid, p_plan_id uuid, p_branch_id uuid,
+  p_billing_cycle text, p_duration_months integer, p_amount_paise bigint,
+  p_status text, p_offering_type text, p_auto_renew boolean,
+  p_previous_membership_id uuid, p_renewal_number integer,
+  p_total_paused_days integer)
+returns void language plpgsql stable security definer set search_path = public as $$
+declare
+  v_plan public.erp_plans%rowtype;
+  v_student_branch uuid;
+begin
+  select * into v_plan from public.erp_plans
+   where id = p_plan_id and org_id = p_org;
+  select branch_id into v_student_branch from public.erp_students
+   where id = p_student_id and org_id = p_org and status = 'active';
+  if v_plan.id is null or v_student_branch is null then
+    raise exception 'FORBIDDEN';
+  end if;
+  if v_plan.status <> 'active'
+     or p_branch_id is distinct from v_student_branch
+     or not public.erp__student_in_my_active_batch(p_org, p_student_id) then
+    raise exception 'FORBIDDEN';
+  end if;
+  if p_billing_cycle is distinct from v_plan.billing_cycle
+     or p_duration_months is distinct from v_plan.duration_months
+     or p_amount_paise is distinct from v_plan.amount_paise
+     or p_status is distinct from 'active'
+     or p_offering_type is distinct from v_plan.plan_type
+     or p_auto_renew is distinct from v_plan.renewal_enabled_default
+     or p_previous_membership_id is not null
+     or coalesce(p_renewal_number, 0) <> 0
+     or coalesce(p_total_paused_days, 0) <> 0 then
+    raise exception 'VALIDATION_FAILED: instructor plan-exact membership';
+  end if;
+end $$;
+
+create or replace function public.erp__can_instructor_collect_membership(
+  p_org uuid, p_membership_id uuid)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare
+  v_membership public.erp_memberships%rowtype;
+  v_student_branch uuid;
+begin
+  if p_membership_id is null then return false; end if;
+  select * into v_membership from public.erp_memberships
+   where id = p_membership_id and org_id = p_org;
+  if v_membership.id is null or v_membership.status not in ('active','paused') then
+    return false;
+  end if;
+  select branch_id into v_student_branch from public.erp_students
+   where id = v_membership.student_id and org_id = p_org and status = 'active';
+  return v_student_branch is not null
+     and v_student_branch = v_membership.branch_id
+     and public.erp__student_in_my_active_batch(p_org, v_membership.student_id);
+end $$;
+
 create or replace function public.erp__log(p_org uuid, p_action text, p_entity text, p_entity_id uuid)
 returns void language sql security definer set search_path = public as $$
   insert into public.erp_audit_log(org_id, actor, action, entity, entity_id)
@@ -997,7 +1160,7 @@ begin
   if auth.uid() is null then raise exception 'UNAUTHENTICATED'; end if;
   v_org := public.erp_current_org();
   if v_org is null then
-    return jsonb_build_object('organizationId', null, 'roles', '[]'::jsonb);
+    return jsonb_build_object('organizationId', null, 'roles', '[]'::jsonb, 'setupVersion', 11);
   end if;
   select name into v_name from public.erp_organizations where id = v_org;
   v_roles := public.erp_my_roles();
@@ -1035,15 +1198,18 @@ begin
     'adminBranchIds', to_jsonb(v_admin_branches),
     'branchIds', to_jsonb(v_branch_ids),
     'instructorId', public.erp_my_instructor_id(),
-    'studentId', v_student
+    'studentId', v_student,
+    'setupVersion', 11
   );
 end $$;
 
 -- ----------------------------------------------------------------------------
 -- One bounded snapshot for all screens (one call per load / per mutation).
 -- Visibility: org managers see their org; branch admins their branches;
--- instructors see only their batches, roster identities and minimal
--- same-branch candidates; students see only themselves, their assigned
+-- instructors see only their batches, roster identities, minimal
+-- same-branch candidates, active plan templates, billing settings, and the
+-- memberships/payments of students actively enrolled in their own active
+-- batches; students see only themselves, their assigned
 -- batches (teacher display name only), and their own finance records/plans.
 -- ----------------------------------------------------------------------------
 create or replace function public.erp_get_snapshot()
@@ -1223,6 +1389,22 @@ begin
             select 1 from public.erp_memberships m
              where m.org_id = v_org and m.plan_id = p.id
                and m.student_id = v_student))
+          or (v_instructor is not null and (
+            p.status = 'active'
+            or exists (
+              select 1 from public.erp_memberships m
+                join public.erp_students s
+                  on s.id = m.student_id and s.org_id = v_org
+                 and s.branch_id = m.branch_id
+                join public.erp_enrollments e
+                  on e.student_id = m.student_id and e.org_id = v_org
+                 and e.status = 'active'
+                join public.erp_batches bt
+                  on bt.id = e.batch_id and bt.org_id = v_org
+                 and bt.status = 'active' and bt.branch_id = m.branch_id
+                 and bt.instructor_id = v_instructor
+                 and bt.branch_id = any(v_branches)
+               where m.org_id = v_org and m.plan_id = p.id)))
         )),
     'memberships', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', m.id, 'studentId', m.student_id, 'planId', m.plan_id, 'branchId', m.branch_id,
@@ -1239,7 +1421,19 @@ begin
       from public.erp_memberships m
      where m.org_id = v_org and m.branch_id = any(v_branches)
        and (v_org_mgr or m.branch_id = any(v_admin_branches)
-            or (v_student is not null and m.student_id = v_student))),
+            or (v_student is not null and m.student_id = v_student)
+            or (v_instructor is not null and exists (
+              select 1 from public.erp_students s
+                join public.erp_enrollments e
+                  on e.student_id = s.id and e.org_id = v_org
+                 and e.status = 'active'
+                join public.erp_batches bt
+                  on bt.id = e.batch_id and bt.org_id = v_org
+                 and bt.status = 'active' and bt.branch_id = m.branch_id
+                 and bt.instructor_id = v_instructor
+                 and bt.branch_id = any(v_branches)
+               where s.id = m.student_id and s.org_id = v_org
+                 and s.branch_id = m.branch_id)))),
     'payments', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'studentId', p.student_id, 'membershipId', coalesce(p.membership_id::text, ''),
         'branchId', coalesce(p.branch_id::text, ''), 'amountPaise', p.amount_paise,
@@ -1248,7 +1442,19 @@ begin
       from public.erp_payments p
      where p.org_id = v_org and (p.branch_id is null or p.branch_id = any(v_branches))
        and (v_org_mgr or p.branch_id = any(v_admin_branches)
-            or (v_student is not null and p.student_id = v_student))),
+            or (v_student is not null and p.student_id = v_student)
+            or (v_instructor is not null and p.branch_id is not null and exists (
+              select 1 from public.erp_students s
+                join public.erp_enrollments e
+                  on e.student_id = s.id and e.org_id = v_org
+                 and e.status = 'active'
+                join public.erp_batches bt
+                  on bt.id = e.batch_id and bt.org_id = v_org
+                 and bt.status = 'active' and bt.branch_id = p.branch_id
+                 and bt.instructor_id = v_instructor
+                 and bt.branch_id = any(v_branches)
+               where s.id = p.student_id and s.org_id = v_org
+                 and s.branch_id = p.branch_id)))),
     'billingSettings', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', bs.id, 'legalName', bs.legal_name, 'email', bs.email, 'phone', bs.phone,
         'address', bs.address, 'city', bs.city, 'state', bs.state_name,
@@ -1270,9 +1476,11 @@ begin
         'updatedAt', bs.updated_at, 'syncVersion', bs.sync_version)), '[]')
       from public.erp_billing_settings bs
      where bs.org_id = v_org
-       -- Managers configure it; linked students may receive it so their own
-       -- due invoice/receipt can show the studio's payment instructions.
-       and (v_org_mgr or cardinality(v_admin_branches) > 0 or v_student is not null))
+       -- Managers configure it; linked students and scoped Instructors may
+       -- receive it only so gross dues and their permitted invoices/receipts
+       -- show the studio's GST and public payment instructions.
+       and (v_org_mgr or cardinality(v_admin_branches) > 0
+            or v_student is not null or v_instructor is not null))
   );
 end $$;
 
@@ -1325,12 +1533,13 @@ create or replace function public.erp_save_student(p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_org uuid; v_id uuid; v_branch uuid; v_current_branch uuid;
+  v_is_branch_manager boolean := false;
   v_first_name text := btrim(coalesce(p_payload->>'firstName', ''));
   v_last_name text := btrim(coalesce(p_payload->>'lastName', ''));
   v_full_name text := btrim(coalesce(nullif(btrim(concat_ws(' ', nullif(btrim(coalesce(p_payload->>'firstName', '')), ''), nullif(btrim(coalesce(p_payload->>'lastName', '')), ''))), ''), p_payload->>'fullName', ''));
   v_experience text := coalesce(nullif(p_payload->>'yogaExperience', ''), '');
 begin
-  v_org := public.erp__require_manager();
+  v_org := public.erp__require_org();
   v_id := nullif(p_payload->>'id', '')::uuid;
   v_branch := nullif(p_payload->>'branchId', '')::uuid;
   if v_first_name = '' and v_full_name <> '' then
@@ -1343,12 +1552,19 @@ begin
   if v_experience not in ('', 'experienced', 'no_experience', 'less_experienced') then
     raise exception 'VALIDATION_FAILED: yogaExperience';
   end if;
-  perform public.erp__require_branch_manager(v_org, v_branch);
   if v_id is not null then
     select branch_id into v_current_branch from public.erp_students
      where id = v_id and org_id = v_org;
     if v_current_branch is null then raise exception 'FORBIDDEN'; end if;
-    perform public.erp__require_branch_manager(v_org, v_current_branch);
+  end if;
+  v_is_branch_manager := public.erp__can_manage_branch(v_org, v_branch)
+    and (v_id is null or public.erp__can_manage_branch(v_org, v_current_branch));
+  if not v_is_branch_manager then
+    -- SQL v11 Instructor path: create-only. A supplied id is an update in
+    -- this direct RPC and remains manager-only; the sync door handles the
+    -- client-generated UUID used by the guided/offline enrolment flow.
+    if v_id is not null then raise exception 'FORBIDDEN'; end if;
+    perform public.erp__assert_instructor_walk_in_payload(v_org, p_payload, v_branch);
   end if;
   if v_id is null then
     insert into public.erp_students(
@@ -1597,12 +1813,15 @@ end $$;
 -- ----------------------------------------------------------------------------
 -- Public Student admissions (SQL v6)
 --
--- The shareable link contains only the organization admission code. The
--- applicant first creates/confirms a normal account with "Join an existing
--- studio" and signs in; these RPCs derive identity from auth.uid(), use the
--- account email as the future portal sign-in, and never accept anonymous
--- business-data writes. A manager selects the branch/joining date during
--- review. Confirmation inserts the Student and calls the existing audited,
+-- The shareable studio link contains the organization admission code; a
+-- branch link additionally contains an active branch id that is validated
+-- against that organization and stored only as the applicant's preferred
+-- branch. Neither selector is authorization. The applicant first
+-- creates/confirms a normal account with "Join an existing studio" and
+-- signs in; these RPCs derive identity from auth.uid(), use the account
+-- email as the future portal sign-in, and never accept anonymous
+-- business-data writes. A manager selects the final branch/joining date
+-- during review. Confirmation inserts the Student and calls the audited,
 -- server-checked Student portal grant in the same transaction.
 -- ----------------------------------------------------------------------------
 create or replace function public.erp__admission_json(p_admission public.erp_admissions)
@@ -1626,6 +1845,9 @@ returns jsonb language sql stable security definer set search_path = public as $
     'reasonToJoin', p_admission.reason_to_join,
     'status', p_admission.status,
     'branchId', p_admission.branch_id,
+    'branchName', coalesce((
+      select name from public.erp_branches
+       where id = p_admission.branch_id and org_id = p_admission.org_id), ''),
     'studentId', p_admission.student_id,
     'submittedAt', p_admission.submitted_at,
     'updatedAt', p_admission.updated_at,
@@ -1641,12 +1863,19 @@ returns uuid language sql stable security definer set search_path = public as $$
    limit 1
 $$;
 
-create or replace function public.erp_get_my_admission(p_code text)
+-- SQL v11 replaces the two-argument admission RPCs. Dropping the old
+-- signatures prevents PostgREST overload ambiguity when p_branch_id is used.
+drop function if exists public.erp_get_my_admission(text);
+drop function if exists public.erp_submit_admission(text, jsonb);
+
+create or replace function public.erp_get_my_admission(
+  p_code text, p_branch_id uuid default null)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
   v_actor uuid := auth.uid();
   v_org uuid;
   v_org_name text := '';
+  v_branch_name text := '';
   v_email text := '';
   v_admission public.erp_admissions%rowtype;
 begin
@@ -1654,6 +1883,11 @@ begin
   v_org := public.erp__admission_org(p_code);
   if v_org is null then raise exception 'ADMISSION_LINK_INVALID'; end if;
   select name into v_org_name from public.erp_organizations where id = v_org;
+  if p_branch_id is not null then
+    select name into v_branch_name from public.erp_branches
+     where id = p_branch_id and org_id = v_org and status = 'active';
+    if v_branch_name is null then raise exception 'ADMISSION_BRANCH_INVALID'; end if;
+  end if;
   select coalesce(lower(email::text), '') into v_email
     from auth.users where id = v_actor;
   select * into v_admission
@@ -1666,13 +1900,18 @@ begin
     'target', jsonb_build_object(
       'organizationId', v_org,
       'organizationName', coalesce(v_org_name, ''),
-      'admissionCode', lower(btrim(coalesce(p_code, '')))),
+      'admissionCode', lower(btrim(coalesce(p_code, ''))),
+      'branchId', p_branch_id,
+      'branchName', coalesce(v_branch_name, ''),
+      'preferredBranchId', p_branch_id,
+      'preferredBranchName', coalesce(v_branch_name, '')),
     'applicantEmail', coalesce(v_email, ''),
     'admission', case when v_admission.id is null then null
                       else public.erp__admission_json(v_admission) end);
 end $$;
 
-create or replace function public.erp_submit_admission(p_code text, p_payload jsonb)
+create or replace function public.erp_submit_admission(
+  p_code text, p_payload jsonb, p_branch_id uuid default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_actor uuid := auth.uid();
@@ -1704,6 +1943,11 @@ begin
   end if;
   v_org := public.erp__admission_org(p_code);
   if v_org is null then raise exception 'ADMISSION_LINK_INVALID'; end if;
+  if p_branch_id is not null and not exists (
+    select 1 from public.erp_branches
+     where id = p_branch_id and org_id = v_org and status = 'active') then
+    raise exception 'ADMISSION_BRANCH_INVALID';
+  end if;
 
   perform pg_advisory_xact_lock(hashtextextended('erp-admissions:' || v_org::text, 0));
 
@@ -1767,7 +2011,7 @@ begin
       phone = v_phone, subject = v_subject, email = v_email, address = v_address,
       pin_code = v_pin_code, referred_by = v_referred_by,
       yoga_experience = v_experience, medical_physical_issue = v_medical,
-      reason_to_join = v_reason, status = 'pending', branch_id = null,
+      reason_to_join = v_reason, status = 'pending', branch_id = p_branch_id,
       student_id = null, submitted_at = case when status = 'rejected' then now() else submitted_at end,
       updated_at = now(), reviewed_by = null, reviewed_at = null, review_note = ''
      where id = v_existing.id
@@ -1776,26 +2020,35 @@ begin
     insert into public.erp_admissions(
       org_id, applicant_user_id, first_name, last_name, dob, phone, subject,
       email, address, pin_code, referred_by, yoga_experience,
-      medical_physical_issue, reason_to_join)
+      medical_physical_issue, reason_to_join, branch_id)
     values (v_org, v_actor, v_first_name, v_last_name, v_dob, v_phone,
             v_subject, v_email, v_address, v_pin_code, v_referred_by,
-            v_experience, v_medical, v_reason)
+            v_experience, v_medical, v_reason, p_branch_id)
     returning * into v_saved;
   end if;
 
   insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
   values (v_org, v_actor, v_action, 'admission', v_saved.id,
-          jsonb_build_object('email', v_email, 'status', 'pending'));
+          jsonb_build_object('email', v_email, 'status', 'pending',
+                             'branchId', p_branch_id));
   return public.erp__admission_json(v_saved);
 end $$;
 
 create or replace function public.erp_get_admission_link_info()
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
-  v_org uuid := public.erp__require_manager();
+  v_org uuid := public.erp__require_org();
   v_name text := '';
   v_code text := '';
 begin
+  -- Managers review admission requests. A linked Instructor may also read
+  -- this link-only response so Students -> Share public admission URL works;
+  -- it contains no applicant, student, medical or review data, and the
+  -- admission list/review RPCs below remain manager-only.
+  if not public.erp_can_manage()
+     and public.erp_my_instructor_id() is null then
+    raise exception 'FORBIDDEN';
+  end if;
   select name, admission_code into v_name, v_code
     from public.erp_organizations where id = v_org;
   return jsonb_build_object(
@@ -1808,6 +2061,8 @@ create or replace function public.erp_list_admissions(p_status text default 'pen
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
   v_org uuid := public.erp__require_manager();
+  v_org_mgr boolean := public.erp__is_org_manager(v_org);
+  v_admin_branches uuid[] := public.erp__admin_branch_ids(v_org);
   v_status text := lower(btrim(coalesce(nullif(p_status, ''), 'pending')));
   v_items jsonb := '[]'::jsonb;
 begin
@@ -1828,11 +2083,16 @@ begin
            where s.org_id = v_org and s.email <> ''
              and lower(s.email) = lower(a.email)
              and (a.student_id is null or s.id <> a.student_id)
+             and (v_org_mgr or s.branch_id = any(v_admin_branches))
            order by case s.status when 'active' then 0 else 1 end, s.created_at
            limit 1
         ) dup on true
        where a.org_id = v_org
          and (v_status = 'all' or a.status = v_status)
+         -- Branch Admins triage only requests whose branch link/final branch
+         -- is one of their branches. Studio-wide (null-branch) requests stay
+         -- with Owner/Co-owner until a final branch is selected.
+         and (v_org_mgr or a.branch_id = any(v_admin_branches))
        order by a.submitted_at desc
        limit 100
     ) bounded;
@@ -1875,6 +2135,11 @@ begin
    for update;
   if v_admission.id is null then raise exception 'FORBIDDEN'; end if;
   if v_admission.status <> 'pending' then raise exception 'ADMISSION_NOT_PENDING'; end if;
+  if not public.erp__is_org_manager(v_org)
+     and (v_admission.branch_id is null
+       or not (v_admission.branch_id = any(public.erp__admin_branch_ids(v_org)))) then
+    raise exception 'FORBIDDEN';
+  end if;
 
   if v_action = 'reject' then
     update public.erp_admissions set
@@ -2908,7 +3173,10 @@ create or replace function public.erp_save_membership(p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_org uuid; v_id uuid; v_student uuid; v_plan uuid; v_branch uuid;
-  v_student_branch uuid;
+  v_student_branch uuid; v_student_status text;
+  v_is_manager_scope boolean := false; v_instructor_create boolean := false;
+  v_plan_status text; v_plan_months integer; v_plan_amount bigint;
+  v_plan_cycle text; v_plan_renewal_default boolean;
   v_start date; v_months integer; v_cycle text; v_end date; v_amount bigint;
   v_current public.erp_memberships%rowtype;
   v_source public.erp_memberships%rowtype;
@@ -2918,32 +3186,47 @@ declare
   v_total_paused_days integer; v_cancelled_at timestamptz; v_cancel_reason text;
   v_existing_child uuid; v_is_new boolean;
 begin
-  v_org := public.erp__require_manager();
+  v_org := public.erp__require_org();
   v_id := nullif(p_payload->>'id', '')::uuid;
   v_is_new := v_id is null;
   v_student := nullif(p_payload->>'studentId', '')::uuid;
   v_plan := nullif(p_payload->>'planId', '')::uuid;
   v_start := nullif(p_payload->>'startDate', '')::date;
   v_cycle := coalesce(nullif(p_payload->>'billingCycle', ''), 'joining');
-  select branch_id into v_student_branch from public.erp_students where id = v_student and org_id = v_org;
+  select branch_id, status into v_student_branch, v_student_status
+    from public.erp_students where id = v_student and org_id = v_org;
   v_branch := v_student_branch;
   if v_branch is null then raise exception 'FORBIDDEN'; end if;
-  perform public.erp__require_branch_manager(v_org, v_student_branch);
-  select duration_months, amount_paise, plan_type into v_months, v_amount, v_plan_type
+  select duration_months, amount_paise, plan_type, status, billing_cycle,
+         renewal_enabled_default
+    into v_plan_months, v_plan_amount, v_plan_type, v_plan_status,
+         v_plan_cycle, v_plan_renewal_default
     from public.erp_plans where id = v_plan and org_id = v_org;
-  if v_months is null or v_start is null then raise exception 'VALIDATION_FAILED: planId/startDate'; end if;
-  v_months := coalesce(nullif(p_payload->>'durationMonths', '')::integer, v_months);
-  v_amount := coalesce(nullif(p_payload->>'amountPaise', '')::bigint, v_amount);
+  if v_plan_months is null or v_start is null then raise exception 'VALIDATION_FAILED: planId/startDate'; end if;
+  v_months := coalesce(nullif(p_payload->>'durationMonths', '')::integer, v_plan_months);
+  v_amount := coalesce(nullif(p_payload->>'amountPaise', '')::bigint, v_plan_amount);
   if v_months < 1 or v_months > 24 or v_amount < 0 or v_cycle not in ('joining','calendar') then
     raise exception 'VALIDATION_FAILED: subscription terms';
   end if;
   v_branch := coalesce(nullif(p_payload->>'branchId', '')::uuid, v_branch);
-  perform public.erp__require_branch_manager(v_org, v_branch);
   if v_id is not null then
     select * into v_current from public.erp_memberships
      where id = v_id and org_id = v_org for update;
     if not found then raise exception 'FORBIDDEN'; end if;
-    perform public.erp__require_branch_manager(v_org, v_current.branch_id);
+  end if;
+  v_is_manager_scope := public.erp__can_manage_branch(v_org, v_student_branch)
+    and public.erp__can_manage_branch(v_org, v_branch)
+    and (v_is_new or public.erp__can_manage_branch(v_org, v_current.branch_id));
+  if not v_is_manager_scope then
+    -- SQL v11 Instructor path: a supplied id is an update in this direct
+    -- RPC and stays manager-only. Only a brand-new initial period may use
+    -- the narrow path, and its exact plan terms are asserted below after
+    -- the existing lifecycle fields have been normalized.
+    if not v_is_new or v_branch is distinct from v_student_branch
+       or v_student_status <> 'active' then
+      raise exception 'FORBIDDEN';
+    end if;
+    v_instructor_create := true;
   end if;
 
   v_offering_type := coalesce(
@@ -3010,6 +3293,13 @@ begin
     v_cancelled_at := coalesce(v_cancelled_at, v_current.cancelled_at, now());
   else
     v_cancelled_at := null; v_cancel_reason := '';
+  end if;
+
+  if v_instructor_create then
+    perform public.erp__assert_instructor_initial_membership(
+      v_org, v_student, v_plan, v_branch, v_cycle, v_months, v_amount,
+      v_status, v_offering_type, v_auto_renew, v_previous, v_renewal_number,
+      v_total_paused_days);
   end if;
 
   if v_previous is not null then
@@ -3126,7 +3416,7 @@ declare
   v_org uuid; v_id uuid; v_membership uuid; v_student uuid; v_branch uuid;
   v_amount bigint; v_paid date; v_receipt text; v_next bigint;
 begin
-  v_org := public.erp__require_manager();
+  v_org := public.erp__require_org();
   v_membership := nullif(p_payload->>'membershipId', '')::uuid;
   v_amount := nullif(p_payload->>'amountPaise', '')::bigint;
   v_paid := coalesce(nullif(p_payload->>'paidOn', '')::date, current_date);
@@ -3136,7 +3426,10 @@ begin
   select student_id, branch_id into v_student, v_branch
     from public.erp_memberships where id = v_membership and org_id = v_org and status in ('active','paused');
   if v_student is null then raise exception 'FORBIDDEN'; end if;
-  perform public.erp__require_branch_manager(v_org, v_branch);
+  if not public.erp__can_manage_branch(v_org, v_branch)
+     and not public.erp__can_instructor_collect_membership(v_org, v_membership) then
+    raise exception 'FORBIDDEN';
+  end if;
   insert into public.erp_counters(org_id, receipt) values (v_org, 1)
   on conflict (org_id) do update set receipt = public.erp_counters.receipt + 1
   returning receipt into v_next;
@@ -3248,12 +3541,14 @@ begin
   if v_experience not in ('', 'experienced', 'no_experience', 'less_experienced') then
     raise exception 'VALIDATION_FAILED: yogaExperience';
   end if;
-  perform public.erp__require_branch_manager(p_org, v_branch);
   select * into v_current from public.erp_students where id = v_id for update;
   if v_current.id is not null then
     if v_current.org_id <> p_org then
       return public.erp__sync_result(p_op, 'conflict', v_id, null, 'ID_IN_USE', 'That record ID is already in use.');
     end if;
+    -- Any update to an existing student remains branch-manager-only. The
+    -- Instructor walk-in path below is create-only.
+    perform public.erp__require_branch_manager(p_org, v_branch);
     perform public.erp__require_branch_manager(p_org, v_current.branch_id);
     if v_base <> v_current.sync_version then
       return public.erp__sync_result(p_op, 'conflict', v_id, v_current.sync_version, 'VERSION_CONFLICT', 'This student changed in Supabase after it was copied to this device.');
@@ -3272,6 +3567,10 @@ begin
       reason_to_join = coalesce(v_payload->>'reasonToJoin', '')
      where id = v_id returning sync_version into v_version;
   else
+    if not public.erp__can_manage_branch(p_org, v_branch) then
+      if v_base > 0 then raise exception 'FORBIDDEN'; end if;
+      perform public.erp__assert_instructor_walk_in_payload(p_org, v_payload, v_branch);
+    end if;
     if v_base > 0 then
       return public.erp__sync_result(p_op, 'conflict', null, null, 'RECORD_MISSING', 'This student no longer exists in Supabase.');
     end if;
@@ -3671,7 +3970,10 @@ declare
   v_source public.erp_memberships%rowtype;
   v_child public.erp_memberships%rowtype;
   v_version integer;
-  v_student_branch uuid;
+  v_student_branch uuid; v_student_status text;
+  v_is_manager_scope boolean := false; v_instructor_create boolean := false;
+  v_plan_status text; v_plan_months integer; v_plan_amount bigint;
+  v_plan_cycle text; v_plan_renewal_default boolean;
   v_plan_type text;
   v_offering_type text := nullif(v_payload->>'offeringType', '');
   v_auto_renew boolean := coalesce(nullif(v_payload->>'autoRenew', '')::boolean, true);
@@ -3708,15 +4010,17 @@ begin
     v_cancelled_at := null; v_cancel_reason := '';
   end if;
 
-  select branch_id into v_student_branch from public.erp_students
+  select branch_id, status into v_student_branch, v_student_status
+    from public.erp_students
    where id = v_student and org_id = p_org;
   if v_student_branch is null then raise exception 'FORBIDDEN'; end if;
   v_branch := coalesce(v_branch, v_student_branch);
-  perform public.erp__require_branch_manager(p_org, v_student_branch);
-  perform public.erp__require_branch_manager(p_org, v_branch);
-  select duration_months, amount_paise, plan_type into v_months, v_amount, v_plan_type
+  select duration_months, amount_paise, plan_type, status, billing_cycle,
+         renewal_enabled_default
+    into v_plan_months, v_plan_amount, v_plan_type, v_plan_status,
+         v_plan_cycle, v_plan_renewal_default
     from public.erp_plans where id = v_plan and org_id = p_org;
-  if v_months is null then raise exception 'FORBIDDEN'; end if;
+  if v_plan_months is null then raise exception 'FORBIDDEN'; end if;
   select * into v_current from public.erp_memberships where id = v_id for update;
   v_offering_type := coalesce(v_current.offering_type, v_offering_type, v_plan_type, 'subscription');
   if v_offering_type not in ('subscription','one_month') then
@@ -3726,8 +4030,8 @@ begin
      and nullif(v_payload->>'offeringType', '') is distinct from v_plan_type then
     raise exception 'VALIDATION_FAILED: offeringType/planType';
   end if;
-  v_months := coalesce(nullif(v_payload->>'durationMonths', '')::integer, v_months);
-  v_amount := coalesce(nullif(v_payload->>'amountPaise', '')::bigint, v_amount);
+  v_months := coalesce(nullif(v_payload->>'durationMonths', '')::integer, v_plan_months);
+  v_amount := coalesce(nullif(v_payload->>'amountPaise', '')::bigint, v_plan_amount);
   if v_offering_type = 'one_month' then
     if v_previous is not null then raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_RENEWAL'; end if;
     if v_status = 'paused' then raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_PAUSE'; end if;
@@ -3750,11 +4054,17 @@ begin
     raise exception 'VALIDATION_FAILED: pausedFrom';
   end if;
 
+  v_is_manager_scope := public.erp__can_manage_branch(p_org, v_student_branch)
+    and public.erp__can_manage_branch(p_org, v_branch)
+    and (v_current.id is null
+      or public.erp__can_manage_branch(p_org, v_current.branch_id));
   if v_current.id is not null then
     if v_current.org_id <> p_org then
       return public.erp__sync_result(p_op, 'conflict', v_id, null, 'ID_IN_USE', 'That record ID is already in use.');
     end if;
-    perform public.erp__require_branch_manager(p_org, v_current.branch_id);
+    -- Every update/lifecycle change remains branch-manager-only. The
+    -- Instructor path below may only insert a new initial period.
+    if not v_is_manager_scope then raise exception 'FORBIDDEN'; end if;
     if v_base <> v_current.sync_version then
       return public.erp__sync_result(p_op, 'conflict', v_id, v_current.sync_version, 'VERSION_CONFLICT', 'This membership changed in Supabase after it was copied to this device.');
     end if;
@@ -3762,7 +4072,17 @@ begin
       return public.erp__sync_result(p_op, 'conflict', v_id, v_current.sync_version, 'SUBSCRIPTION_CANCELLED', 'This subscription was cancelled in Supabase and cannot be reopened.');
     end if;
   elsif v_base > 0 then
+    if not v_is_manager_scope then raise exception 'FORBIDDEN'; end if;
     return public.erp__sync_result(p_op, 'conflict', null, null, 'RECORD_MISSING', 'This membership no longer exists in Supabase.');
+  elsif not v_is_manager_scope then
+    if v_branch is distinct from v_student_branch or v_student_status <> 'active' then
+      raise exception 'FORBIDDEN';
+    end if;
+    v_instructor_create := true;
+    perform public.erp__assert_instructor_initial_membership(
+      p_org, v_student, v_plan, v_branch, v_cycle, v_months, v_amount,
+      v_status, v_offering_type, v_auto_renew, v_previous, v_renewal_number,
+      v_total_paused_days);
   end if;
 
   if v_status = 'paused' then
@@ -3887,7 +4207,10 @@ begin
   select * into v_membership from public.erp_memberships
    where id = nullif(v_payload->>'membershipId', '')::uuid for update;
   if v_membership.id is null or v_membership.org_id <> p_org then raise exception 'FORBIDDEN'; end if;
-  perform public.erp__require_branch_manager(p_org, v_membership.branch_id);
+  if not public.erp__can_manage_branch(p_org, v_membership.branch_id)
+     and not public.erp__can_instructor_collect_membership(p_org, v_membership.id) then
+    raise exception 'FORBIDDEN';
+  end if;
 
   select * into v_current from public.erp_payments where id = v_id for update;
   if v_current.id is not null then
@@ -4086,13 +4409,29 @@ begin
               select 1 from public.erp_batches
                where id = v_batch and org_id = v_org and status = 'active'
                  and instructor_id = public.erp_my_instructor_id()));
-        elsif v_entity in ('branches','students','instructors','batches','memberships')
+        elsif v_entity = 'students' and v_type = 'upsert' then
+          -- Create-only Instructor walk-in. The apply function still checks
+          -- that no row exists and enforces the basic-field payload.
+          v_authorized := public.erp_can_manage() or (
+            v_base = 0 and public.erp__is_my_active_batch(
+              v_org, nullif((v_op->'payload')->>'walkInBatchId', '')::uuid));
+        elsif v_entity = 'memberships' and v_type = 'upsert' then
+          -- Create-only Instructor initial period. Enrollment operations in
+          -- the same ordered sync batch have already been applied by now;
+          -- the apply function then asserts exact active-plan terms.
+          v_authorized := public.erp_can_manage() or (
+            v_base = 0 and public.erp__student_in_my_active_batch(
+              v_org, nullif((v_op->'payload')->>'studentId', '')::uuid));
+        elsif v_entity in ('branches','instructors','batches')
               and v_type = 'upsert' then
           v_authorized := public.erp_can_manage();
         elsif v_entity in ('plans','billingSettings') and v_type = 'upsert' then
           v_authorized := public.erp__is_org_manager(v_org);
         elsif v_entity = 'payments' and v_type in ('payment_create','payment_void') then
-          v_authorized := public.erp_can_manage();
+          v_authorized := public.erp_can_manage() or (
+            v_type = 'payment_create' and v_base = 0
+            and public.erp__can_instructor_collect_membership(
+              v_org, nullif((v_op->'payload')->>'membershipId', '')::uuid));
         end if;
 
         if not v_authorized then
@@ -4186,6 +4525,11 @@ revoke all on function public.erp__sync_apply_payment(uuid, jsonb) from public, 
 revoke all on function public.erp__sync_apply_billing_settings(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.erp__normalize_specialties(jsonb) from public, anon, authenticated;
 revoke all on function public.erp__require_batch_roster_editor(uuid, uuid, uuid, boolean) from public, anon, authenticated;
+revoke all on function public.erp__is_my_active_batch(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.erp__student_in_my_active_batch(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.erp__assert_instructor_walk_in_payload(uuid, jsonb, uuid) from public, anon, authenticated;
+revoke all on function public.erp__assert_instructor_initial_membership(uuid, uuid, uuid, uuid, text, integer, bigint, text, text, boolean, uuid, integer, integer) from public, anon, authenticated;
+revoke all on function public.erp__can_instructor_collect_membership(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.erp__org_role(uuid) from public, anon, authenticated;
 revoke all on function public.erp__is_org_manager(uuid) from public, anon, authenticated;
 revoke all on function public.erp__is_primary_owner(uuid) from public, anon, authenticated;
@@ -4223,8 +4567,8 @@ begin
     'erp_bootstrap_organization(text)', 'erp_get_context()', 'erp_get_snapshot()',
     'erp_save_branch(jsonb)', 'erp_archive_branch(uuid)', 'erp_save_student(jsonb)',
     'erp_archive_student(uuid)', 'erp_grant_student_access(uuid, text)',
-    'erp_revoke_student_access(uuid)', 'erp_get_my_admission(text)',
-    'erp_submit_admission(text, jsonb)', 'erp_get_admission_link_info()',
+    'erp_revoke_student_access(uuid)', 'erp_get_my_admission(text, uuid)',
+    'erp_submit_admission(text, jsonb, uuid)', 'erp_get_admission_link_info()',
     'erp_list_admissions(text)',
     'erp_review_admission(uuid, text, uuid, date, text)',
     'erp_list_role_access()',

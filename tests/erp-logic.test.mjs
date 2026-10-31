@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attendanceSummary, batchFill, batchOverlapDays, findInstructorScheduleConflicts,
-  formatINR, membershipBalance, membershipEnd,
+  admissionWaitingDays, attendanceSummary, batchFill, batchOverlapDays,
+  findInstructorScheduleConflicts,
+  formatINR, instructorFinanceStudentIds, membershipBalance, membershipEnd,
   monthlyRecurringRevenuePaise, nextBatchDate, nextRenewalDate, normalizeInstructorProfile,
   normalizePlanTemplate,
   normalizeSubscriptionLifecycle, pauseDaysBetween, planBillingPeriodLabel,
@@ -145,6 +146,28 @@ test('batch workspace derives next class, capacity state and instructor overlaps
   ]);
   assert.equal(conflicts[0].instructorId, 'instructor-1');
   assert.deepEqual(conflicts[0].days, [5]);
+});
+
+test('admission and instructor collection helpers stay within their operational scope', () => {
+  assert.equal(admissionWaitingDays('2026-10-31T10:00:00Z', '2026-10-31'), 0);
+  assert.equal(admissionWaitingDays('2026-10-24T10:00:00Z', '2026-10-31'), 7);
+  assert.equal(admissionWaitingDays('', '2026-10-31'), null);
+
+  const data = {
+    batches: [
+      {id: 'own-active', instructorId: 'teacher-1', status: 'active'},
+      {id: 'own-archived', instructorId: 'teacher-1', status: 'archived'},
+      {id: 'other-teacher', instructorId: 'teacher-2', status: 'active'},
+    ],
+    enrollments: [
+      {batchId: 'own-active', studentId: 'student-1', status: 'active'},
+      {batchId: 'own-active', studentId: 'student-2', status: 'ended'},
+      {batchId: 'own-archived', studentId: 'student-3', status: 'active'},
+      {batchId: 'other-teacher', studentId: 'student-4', status: 'active'},
+    ],
+  };
+  assert.deepEqual(instructorFinanceStudentIds(data, 'teacher-1'), ['student-1']);
+  assert.deepEqual(instructorFinanceStudentIds(data, ''), []);
 });
 
 test('instructor profiles normalize specialties, experience and joining date', () => {

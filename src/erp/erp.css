@@ -117,6 +117,7 @@
 .erp-student-list b{font-size:13px;color:#3d3547;white-space:nowrap}
 .erp-banner{display:flex;gap:12px;align-items:flex-start;background:#fbecde;border:1px solid #f3dcbd;color:#7a5527;border-radius:12px;padding:14px 16px;font-size:13px;line-height:1.7;margin:16px 0}
 .erp-banner.blue{background:#eee7f7;border-color:#ded1ef;color:#5c4377}
+.erp-form>.app-error-notice{grid-column:1/-1;margin:0}
 .erp-link-btn{color:#8664ba;font-weight:700;font-size:12px;display:inline-flex;gap:5px;align-items:center;padding:6px 4px;min-height:36px}
 .erp-danger{color:#a34c4c!important}
 .erp-subscription-summary{margin:6px 0 16px}
@@ -522,4 +523,240 @@
 @media(max-width:430px){
  .erp-workspace-summary{grid-template-columns:1fr 1fr}
  .erp-branch-card,.erp-batch-card{padding:15px}
+}
+
+/* Admissions, enrolment and instructor collection workspace */
+.admission-link-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr));gap:13px;margin:6px 0 8px}
+.admission-link-card{display:flex;flex-direction:column;gap:12px;border:1px solid #ece3f3;background:linear-gradient(145deg,#fff,#fbf8ff);border-radius:16px;padding:16px;min-width:0}
+.admission-link-card>header{display:flex;align-items:flex-start;gap:10px}
+.admission-link-card>header>div{flex:1;min-width:0}
+.admission-link-card h3{font-size:15px;color:#3d3547;line-height:1.4;overflow-wrap:anywhere}
+.admission-link-card p{font-size:12px;color:#8d7d99;line-height:1.6;margin-top:4px}
+.admission-link-card .erp-field{margin-top:auto}
+.admission-link-card input[readonly]{font-size:11px;color:#6f5f7c}
+.admission-link-card>footer{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+.admission-link-card>footer .secondary-button{min-height:36px;padding:8px 11px;font-size:12px}
+.admission-link-note{font-size:12px;color:#9b92a4;line-height:1.6;margin:0 0 14px}
+.admissions-manager-panel .admission-summary{margin-bottom:2px}
+.admission-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(345px,100%),1fr));gap:14px}
+.erp-admission-card{display:flex;flex-direction:column;border:1px solid #f0e9f5;background:#fdfcfe;border-radius:16px;padding:17px;min-width:0}
+.erp-admission-card>header{display:flex;align-items:flex-start;gap:11px}
+.erp-admission-card>header>div{flex:1;min-width:0}
+.erp-admission-card h3{font-size:16px;color:#3d3547;line-height:1.35;overflow-wrap:anywhere}
+.erp-admission-card>header p{font-size:12px;color:#9b92a4;line-height:1.5;margin-top:3px}
+.erp-admission-card>dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:14px 0 0}
+.erp-admission-card>dl>div{border:1px solid #f3edf8;background:#fff;border-radius:11px;padding:10px;min-width:0}
+.erp-admission-card>dl>div.full{grid-column:1/-1}
+.erp-admission-card dt{font-size:9px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#a295ae}
+.erp-admission-card dd{margin:4px 0 0;font-size:12.5px;color:#3d3547;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}
+.erp-admission-card>footer{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:auto;padding-top:15px}
+.erp-admission-card>footer .primary-button{min-height:38px;padding:9px 13px;font-size:12px}
+.erp-admission-card .erp-badge svg{vertical-align:-2px;margin-right:3px}
+.erp-muted{font-size:12px;color:#9b92a4}
+.admission-qr-box{display:grid;justify-items:center;gap:10px;text-align:center;border:1px solid #f0e9f5;background:#fdfcfe;border-radius:16px;padding:20px;margin-bottom:16px}
+.admission-qr-box img{width:min(300px,78vw);height:auto;aspect-ratio:1;border-radius:12px;background:#fff}
+.admission-qr-box strong{font-size:15px;color:#3d3547;overflow-wrap:anywhere}
+.admission-qr-box small{font-size:10.5px;color:#8d7d99;line-height:1.6;overflow-wrap:anywhere;max-width:100%}
+.admission-qr-box p{font-size:13px;color:#8d7d99;line-height:1.6}
+.enrollment-wizard-form{display:grid;gap:14px}
+.enrollment-step{border:1px solid #f0e9f5;background:#fdfcfe;border-radius:16px;padding:16px;min-width:0}
+.enrollment-step>h3{display:flex;align-items:center;gap:9px;font-size:16px;color:#3d3547;margin:0 0 13px}
+.enrollment-step>h3>span{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:50%;background:#8664ba;color:#fff;font-size:13px;font-weight:800;flex-shrink:0}
+.enrollment-mode-toggle{display:flex;flex-wrap:wrap;margin-bottom:14px}
+.enrollment-mode-toggle button{display:inline-flex;align-items:center;gap:6px}
+.enrollment-fixed-student{display:flex;align-items:center;gap:12px;border:1px solid #e8f2df;background:#f8fcf5;border-radius:13px;padding:13px;min-width:0}
+.enrollment-fixed-student>div{flex:1;min-width:0}
+.enrollment-fixed-student strong{display:block;font-size:14px;color:#3d3547;overflow-wrap:anywhere}
+.enrollment-fixed-student small{display:block;font-size:11.5px;color:#7d8b74;line-height:1.55;margin-top:3px;overflow-wrap:anywhere}
+.enrollment-fields{margin-top:9px}
+.enrollment-readonly{display:flex;align-items:center;min-height:44px;border:1px solid #f0e7fa;background:#fbf8ff;border-radius:12px;padding:10px 12px;font-size:13px;font-weight:700;color:#514559}
+.enrollment-warning{font-size:12px;color:#8a6740;background:#fffaf0;border:1px solid #f3e1bd;border-radius:11px;padding:10px 12px;line-height:1.6;margin:9px 0 0}
+.enrollment-wizard-v2{width:min(1080px,calc(100vw - 32px))}
+.enrollment-wizard-v2 .enrollment-wizard-form{display:block}
+.enrollment-wizard-shell{display:grid;grid-template-columns:285px minmax(0,1fr);gap:20px;align-items:start}
+.enrollment-wizard-sidebar{position:sticky;top:0;display:grid;gap:14px;min-width:0}
+.enrollment-progress{display:grid;gap:8px;list-style:none;margin:0;padding:0}
+.enrollment-progress button{width:100%;display:flex;align-items:flex-start;gap:10px;text-align:left;border:1px solid #eee6f5;background:#fdfcfe;border-radius:14px;padding:11px;color:#776b84;min-height:58px}
+.enrollment-progress button:hover:not(:disabled){border-color:#cdb8e6;background:#fbf7ff}
+.enrollment-progress li.active button{border-color:#8664ba;background:#f3edfb;box-shadow:0 5px 16px #8664ba14;color:#4b3a61}
+.enrollment-progress li.complete button{border-color:#cfe3c5;background:#f7fbf3}
+.enrollment-progress-icon,.enrollment-step-icon,.enrollment-choice-icon{display:inline-flex;align-items:center;justify-content:center;border-radius:11px;background:#eee7f7;color:#8664ba;flex-shrink:0}
+.enrollment-progress-icon{width:32px;height:32px}
+.enrollment-progress li.active .enrollment-progress-icon{background:#8664ba;color:#fff}
+.enrollment-progress li.complete .enrollment-progress-icon{background:#dcefd4;color:#57794a}
+.enrollment-progress button>span:last-child{min-width:0}
+.enrollment-progress strong{display:block;font-size:12.5px;line-height:1.35;color:inherit}
+.enrollment-progress small{display:block;font-size:11px;line-height:1.45;color:#9b92a4;margin-top:2px;overflow-wrap:anywhere}
+.enrollment-live-summary{border:1px solid #e3d7f2;background:linear-gradient(145deg,#f4eefc,#fdf8f4);border-radius:16px;padding:15px;min-width:0}
+.enrollment-live-summary-head{display:flex;align-items:center;gap:11px;min-width:0}
+.enrollment-live-summary-head>div{min-width:0}
+.enrollment-live-summary-head small{display:block;font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#9b82bb}
+.enrollment-live-summary-head strong{display:block;font-size:14px;color:#3d3547;line-height:1.35;margin-top:2px;overflow-wrap:anywhere}
+.enrollment-live-summary-head span{display:block;font-size:11px;color:#8d7d99;line-height:1.45;margin-top:2px;overflow-wrap:anywhere}
+.enrollment-live-summary>dl{display:grid;gap:8px;margin:14px 0}
+.enrollment-live-summary>dl>div{display:grid;grid-template-columns:74px minmax(0,1fr);gap:8px;border-top:1px solid #e9dff4;padding-top:8px;min-width:0}
+.enrollment-live-summary dt{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9b92a4}
+.enrollment-live-summary dd{margin:0;font-size:12px;color:#514559;line-height:1.5;overflow-wrap:anywhere}
+.enrollment-live-total{display:flex;justify-content:space-between;align-items:center;gap:12px;border-radius:12px;background:#fff;border:1px solid #eee4f7;padding:11px 12px;color:#776b84;font-size:11px;font-weight:700}
+.enrollment-live-total strong{font-size:16px;color:#3d3547;white-space:nowrap}
+.enrollment-scope-note{display:flex;gap:9px;align-items:flex-start;border:1px solid #dcebd2;background:#f8fcf5;border-radius:14px;padding:12px;color:#60715b}
+.enrollment-scope-note svg{flex-shrink:0;margin-top:1px}
+.enrollment-scope-note p{font-size:11.5px;line-height:1.6;margin:0}
+.enrollment-wizard-main{display:grid;gap:16px;min-width:0}
+.enrollment-wizard-main>.erp-banner{margin:0}
+.enrollment-step-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:15px;min-width:0}
+.enrollment-step-head>div{flex:1;min-width:0}
+.enrollment-step-head small{display:block;font-size:9px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;color:#a295ae}
+.enrollment-step-head h3{font-size:18px;color:#3d3547;line-height:1.3;margin:3px 0 4px}
+.enrollment-step-head p{font-size:12px;color:#9b92a4;line-height:1.6;margin:0}
+.enrollment-step-head .erp-badge{margin-left:auto;flex-shrink:0}
+.enrollment-step-icon{width:40px;height:40px;border-radius:13px}
+.enrollment-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-bottom:14px}
+.enrollment-choice-card{display:flex;align-items:flex-start;gap:11px;text-align:left;border:1.5px solid #eee6f5;background:#fff;border-radius:15px;padding:14px;color:#776b84;min-height:96px}
+.enrollment-choice-card:hover:not(:disabled){border-color:#cdb8e6;background:#fdfbff}
+.enrollment-choice-card.selected{border-color:#8664ba;background:#f5f0fc;box-shadow:0 5px 16px #8664ba12;color:#8664ba}
+.enrollment-choice-card>span:nth-child(2){flex:1;min-width:0}
+.enrollment-choice-card strong{display:block;font-size:13px;color:#3d3547;line-height:1.4}
+.enrollment-choice-card small{display:block;font-size:11.5px;color:#9b92a4;line-height:1.55;margin-top:4px}
+.enrollment-choice-icon{width:36px;height:36px}
+.enrollment-fields-note{grid-column:1/-1;border:1px solid #eee6f5;background:#fbf8ff;border-radius:12px;padding:11px 12px;font-size:12px;color:#776b84;line-height:1.6;margin:0}
+.enrollment-fields-note strong{color:#3d3547}
+.enrollment-step>.enrollment-fields-note{margin-top:10px}
+.enrollment-selected-card{grid-column:1/-1;display:flex;align-items:center;gap:11px;border:1px solid #dcebd2;background:#f8fcf5;border-radius:14px;padding:12px;min-width:0}
+.enrollment-selected-card>div{flex:1;min-width:0}
+.enrollment-selected-card strong{display:block;font-size:13px;color:#3d3547;line-height:1.4;overflow-wrap:anywhere}
+.enrollment-selected-card small{display:block;font-size:11.5px;color:#71826c;line-height:1.55;margin-top:2px;overflow-wrap:anywhere}
+.enrollment-duplicate-warning{grid-column:1/-1;display:flex;align-items:center;gap:11px;border:1px solid #f3dcbd;background:#fffaf0;border-radius:14px;padding:12px;color:#7a5527;font-size:12px;line-height:1.6;min-width:0}
+.enrollment-duplicate-warning svg{flex-shrink:0}
+.enrollment-duplicate-warning span{flex:1;min-width:0;overflow-wrap:anywhere}
+.enrollment-duplicate-warning .secondary-button{flex-shrink:0}
+.enrollment-warning.full{grid-column:1/-1}
+.enrollment-batch-preview,.enrollment-plan-preview{grid-column:1/-1;border:1px solid #e4d9f2;background:#fff;border-radius:15px;padding:14px;min-width:0}
+.enrollment-batch-preview-head{display:flex;align-items:center;gap:11px;min-width:0}
+.enrollment-batch-preview-head>div{flex:1;min-width:0}
+.enrollment-batch-preview-head strong{display:block;font-size:14px;color:#3d3547;line-height:1.35;overflow-wrap:anywhere}
+.enrollment-batch-preview-head small{display:block;font-size:11.5px;color:#9b92a4;line-height:1.5;margin-top:2px;overflow-wrap:anywhere}
+.enrollment-preview-meta{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.enrollment-preview-meta span{display:inline-flex;align-items:center;gap:6px;border:1px solid #eee6f5;background:#fdfbff;border-radius:999px;padding:6px 9px;font-size:11px;color:#6c5a7d;line-height:1.4}
+.enrollment-preview-meta svg{color:#8664ba;flex-shrink:0}
+.enrollment-capacity-row{display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#8d7d99;margin-bottom:6px}
+.enrollment-plan-preview{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:13px 18px;margin-top:13px}
+.enrollment-plan-preview>div:first-child{display:flex;align-items:center;gap:11px;min-width:0}
+.enrollment-plan-preview>div:first-child strong{display:block;font-size:14px;color:#3d3547;line-height:1.35;overflow-wrap:anywhere}
+.enrollment-plan-preview>div:first-child small{display:block;font-size:11.5px;color:#9b92a4;line-height:1.5;margin-top:2px}
+.enrollment-plan-price{text-align:right;min-width:120px}
+.enrollment-plan-price small{display:block;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9b92a4}
+.enrollment-plan-price strong{display:block;font-size:20px;color:#3d3547;line-height:1.25;margin-top:2px}
+.enrollment-plan-price span{display:block;font-size:10px;color:#9b92a4;line-height:1.45;margin-top:2px}
+.enrollment-plan-preview>dl{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0}
+.enrollment-plan-preview>dl>div{border:1px solid #f2ebf8;background:#fdfcfe;border-radius:11px;padding:10px;min-width:0}
+.enrollment-plan-preview dt{font-size:9px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#a295ae}
+.enrollment-plan-preview dd{margin:4px 0 0;font-size:12px;color:#3d3547;line-height:1.5;overflow-wrap:anywhere}
+.enrollment-quick-amounts{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.enrollment-quick-amounts button{border:1px solid #ddd0f0;background:#f6f1fc;color:#7551aa;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:700;min-height:36px}
+.enrollment-quick-amounts button:hover:not(:disabled){background:#eee4fa}
+.enrollment-payment-balance{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0}
+.enrollment-payment-balance>div{border:1px solid #eee6f5;background:#fdfcfe;border-radius:12px;padding:11px;min-width:0}
+.enrollment-payment-balance>div.total{border-color:#cdb8e6;background:#f5f0fc}
+.enrollment-payment-balance dt{font-size:9px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#a295ae}
+.enrollment-payment-balance dd{margin:4px 0 0;font-size:14px;font-weight:800;color:#3d3547;line-height:1.35;overflow-wrap:anywhere}
+.enrollment-review{border:1px dashed #cdb8e6;background:#fbf8ff;border-radius:16px;padding:16px;min-width:0}
+.enrollment-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.enrollment-review-head h4{font-size:15px;color:#3d3547;margin:0}
+.enrollment-review-head p{font-size:11.5px;color:#9b92a4;line-height:1.55;margin:3px 0 0}
+.enrollment-review-list{display:grid;gap:9px}
+.enrollment-review-list>div{display:flex;align-items:center;gap:11px;border:1px solid #eee4f7;background:#fff;border-radius:13px;padding:11px;min-width:0}
+.enrollment-review-list>div>span:nth-child(2){flex:1;min-width:0}
+.enrollment-review-list small{display:block;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#a295ae}
+.enrollment-review-list strong{display:block;font-size:13px;color:#3d3547;line-height:1.4;margin-top:2px;overflow-wrap:anywhere}
+.enrollment-review-list em{display:block;font-style:normal;font-size:11.5px;color:#8d7d99;line-height:1.55;margin-top:2px;overflow-wrap:anywhere}
+.enrollment-review-list .secondary-button{min-height:38px;padding:8px 12px}
+.enrollment-wizard-actions{position:sticky;bottom:-26px;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #eee6f5;background:#fff;padding:14px 0 2px}
+.enrollment-wizard-actions>div{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}
+.enrollment-summary{display:flex;flex-wrap:wrap;gap:7px;align-items:center;border:1px dashed #d8c9ec;background:#fbf8ff;border-radius:13px;padding:12px;font-size:12px;color:#6c5a7d;line-height:1.5}
+.enrollment-summary strong{color:#3d3547;margin-right:2px}
+.enrollment-summary span{border:1px solid #eee5f7;background:#fff;border-radius:999px;padding:5px 9px;overflow-wrap:anywhere}
+.enrollment-complete{border:1px solid #dcebd2;background:#fbfef8;border-radius:18px;padding:24px;text-align:center}
+.enrollment-complete-icon{width:58px;height:58px;margin:0 auto 12px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#eaf4e2;color:#5a7d45}
+.enrollment-complete h3{font-size:20px;color:#3d3547;margin:0 0 7px}
+.enrollment-complete>p{font-size:13px;color:#776b84;line-height:1.65;margin:0 auto;max-width:620px}
+.enrollment-complete-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;text-align:left;margin:18px 0}
+.enrollment-complete-details>div{border:1px solid #edf2e8;background:#fff;border-radius:13px;padding:12px;min-width:0}
+.enrollment-complete-details dt{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:#8b7d9d;font-weight:800;margin-bottom:5px}
+.enrollment-complete-details dd{font-size:13px;color:#3d3547;font-weight:700;line-height:1.5;margin:0;overflow-wrap:anywhere}
+.enrollment-complete .erp-form-actions{justify-content:center}
+:root[data-theme="dark"] .admission-link-card,:root[data-theme="dark"] .erp-admission-card,:root[data-theme="dark"] .admission-qr-box,:root[data-theme="dark"] .enrollment-step,:root[data-theme="dark"] .enrollment-complete{background:#251f34;border-color:#3a304d}
+:root[data-theme="dark"] .admission-link-card h3,:root[data-theme="dark"] .erp-admission-card h3,:root[data-theme="dark"] .admission-qr-box strong,:root[data-theme="dark"] .enrollment-step>h3,:root[data-theme="dark"] .enrollment-fixed-student strong,:root[data-theme="dark"] .enrollment-summary strong,:root[data-theme="dark"] .enrollment-complete h3,:root[data-theme="dark"] .enrollment-complete-details dd{color:#f0e8f7}
+:root[data-theme="dark"] .enrollment-complete>p{color:#c3b2d4}
+:root[data-theme="dark"] .enrollment-complete-details>div{background:#211b2f;border-color:#3a304d}
+:root[data-theme="dark"] .enrollment-complete-icon{background:#263b2a;color:#b8e0ae}
+:root[data-theme="dark"] .admission-link-card p,:root[data-theme="dark"] .admission-link-note,:root[data-theme="dark"] .erp-admission-card>header p,:root[data-theme="dark"] .admission-qr-box small,:root[data-theme="dark"] .admission-qr-box p,:root[data-theme="dark"] .erp-muted{color:#aa99bd}
+:root[data-theme="dark"] .erp-admission-card>dl>div,:root[data-theme="dark"] .enrollment-summary span{background:#211b2f;border-color:#3a304d;color:#e8e2ef}
+:root[data-theme="dark"] .erp-admission-card dd{color:#f0e8f7}
+:root[data-theme="dark"] .enrollment-fixed-student{background:#213326;border-color:#355237}
+:root[data-theme="dark"] .enrollment-fixed-student small{color:#b8cfba}
+:root[data-theme="dark"] .enrollment-readonly{background:#211b2f;border-color:#3a304d;color:#e8e2ef}
+:root[data-theme="dark"] .enrollment-warning{background:#3a2e1d;border-color:#5c472d;color:#efd6a8}
+:root[data-theme="dark"] .enrollment-summary{background:#251f34;border-color:#574873;color:#c3b2d4}
+:root[data-theme="dark"] .enrollment-progress button,:root[data-theme="dark"] .enrollment-choice-card,:root[data-theme="dark"] .enrollment-batch-preview,:root[data-theme="dark"] .enrollment-plan-preview,:root[data-theme="dark"] .enrollment-review-list>div{background:#211b2f;border-color:#3a304d;color:#c3b2d4}
+:root[data-theme="dark"] .enrollment-progress li.active button{background:#2d2344;border-color:#9875c7;color:#f0e8f7}
+:root[data-theme="dark"] .enrollment-progress li.complete button{background:#213326;border-color:#355237}
+:root[data-theme="dark"] .enrollment-choice-card.selected{background:#2d2344;border-color:#9875c7;color:#cdb1eb}
+:root[data-theme="dark"] .enrollment-live-summary{background:linear-gradient(145deg,#2d2344,#33251f);border-color:#493761}
+:root[data-theme="dark"] .enrollment-live-summary>dl>div{border-top-color:#3a304d}
+:root[data-theme="dark"] .enrollment-live-total,:root[data-theme="dark"] .enrollment-plan-preview>dl>div,:root[data-theme="dark"] .enrollment-payment-balance>div{background:#211b2f;border-color:#3a304d;color:#c3b2d4}
+:root[data-theme="dark"] .enrollment-payment-balance>div.total{background:#2d2344;border-color:#6b548d}
+:root[data-theme="dark"] .enrollment-progress-icon,:root[data-theme="dark"] .enrollment-step-icon,:root[data-theme="dark"] .enrollment-choice-icon{background:#342a49;color:#cdb1eb}
+:root[data-theme="dark"] .enrollment-progress li.active .enrollment-progress-icon{background:#9875c7;color:#171320}
+:root[data-theme="dark"] .enrollment-progress li.complete .enrollment-progress-icon{background:#263b2a;color:#b8e0ae}
+:root[data-theme="dark"] .enrollment-scope-note,:root[data-theme="dark"] .enrollment-selected-card{background:#213326;border-color:#355237;color:#b8cfba}
+:root[data-theme="dark"] .enrollment-fields-note,:root[data-theme="dark"] .enrollment-review{background:#251f34;border-color:#574873;color:#c3b2d4}
+:root[data-theme="dark"] .enrollment-duplicate-warning{background:#3a2e1d;border-color:#5c472d;color:#efd6a8}
+:root[data-theme="dark"] .enrollment-preview-meta span{background:#251f34;border-color:#3a304d;color:#c3b2d4}
+:root[data-theme="dark"] .enrollment-quick-amounts button{background:#342a49;border-color:#574873;color:#e6d8fb}
+:root[data-theme="dark"] .enrollment-wizard-actions{background:#211b2f;border-top-color:#3a304d}
+:root[data-theme="dark"] .enrollment-live-summary-head strong,:root[data-theme="dark"] .enrollment-live-total strong,:root[data-theme="dark"] .enrollment-step-head h3,:root[data-theme="dark"] .enrollment-choice-card strong,:root[data-theme="dark"] .enrollment-selected-card strong,:root[data-theme="dark"] .enrollment-batch-preview-head strong,:root[data-theme="dark"] .enrollment-plan-preview>div:first-child strong,:root[data-theme="dark"] .enrollment-plan-price strong,:root[data-theme="dark"] .enrollment-plan-preview dd,:root[data-theme="dark"] .enrollment-payment-balance dd,:root[data-theme="dark"] .enrollment-review-head h4,:root[data-theme="dark"] .enrollment-review-list strong{color:#f0e8f7}
+:root[data-theme="dark"] .enrollment-progress small,:root[data-theme="dark"] .enrollment-live-summary-head>div>span,:root[data-theme="dark"] .enrollment-live-summary dd,:root[data-theme="dark"] .enrollment-step-head p,:root[data-theme="dark"] .enrollment-choice-card small,:root[data-theme="dark"] .enrollment-selected-card small,:root[data-theme="dark"] .enrollment-batch-preview-head small,:root[data-theme="dark"] .enrollment-capacity-row,:root[data-theme="dark"] .enrollment-review-list em{color:#aa99bd}
+@media(max-width:900px){
+ .enrollment-wizard-shell{grid-template-columns:1fr}
+ .enrollment-wizard-sidebar{position:static}
+ .enrollment-progress{grid-template-columns:repeat(4,minmax(132px,1fr));overflow-x:auto;padding-bottom:3px}
+ .enrollment-progress button{min-height:66px}
+ .enrollment-live-summary{display:none}
+ .enrollment-scope-note{display:none}
+}
+@media(max-width:760px){
+ .admission-link-card>header{flex-wrap:wrap}
+ .erp-admission-card>dl{grid-template-columns:1fr}
+ .erp-admission-card>dl>div.full{grid-column:auto}
+ .enrollment-step{padding:14px}
+ .enrollment-progress{grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;padding-bottom:0}
+ .enrollment-progress button{min-height:60px;padding:9px}
+ .enrollment-step-head{gap:9px}
+ .enrollment-step-head .erp-badge{display:none}
+ .enrollment-choice-grid{grid-template-columns:1fr}
+ .enrollment-choice-card{min-height:76px}
+ .enrollment-selected-card{align-items:flex-start;flex-wrap:wrap}
+ .enrollment-duplicate-warning{align-items:flex-start;flex-wrap:wrap}
+ .enrollment-duplicate-warning .secondary-button{width:100%;justify-content:center}
+ .enrollment-batch-preview-head{align-items:flex-start;flex-wrap:wrap}
+ .enrollment-plan-preview{grid-template-columns:1fr}
+ .enrollment-plan-price{text-align:left;min-width:0}
+ .enrollment-plan-preview>dl,.enrollment-payment-balance{grid-template-columns:1fr}
+ .enrollment-review{padding:13px}
+ .enrollment-review-list>div{align-items:flex-start}
+ .enrollment-review-list .secondary-button{padding:7px 9px}
+ .enrollment-wizard-actions{bottom:-22px;align-items:stretch;flex-direction:column-reverse}
+ .enrollment-wizard-actions>div{display:flex}
+ .enrollment-wizard-actions>div>*{flex:1}
+ .enrollment-wizard-actions>div>.primary-button{flex:1.45}
+ .enrollment-wizard-actions .primary-button,.enrollment-wizard-actions .secondary-button{justify-content:center}
+ .enrollment-fixed-student{align-items:flex-start;flex-wrap:wrap}
+ .enrollment-complete{padding:19px 15px}
+ .enrollment-complete-details{grid-template-columns:1fr}
+}
+@media(max-width:430px){
+ .admission-link-card,.erp-admission-card{padding:14px}
+ .admission-link-card>footer .secondary-button{flex:1 1 112px;justify-content:center}
+ .erp-admission-card>footer .primary-button{flex:1 1 100%;justify-content:center}
 }

@@ -29,7 +29,7 @@ test('SQL role boundary keeps internal helpers private and portal snapshots leas
 
   assert.ok(granted.length>0);
   assert.equal(granted.some(name=>name.startsWith('erp__')),false);
-  for(const helper of ['erp_current_org','erp_my_roles','erp_can_manage','erp_my_instructor_id','erp_my_student_id','erp__require_org','erp__require_manager','erp__log']){
+  for(const helper of ['erp_current_org','erp_my_roles','erp_can_manage','erp_my_instructor_id','erp_my_student_id','erp__require_org','erp__require_manager','erp__log','erp__is_my_active_batch','erp__student_in_my_active_batch','erp__assert_instructor_walk_in_payload','erp__assert_instructor_initial_membership','erp__can_instructor_collect_membership']){
     assert.equal(granted.includes(helper),false,`${helper} must not be browser-callable`);
     assert.equal(revoked.has(helper),true,`${helper} must be explicitly revoked`);
   }
@@ -41,4 +41,45 @@ test('SQL role boundary keeps internal helpers private and portal snapshots leas
   const plansBlock=sql.slice(sql.indexOf("'plans',"),sql.indexOf("'memberships',"));
   assert.match(plansBlock,/m\.plan_id = p\.id/);
   assert.match(plansBlock,/m\.student_id = v_student/);
+  assert.match(plansBlock,/v_instructor is not null and \([\s\S]*p\.status = 'active'/);
+  assert.match(sql,/'setupVersion', 11/);
+
+  // SQL v11 admission links use one unambiguous three-argument RPC pair;
+  // the SQL v10 overloads must be dropped and must not remain granted.
+  assert.match(sql,/SQL version 11/);
+  assert.match(sql,/drop function if exists public\.erp_get_my_admission\(text\)/);
+  assert.match(sql,/drop function if exists public\.erp_submit_admission\(text, jsonb\)/);
+  assert.ok(grantBlock.includes("'erp_get_my_admission(text, uuid)'"));
+  assert.ok(grantBlock.includes("'erp_submit_admission(text, jsonb, uuid)'"));
+  assert.equal(grantBlock.includes("'erp_get_my_admission(text)'"),false);
+  assert.equal(grantBlock.includes("'erp_submit_admission(text, jsonb)'"),false);
+  assert.match(sql,/ADMISSION_BRANCH_INVALID/);
+  assert.match(sql,/v_org_mgr or a\.branch_id = any\(v_admin_branches\)/);
+  assert.match(sql,/v_admission\.branch_id is null[\s\S]*erp__admin_branch_ids\(v_org\)/);
+  const admissionLinkInfoBlock=sql.slice(
+    sql.indexOf('create or replace function public.erp_get_admission_link_info'),
+    sql.indexOf('create or replace function public.erp_list_admissions'));
+  assert.match(admissionLinkInfoBlock,/erp_can_manage\(\)[\s\S]*erp_my_instructor_id\(\) is null/);
+  assert.equal(admissionLinkInfoBlock.includes('erp__require_manager'),false);
+  const admissionListBlock=sql.slice(
+    sql.indexOf('create or replace function public.erp_list_admissions'),
+    sql.indexOf('create or replace function public.erp_review_admission'));
+  assert.match(admissionListBlock,/erp__require_manager\(\)/);
+
+  // The Instructor expansion is create-only and plan-exact; offline sync
+  // must recheck the walk-in batch proof, active own-batch enrolment and the
+  // payment target instead of trusting the client-side wizard.
+  assert.match(sql,/walk-in basic fields only/);
+  assert.match(sql,/medicalPhysicalIssue', ''\)\) <> ''/);
+  assert.match(sql,/p_amount_paise is distinct from v_plan\.amount_paise/);
+  assert.match(sql,/p_previous_membership_id is not null/);
+  assert.match(sql,/erp__can_instructor_collect_membership\(v_org, v_membership\)/);
+  assert.match(sql,/v_type = 'payment_create' and v_base = 0/);
+  assert.match(sql,/\(v_op->'payload'\)->>'walkInBatchId'/);
+  const membershipsBlock=sql.slice(sql.indexOf("'memberships',"),sql.indexOf("'payments',"));
+  const paymentsBlock=sql.slice(sql.indexOf("'payments',"),sql.indexOf("'billingSettings',"));
+  assert.match(membershipsBlock,/v_instructor is not null and exists/);
+  assert.match(membershipsBlock,/bt\.instructor_id = v_instructor/);
+  assert.match(paymentsBlock,/v_instructor is not null and p\.branch_id is not null and exists/);
+  assert.match(paymentsBlock,/bt\.instructor_id = v_instructor/);
 });

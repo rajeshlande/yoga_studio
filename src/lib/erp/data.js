@@ -76,7 +76,7 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v10) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v11) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -114,7 +114,7 @@ function studentAccessError(error) {
 
 function roleAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v10) in Supabase, then try again.');
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v11) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -167,11 +167,14 @@ function roleAccessError(error) {
 
 function admissionError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v10) in Supabase, then try again.');
+    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v11) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ADMISSION_LINK_INVALID/.test(text)) {
     return new Error('This admission link is not valid. Ask the studio for its current admission link.');
+  }
+  if (/ADMISSION_BRANCH_INVALID/.test(text)) {
+    return new Error('This branch admission link is not valid or the branch is no longer active. Ask the studio for its current branch admission link.');
   }
   if (/ADMISSION_ACCOUNT_UNCONFIRMED/.test(text)) {
     return new Error('Confirm your account email first, then return to the admission form.');
@@ -851,6 +854,10 @@ export function createErpClient(mode, options = {}) {
         referredBy: payload.referredBy || '', yogaExperience: payload.yogaExperience || '',
         medicalPhysicalIssue: payload.medicalPhysicalIssue || '',
         reasonToJoin: payload.reasonToJoin || '',
+        // Transient authorization context for a brand-new Instructor walk-in
+        // student. SQL reads it to prove the create is tied to that
+        // instructor's own active batch; it is not a student table column.
+        ...(payload.walkInBatchId ? {walkInBatchId: payload.walkInBatchId} : {}),
       }));
     }),
 
@@ -898,7 +905,7 @@ export function createErpClient(mode, options = {}) {
       }
     },
 
-    async getMyAdmission(code) {
+    async getMyAdmission(code, branchId = '') {
       const cleanCode = String(code || '').trim().toLowerCase();
       if (!cleanCode) throw admissionError(new Error('ADMISSION_LINK_INVALID'));
       try {
@@ -907,7 +914,10 @@ export function createErpClient(mode, options = {}) {
           error.code = 'OFFLINE';
           throw error;
         }
-        const result = await rpc('erp_get_my_admission', {p_code: cleanCode});
+        const result = await rpc('erp_get_my_admission', {
+          p_code: cleanCode,
+          p_branch_id: String(branchId || '').trim() || null,
+        });
         return {
           target: result?.target || {},
           applicantEmail: result?.applicantEmail || '',
@@ -941,7 +951,11 @@ export function createErpClient(mode, options = {}) {
           error.code = 'OFFLINE';
           throw error;
         }
-        return await rpc('erp_submit_admission', {p_code: cleanCode, p_payload: payload});
+        return await rpc('erp_submit_admission', {
+          p_code: cleanCode,
+          p_payload: payload,
+          p_branch_id: String(values.branchId || '').trim() || null,
+        });
       } catch (error) {
         throw admissionError(error);
       }
