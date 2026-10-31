@@ -316,3 +316,10 @@ label,.password-label>button,.auth-switch,.auth-switch>button,.back-link,.nav-it
   .app-error-boundary-actions{align-items:stretch;flex-direction:column-reverse}
   .app-error-boundary-actions button{justify-content:center}
 }
+.terms-screen .terms-main{max-width:980px}
+.terms-panel{margin-top:22px;text-align:left}
+.terms-panel h2{font-size:16px;margin:20px 0 8px;color:#5d4773}
+.terms-panel h2:first-child{margin-top:0}
+.terms-panel p{font-size:13px;line-height:1.8;color:#796784}
+:root[data-theme="dark"] .terms-panel h2{color:#e6d8f5}
+:root[data-theme="dark"] .terms-panel p{color:#b9a6ca}

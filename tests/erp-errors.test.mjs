@@ -7,7 +7,7 @@ test('missing Supabase RPCs become an actionable SQL setup error', () => {
   assert.equal(info.kind, 'setup');
   assert.match(info.title, /Database setup/);
   assert.match(info.solution, /supabase\/erp_setup\.sql/);
-  assert.match(info.solution, /SQL v11/);
+  assert.match(info.solution, /SQL v12/);
   assert.equal(info.code, 'PGRST202');
 });
 

@@ -26,14 +26,20 @@ test('SQL role boundary keeps internal helpers private and portal snapshots leas
   const grantBlock=sql.slice(grantStart,sql.indexOf('\n  loop',grantStart));
   const granted=[...grantBlock.matchAll(/'([a-z0-9_]+)\(/g)].map(match=>match[1]);
   const revoked=new Set([...sql.matchAll(/revoke all on function public\.([a-z0-9_]+)\(/gi)].map(match=>match[1]));
+  const publicGrantBlock=sql.slice(sql.indexOf('Public admission registration surface'),sql.indexOf('AFTER SETUP'));
+  const publicGranted=[...publicGrantBlock.matchAll(/grant execute on function public\.([a-z0-9_]+)\(/g)].map(match=>match[1]);
 
   assert.ok(granted.length>0);
+  assert.deepEqual(publicGranted.sort(),['erp_get_public_admission_target','erp_submit_admission']);
+  assert.match(publicGrantBlock,/erp_get_public_admission_target\(text, uuid\) to anon, authenticated/);
+  assert.match(publicGrantBlock,/erp_submit_admission\(text, jsonb, uuid\) to anon/);
   assert.equal(granted.some(name=>name.startsWith('erp__')),false);
-  for(const helper of ['erp_current_org','erp_my_roles','erp_can_manage','erp_my_instructor_id','erp_my_student_id','erp__require_org','erp__require_manager','erp__log','erp__is_my_active_batch','erp__student_in_my_active_batch','erp__assert_instructor_walk_in_payload','erp__assert_instructor_initial_membership','erp__can_instructor_collect_membership']){
+  for(const helper of ['erp_current_org','erp_my_roles','erp_can_manage','erp_my_instructor_id','erp_my_student_id','erp__require_org','erp__require_manager','erp__log','erp__is_my_active_batch','erp__student_in_my_active_batch','erp__assert_instructor_walk_in_payload','erp__assert_instructor_initial_membership','erp__can_instructor_collect_membership','erp__instructor_branch_ids']){
     assert.equal(granted.includes(helper),false,`${helper} must not be browser-callable`);
+    assert.equal(publicGranted.includes(helper),false,`${helper} must not be public-callable`);
     assert.equal(revoked.has(helper),true,`${helper} must be explicitly revoked`);
   }
-  assert.deepEqual(defined.filter(name=>!granted.includes(name)&&!revoked.has(name)),[]);
+  assert.deepEqual(defined.filter(name=>!granted.includes(name)&&!publicGranted.includes(name)&&!revoked.has(name)),[]);
 
   assert.equal(/vis\.full_record or vis\.instructor_enrolled then s\./.test(sql),false);
   assert.match(sql,/'phone', case when vis\.full_record then s\.phone/);
@@ -42,11 +48,12 @@ test('SQL role boundary keeps internal helpers private and portal snapshots leas
   assert.match(plansBlock,/m\.plan_id = p\.id/);
   assert.match(plansBlock,/m\.student_id = v_student/);
   assert.match(plansBlock,/v_instructor is not null and \([\s\S]*p\.status = 'active'/);
-  assert.match(sql,/'setupVersion', 11/);
+  assert.match(sql,/'setupVersion', 12/);
 
-  // SQL v11 admission links use one unambiguous three-argument RPC pair;
-  // the SQL v10 overloads must be dropped and must not remain granted.
-  assert.match(sql,/SQL version 11/);
+  // SQL v12 keeps the unambiguous three-argument admission RPC pair and
+  // adds only the guarded public-registration target/submit surface; the
+  // SQL v10 overloads must be dropped and must not remain granted.
+  assert.match(sql,/SQL version 12/);
   assert.match(sql,/drop function if exists public\.erp_get_my_admission\(text\)/);
   assert.match(sql,/drop function if exists public\.erp_submit_admission\(text, jsonb\)/);
   assert.ok(grantBlock.includes("'erp_get_my_admission(text, uuid)'"));
@@ -54,8 +61,10 @@ test('SQL role boundary keeps internal helpers private and portal snapshots leas
   assert.equal(grantBlock.includes("'erp_get_my_admission(text)'"),false);
   assert.equal(grantBlock.includes("'erp_submit_admission(text, jsonb)'"),false);
   assert.match(sql,/ADMISSION_BRANCH_INVALID/);
-  assert.match(sql,/v_org_mgr or a\.branch_id = any\(v_admin_branches\)/);
-  assert.match(sql,/v_admission\.branch_id is null[\s\S]*erp__admin_branch_ids\(v_org\)/);
+  assert.match(sql,/v_is_manager and a\.branch_id = any\(v_admin_branches\)/);
+  assert.match(sql,/v_instructor_branches\) > 0[\s\S]*a\.branch_id is null/);
+  assert.match(sql,/raw_user_meta_data[\s\S]*admission_code/);
+  assert.match(sql,/VALIDATION_FAILED: termsAccepted/);
   const admissionLinkInfoBlock=sql.slice(
     sql.indexOf('create or replace function public.erp_get_admission_link_info'),
     sql.indexOf('create or replace function public.erp_list_admissions'));
@@ -64,7 +73,16 @@ test('SQL role boundary keeps internal helpers private and portal snapshots leas
   const admissionListBlock=sql.slice(
     sql.indexOf('create or replace function public.erp_list_admissions'),
     sql.indexOf('create or replace function public.erp_review_admission'));
-  assert.match(admissionListBlock,/erp__require_manager\(\)/);
+  assert.match(admissionListBlock,/erp__require_org\(\)/);
+  assert.match(admissionListBlock,/erp__instructor_branch_ids\(v_org\)/);
+  assert.match(admissionListBlock,/sensitiveDetailsHidden/);
+  assert.equal(admissionListBlock.includes('erp__require_manager'),false);
+  const admissionReviewBlock=sql.slice(
+    sql.indexOf('create or replace function public.erp_review_admission'),
+    sql.indexOf('-- Role access management'));
+  assert.match(admissionReviewBlock,/v_instructor_branches/);
+  assert.match(admissionReviewBlock,/insert into public\.erp_branch_members/);
+  assert.equal(admissionReviewBlock.includes('erp_grant_student_access(v_student_id'),false);
 
   // The Instructor expansion is create-only and plan-exact; offline sync
   // must recheck the walk-in batch proof, active own-batch enrolment and the

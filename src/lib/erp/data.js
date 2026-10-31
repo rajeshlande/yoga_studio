@@ -76,7 +76,7 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v11) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v12) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -114,7 +114,7 @@ function studentAccessError(error) {
 
 function roleAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v11) in Supabase, then try again.');
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v12) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -167,7 +167,7 @@ function roleAccessError(error) {
 
 function admissionError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v11) in Supabase, then try again.');
+    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v12) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ADMISSION_LINK_INVALID/.test(text)) {
@@ -944,6 +944,9 @@ export function createErpClient(mode, options = {}) {
         yogaExperience: String(values.yogaExperience || '').trim(),
         medicalPhysicalIssue: String(values.medicalPhysicalIssue || '').trim(),
         reasonToJoin: String(values.reasonToJoin || '').trim(),
+        termsAccepted: values.termsAccepted === true,
+        termsVersion: String(values.termsVersion || '').trim(),
+        ...(values.applicantUserId ? {applicantUserId: String(values.applicantUserId).trim()} : {}),
       };
       try {
         if (!browserOnline()) {

@@ -1131,6 +1131,19 @@ export function BranchesPage(props) {
 
 /* ---------------- public admission ---------------- */
 
+export const ADMISSION_TERMS_VERSION = '2026-11-01';
+
+const admissionTermsUrl = () => {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('terms', 'admission');
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '?terms=admission';
+  }
+};
+
 const emptyAdmissionForm = (profile = {}, admission = null) => {
   const nameParts = String(profile.name || '').trim().split(/\s+/).filter(Boolean);
   return {
@@ -1149,25 +1162,48 @@ const emptyAdmissionForm = (profile = {}, admission = null) => {
   };
 };
 
-export function PublicAdmissionPanel({erp, admissionCode, admissionBranchId = '', profile = {}, notify}) {
+export function PublicAdmissionPanel({
+  erp, admissionCode, admissionBranchId = '', profile = {}, notify,
+  publicRegistration = false, onPublicRegister = null,
+  loadPublicTarget = null, onShowSignIn = null,
+}) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [target, setTarget] = useState(null);
   const [admission, setAdmission] = useState(null);
   const [form, setForm] = useState(() => emptyAdmissionForm(profile));
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [registrationResult, setRegistrationResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
   const load = useCallback(async () => {
-    if (!admissionCode || !erp.client?.getMyAdmission) return;
+    if (!admissionCode) return;
     setLoading(true);
     setLoadError('');
     try {
+      if (publicRegistration) {
+        if (!loadPublicTarget) {
+          throw new Error('Public admission registration is unavailable. Please contact the studio.');
+        }
+        const result = await loadPublicTarget(admissionCode, admissionBranchId);
+        setTarget({
+          ...(result?.target || {}),
+          termsVersion: result?.termsVersion || ADMISSION_TERMS_VERSION,
+        });
+        setAdmission(null);
+        setSubmitted(false);
+        return;
+      }
+      if (!erp.client?.getMyAdmission) return;
       const result = await erp.client.getMyAdmission(admissionCode, admissionBranchId);
       const nextAdmission = result.admission || null;
       setTarget(result.target || null);
       setAdmission(nextAdmission);
+      setTermsAccepted(Boolean(nextAdmission?.termsAccepted));
       setForm(emptyAdmissionForm(
         {...profile, email: result.applicantEmail || profile.email || ''},
         nextAdmission,
@@ -1178,7 +1214,7 @@ export function PublicAdmissionPanel({erp, admissionCode, admissionBranchId = ''
     } finally {
       setLoading(false);
     }
-  }, [admissionBranchId, admissionCode, erp.client, profile.email, profile.name]);
+  }, [admissionBranchId, admissionCode, erp.client, loadPublicTarget, profile.email, profile.name, publicRegistration]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1187,11 +1223,51 @@ export function PublicAdmissionPanel({erp, admissionCode, admissionBranchId = ''
   const preferredBranchName = target?.branchName || admission?.branchName || '';
   const submit = async event => {
     event.preventDefault();
+    const termsVersion = target?.termsVersion || ADMISSION_TERMS_VERSION;
+    if (!termsAccepted) {
+      setSubmitError(new Error('Please accept the Terms & Conditions before submitting.'));
+      return;
+    }
+    if (publicRegistration) {
+      if (password.length < 6) {
+        setSubmitError(new Error('Please choose a password with at least 6 characters.'));
+        return;
+      }
+      if (password !== confirmPassword) {
+        setSubmitError(new Error('Password and Confirm password do not match.'));
+        return;
+      }
+    }
     setBusy(true);
     setSubmitError('');
     try {
+      if (publicRegistration) {
+        if (!onPublicRegister) {
+          throw new Error('Public admission registration is unavailable. Please contact the studio.');
+        }
+        const result = await onPublicRegister({
+          code: admissionCode,
+          branchId: preferredBranchId,
+          values: {...form, termsAccepted: true, termsVersion},
+          password,
+        });
+        const saved = result?.admission || null;
+        if (saved) {
+          setAdmission(saved);
+          setForm(emptyAdmissionForm(profile, saved));
+        }
+        setRegistrationResult(result || {});
+        setSubmitted(true);
+        setPassword('');
+        setConfirmPassword('');
+        notify?.(result?.needsEmailConfirmation
+          ? 'Account created and admission submitted. Please confirm your email.'
+          : 'Registration submitted. The studio will review and confirm it.');
+        return;
+      }
       const saved = await erp.client.submitAdmission({
         code: admissionCode, branchId: preferredBranchId, ...form,
+        termsAccepted: true, termsVersion,
       });
       setAdmission(saved);
       setForm(emptyAdmissionForm(profile, saved));
@@ -1220,13 +1296,29 @@ export function PublicAdmissionPanel({erp, admissionCode, admissionBranchId = ''
       <button className="primary-button" onClick={erp.load}>Retry</button>
     </section>;
   }
+  if (publicRegistration && submitted && registrationResult) {
+    const needsEmailConfirmation = Boolean(registrationResult.needsEmailConfirmation);
+    return <section className="erp-panel admission-panel">
+      <span className="erp-badge amber">Admission pending</span>
+      <h2>{needsEmailConfirmation ? 'Check your email to activate your account' : 'Registration submitted'}</h2>
+      <p>
+        Your student account has been created and your admission request is now pending with the studio.
+        {needsEmailConfirmation
+          ? ` Please open the confirmation link sent to ${form.email}. The studio can review your request now; after approval and batch/plan assignment, sign in with this same email and password to open your Student portal.`
+          : ' The studio will approve/reject the request, assign your batch and plan, and then you can sign in with this email and password.'}
+      </p>
+      {onShowSignIn && <button className="secondary-button" type="button" onClick={onShowSignIn}>Go to sign in</button>}
+    </section>;
+  }
 
   return <section className="erp-panel admission-panel">
     <div className="erp-panel-head"><div>
-      <h2>Your details</h2>
-      <p>{target?.organizationName ? `Apply to ${target.organizationName}. ` : ''}Complete this form for studio review. {preferredBranchId
-        ? 'This branch link pre-selects your preferred branch; a manager confirms the final branch and joining date.'
-        : 'A manager selects your branch and joining date when confirming the admission.'}</p>
+      <h2>{publicRegistration ? 'Student registration & admission' : 'Your details'}</h2>
+      <p>{target?.organizationName ? `Apply to ${target.organizationName}. ` : ''}{publicRegistration
+        ? 'Complete this one registration form. It creates your student account and sends your admission request for approval. '
+        : 'Complete this form for studio review. '}{preferredBranchId
+        ? 'This branch link pre-selects your preferred branch; the studio confirms the final branch, batch and plan during approval.'
+        : 'The studio selects your branch, batch and plan when approving the admission.'}</p>
     </div>{admission?.status && <span className={`erp-badge ${admission.status === 'pending' ? 'amber' : 'red'}`}>{admission.status}</span>}</div>
 
     {preferredBranchId && <div className="erp-banner blue" role="status">
@@ -1258,9 +1350,20 @@ export function PublicAdmissionPanel({erp, admissionCode, admissionBranchId = ''
         <input required maxLength={160} value={form.subject} onChange={e => setField('subject', e.target.value)} placeholder="Ex. New Admission in Personal yoga session"/>
       </label>
       <label className="erp-field full">Your Email *
-        <input required readOnly type="email" autoComplete="email" value={form.email}/>
-        <small>This is your confirmed sign-in email. The studio will grant Student portal access to this same account.</small>
+        <input required readOnly={!publicRegistration} type="email" autoComplete="email" value={form.email} onChange={e => setField('email', e.target.value)} placeholder="you@example.com"/>
+        <small>{publicRegistration
+          ? 'This email will become your student sign-in after the studio approves your admission and assigns your batch/plan.'
+          : 'This is your confirmed sign-in email. The studio will grant Student portal access to this same account.'}</small>
       </label>
+      {publicRegistration && <>
+        <label className="erp-field">Create password *
+          <input required type="password" autoComplete="new-password" minLength={6} value={password} onChange={e => setPassword(e.target.value)} placeholder="Create a password"/>
+          <small>Use at least 6 characters. This creates your student account; a manager does not need to assign your portal separately.</small>
+        </label>
+        <label className="erp-field">Confirm password *
+          <input required type="password" autoComplete="new-password" minLength={6} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Enter the password again"/>
+        </label>
+      </>}
       <label className="erp-field full">Address *
         <textarea required rows={3} maxLength={500} autoComplete="street-address" value={form.address} onChange={e => setField('address', e.target.value)}/>
       </label>
@@ -1284,8 +1387,20 @@ export function PublicAdmissionPanel({erp, admissionCode, admissionBranchId = ''
       <label className="erp-field full">Reasons to join yoga *
         <textarea required rows={4} maxLength={2000} value={form.reasonToJoin} onChange={e => setField('reasonToJoin', e.target.value)}/>
       </label>
+      <label className="erp-toggle-row full admission-terms-row">
+        <input type="checkbox" required checked={termsAccepted} onChange={e => setTermsAccepted(e.target.checked)}/>
+        <span>
+          I agree to the{' '}
+          <a href={admissionTermsUrl()} target="_blank" rel="noreferrer">Terms &amp; Conditions</a>
+          {' '}and confirm that the details above are correct.
+        </span>
+      </label>
       <div className="erp-form-actions">
-        <button className="primary-button" disabled={busy}>{busy ? 'Submitting…' : admission?.status === 'pending' ? 'Update admission' : 'Submit admission'}</button>
+        {publicRegistration && onShowSignIn && <button type="button" className="secondary-button" onClick={onShowSignIn}>Already have an account? Sign in</button>}
+        <button className="primary-button" disabled={busy}>{busy
+          ? (publicRegistration ? 'Creating account & submitting…' : 'Submitting…')
+          : publicRegistration ? 'Create account & submit admission'
+            : admission?.status === 'pending' ? 'Update admission' : 'Submit admission'}</button>
       </div>
     </form>
   </section>;
@@ -1361,7 +1476,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v11) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v12) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
@@ -1410,7 +1525,7 @@ function AdmissionQrDialog({item, onClose}) {
     return () => { active = false; };
   }, [item.url]);
 
-  return <Dialog title={`${item.label} QR code`} sub="Print this QR code or show it at the studio. It opens the account-first admission form; it does not grant access by itself." onClose={onClose}>
+  return <Dialog title={`${item.label} QR code`} sub="Print this QR code or show it at the studio. It opens the student registration & admission form; it does not grant access by itself." onClose={onClose}>
     <div className="admission-qr-box">
       {qrUrl
         ? <img src={qrUrl} alt={`QR code for ${item.label}`}/>
@@ -2115,10 +2230,10 @@ function EnrollmentWizardDialog({
           ? <p className="enrollment-fields-note"><strong>Loading plans…</strong> Wait for the studio snapshot to finish loading; the plan list will appear automatically if active plans exist.</p>
           : <ErrorNotice
             error={instructorPlanSetupOutdated ? {
-              title: 'Instructor plans need the SQL v11 update',
+              title: 'Instructor plans need the SQL update',
               message: 'The connected Supabase setup is older than SQL v11. In the older snapshot, Owners could receive the plan list but Instructors received no plans, so Step 3 is empty for your Instructor account even though the Owner can see the plan.',
-              solution: 'Ask the studio Owner to run the complete current supabase/erp_setup.sql (SQL v11) once in Supabase → SQL Editor. After it finishes, stay online and click “Reload plans” here or Sync now; active plans will then be included in the Instructor snapshot. Instructors still cannot create/edit plan templates.',
-              technical: `Connected setupVersion: ${setupVersion || 'not reported by this older database'}; required: 11. Active/non-archived plans loaded for Instructor: 0`,
+              solution: 'Ask the studio Owner to run the complete current supabase/erp_setup.sql (SQL v12) once in Supabase → SQL Editor. After it finishes, stay online and click “Reload plans” here or Sync now; active plans will then be included in the Instructor snapshot. Instructors still cannot create/edit plan templates.',
+              technical: `Connected setupVersion: ${setupVersion || 'not reported by this older database'}; required for Instructor plans: 11 or later (current file: 12). Active/non-archived plans loaded for Instructor: 0`,
               severity: 'error',
             } : {
               title: 'No active plan is available yet',
@@ -2228,7 +2343,7 @@ function EnrollmentWizardDialog({
   </>;
 }
 
-function AdmissionReviewDialog({admission, branches, erp, online, notify, onClose, onReviewed, onConfirmed}) {
+function AdmissionReviewDialog({admission, branches, erp, online, notify, onClose, onReviewed, onConfirmed, instructorMode = false}) {
   const [branchId, setBranchId] = useState(admission.branchId || branches[0]?.id || '');
   const [joiningDate, setJoiningDate] = useState(toISODate());
   const [reviewNote, setReviewNote] = useState('');
@@ -2236,6 +2351,8 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const hasDuplicate = Boolean(admission.possibleDuplicateStudentId);
+  const sensitiveHidden = Boolean(instructorMode || admission.sensitiveDetailsHidden);
+  const emailUnconfirmed = admission.applicantEmailConfirmed === false;
   const preferredBranch = branches.find(branch => branch.id === admission.branchId) || null;
 
   const review = async action => {
@@ -2274,9 +2391,11 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
     }
   };
 
-  return <Dialog title="Review admission" sub="Confirming creates the student and grants portal access to the applicant’s signed-in account. You can continue directly to batch, plan and payment." onClose={onClose} className="admission-review-dialog">
+  return <Dialog title="Review admission" sub="Confirming creates the student and grants portal access to the applicant’s registered account. You can continue directly to batch, plan and payment." onClose={onClose} className="admission-review-dialog">
     {error && <ErrorNotice error={error} context="Review admission"/>}
     {!online && <div className="erp-banner amber" role="status"><WifiOff size={18}/><span>Admissions can be reviewed only while online.</span></div>}
+    {emailUnconfirmed && <div className="erp-banner amber" role="status"><Mail size={18}/><span><b>Email confirmation pending.</b> You can review or reject now, but Confirm stays disabled until the applicant opens the Supabase email confirmation link for this registered account.</span></div>}
+    {sensitiveHidden && <div className="erp-banner blue" role="status"><BadgeCheck size={18}/><span>Instructor view: address, date of birth, medical/physical issue and reason-to-join details are hidden. Confirming still saves the full student record server-side for managers and the student.</span></div>}
     {hasDuplicate && <div className="erp-banner amber" role="alert"><AlertCircle size={18}/><span>
       <b>Possible duplicate:</b> student “{admission.possibleDuplicateStudentName}” already uses this email. Link that existing student through Portal access or resolve the duplicate before confirming; this protects against a second student record for the same account.
     </span></div>}
@@ -2284,18 +2403,20 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
     <dl className="erp-detail-list admission-details">
       <div><dt>First Name</dt><dd>{admission.firstName}</dd></div>
       <div><dt>Last Name</dt><dd>{admission.lastName}</dd></div>
-      <div><dt>Date Of Birth</dt><dd>{formatDate(admission.dob)}</dd></div>
+      <div><dt>Date Of Birth</dt><dd>{sensitiveHidden ? 'Hidden for Instructor' : formatDate(admission.dob)}</dd></div>
       <div><dt>Phone Number</dt><dd>{admission.phone || '—'}</dd></div>
       <div className="full"><dt>Subject</dt><dd>{admission.subject || '—'}</dd></div>
       <div className="full"><dt>Your Email</dt><dd>{admission.email || '—'}</dd></div>
-      <div className="full"><dt>Address</dt><dd>{admission.address || '—'}</dd></div>
-      <div><dt>Pin Code</dt><dd>{admission.pinCode || '—'}</dd></div>
+      <div><dt>Account email</dt><dd>{admission.applicantEmailConfirmed === false ? 'Confirmation pending' : admission.applicantEmailConfirmed ? 'Confirmed' : 'Registered account'}</dd></div>
+      <div><dt>Terms accepted</dt><dd>{admission.termsAccepted ? `Yes${admission.termsVersion ? ` · ${admission.termsVersion}` : ''}` : 'Not recorded'}</dd></div>
+      <div className="full"><dt>Address</dt><dd>{sensitiveHidden ? 'Hidden for Instructor' : admission.address || '—'}</dd></div>
+      <div><dt>Pin Code</dt><dd>{sensitiveHidden ? 'Hidden for Instructor' : admission.pinCode || '—'}</dd></div>
       <div><dt>Reference by</dt><dd>{admission.referredBy || '—'}</dd></div>
       <div><dt>Experience in yoga</dt><dd>{yogaExperienceLabel(admission.yogaExperience)}</dd></div>
       <div><dt>Preferred branch</dt><dd>{preferredBranch?.name || 'Studio link / not selected'}</dd></div>
       <div><dt>Status</dt><dd>{admission.status}</dd></div>
-      <div className="full"><dt>Medical / Physical issue</dt><dd>{admission.medicalPhysicalIssue || '—'}</dd></div>
-      <div className="full"><dt>Reasons to join yoga</dt><dd>{admission.reasonToJoin || '—'}</dd></div>
+      <div className="full"><dt>Medical / Physical issue</dt><dd>{sensitiveHidden ? 'Hidden for Instructor' : admission.medicalPhysicalIssue || '—'}</dd></div>
+      <div className="full"><dt>Reasons to join yoga</dt><dd>{sensitiveHidden ? 'Hidden for Instructor' : admission.reasonToJoin || '—'}</dd></div>
     </dl>
     <form className="erp-form" onSubmit={event => { event.preventDefault(); review('confirm'); }}>
       <label className="erp-field">Admission branch
@@ -2319,7 +2440,7 @@ function AdmissionReviewDialog({admission, branches, erp, online, notify, onClos
           {busy === 'reject' ? 'Rejecting…' : 'Reject admission'}
         </button>
         <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
-        <button className="primary-button" disabled={!online || Boolean(busy) || hasDuplicate}>
+        <button className="primary-button" disabled={!online || Boolean(busy) || hasDuplicate || emailUnconfirmed}>
           {busy === 'confirm' ? 'Confirming…' : continueEnrollment ? 'Confirm & continue enrolment' : 'Confirm admission & grant portal'}
         </button>
       </div>
@@ -2367,7 +2488,7 @@ function AdmissionLinkCards({linkInfo, branches = [], notify, onQr, emptyText = 
   const shareLink = async item => {
     const shareData = {
       title: 'Yoga Studio admission',
-      text: `Join ${linkInfo?.organizationName || 'our yoga studio'} — create your account and complete the admission form:`,
+      text: `Join ${linkInfo?.organizationName || 'our yoga studio'} — complete the student registration & admission form:`,
       url: item.url,
     };
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
@@ -2388,7 +2509,7 @@ function AdmissionLinkCards({linkInfo, branches = [], notify, onQr, emptyText = 
       <footer>
         <button type="button" className="secondary-button" onClick={() => copyLink(item)}><Copy size={14}/> Copy</button>
         <button type="button" className="secondary-button" onClick={() => shareLink(item)}><Share2 size={14}/> Share</button>
-        <a className="secondary-button" href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Join ${linkInfo?.organizationName || 'our yoga studio'} — create your account and complete the admission form: ${item.url}`)}`} target="_blank" rel="noreferrer"><MessageCircle size={14}/> WhatsApp</a>
+        <a className="secondary-button" href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Join ${linkInfo?.organizationName || 'our yoga studio'} — complete the student registration & admission form: ${item.url}`)}`} target="_blank" rel="noreferrer"><MessageCircle size={14}/> WhatsApp</a>
         <button type="button" className="secondary-button" onClick={() => onQr?.(item)}><QrCode size={14}/> QR</button>
         <a className="erp-link-btn" href={item.url} target="_blank" rel="noreferrer"><ExternalLink size={13}/> Open</a>
       </footer>
@@ -2397,7 +2518,7 @@ function AdmissionLinkCards({linkInfo, branches = [], notify, onQr, emptyText = 
 }
 
 function AdmissionsPanel(props) {
-  const {erp, ctx, branches, notify} = props;
+  const {erp, ctx, branches, notify, instructorMode = false} = props;
   const {data} = erp;
   const [status, setStatus] = useState('pending');
   const [admissions, setAdmissions] = useState([]);
@@ -2463,13 +2584,17 @@ function AdmissionsPanel(props) {
   return <section className="erp-panel admissions-manager-panel">
     <div className="erp-panel-head"><div>
       <h2>Admission requests</h2>
-      <p>Share a studio or branch admission link. The applicant first creates and confirms an account with “Join an existing studio,” then submits this form. Confirming creates the student, grants portal access and can continue directly to batch, plan and payment.</p>
+      <p>{instructorMode
+        ? 'Review public registration requests from the studio link and your teaching branches. Approve only into one of your teaching branches, then continue to your batch and plan. Sensitive medical/address details stay hidden in this Instructor view.'
+        : 'Share a studio or branch admission link. The applicant completes one registration form with student details, password and terms; confirming creates the student, grants portal access and can continue directly to batch, plan and payment.'}</p>
     </div><button className="secondary-button" onClick={load} disabled={loading}><RefreshCw size={16}/> Refresh</button></div>
 
-    <AdmissionLinkCards
-      linkInfo={linkInfo} branches={branches} notify={notify} onQr={setQrItem}
-      emptyText={online ? 'Loading admission links…' : 'Reconnect to load the current public admission links.'}/>
-    <p className="admission-link-note">To test a link as a new applicant, open it in a private/incognito window so your manager session does not hide the admission form.</p>
+    {!instructorMode && <>
+      <AdmissionLinkCards
+        linkInfo={linkInfo} branches={branches} notify={notify} onQr={setQrItem}
+        emptyText={online ? 'Loading admission links…' : 'Reconnect to load the current public admission links.'}/>
+      <p className="admission-link-note">To test a link as a new applicant, open it in a private/incognito window so your manager session does not hide the registration form.</p>
+    </>}
 
     <div className="erp-grid admission-summary" aria-label="Admission request summary">
       <div className="erp-kpi"><small>Requests shown</small><strong>{visibleAdmissions.length}</strong><p>{admissions.length} loaded for this status</p></div>
@@ -2507,7 +2632,7 @@ function AdmissionsPanel(props) {
 
     {error && <ErrorNotice error={error} context="Load admission requests" onRetry={load}/>}
     {loading ? <p>Loading admission requests…</p> : admissions.length === 0
-      ? <Empty icon={Users} title="No admission requests" text="New public admission submissions will appear here for manager review."/>
+      ? <Empty icon={Users} title="No admission requests" text="New public admission submissions will appear here for staff review."/>
       : visibleAdmissions.length === 0
         ? <Empty icon={Search} title="No requests match" text="Try another applicant, status or branch/link filter." action={<button className="secondary-button" onClick={() => { setQuery(''); setBranchFilter('all'); }}>Clear filters</button>}/>
         : <div className="admission-card-grid">
@@ -2526,6 +2651,8 @@ function AdmissionsPanel(props) {
                 {admission.status === 'pending' && waitingDays !== null && <span className={`erp-badge ${waitingDays >= 7 ? 'red' : waitingDays >= 3 ? 'amber' : 'lavender'}`}>{waitingDays === 0 ? 'Submitted today' : `Waiting ${waitingDays} day${waitingDays === 1 ? '' : 's'}`}</span>}
                 <span className="erp-badge grey"><MapPin size={11}/> {branchLabel}</span>
                 {admission.possibleDuplicateStudentId && <span className="erp-badge amber">Possible duplicate</span>}
+                {admission.applicantEmailConfirmed === false && <span className="erp-badge amber">Email confirmation pending</span>}
+                {admission.termsAccepted && <span className="erp-badge grey">Terms accepted</span>}
                 {admission.studentId && <span className="erp-badge green">Student created</span>}
               </div>
               <dl>
@@ -2549,7 +2676,7 @@ function AdmissionsPanel(props) {
         </div>}
 
     {reviewing && <AdmissionReviewDialog
-      admission={reviewing} branches={branches} erp={erp} online={online} notify={notify}
+      admission={reviewing} branches={branches} erp={erp} online={online} notify={notify} instructorMode={instructorMode}
       onClose={() => setReviewing(null)} onReviewed={load}
       onConfirmed={seed => { setEnrollmentSeed(seed); load(); }}/>}
     {qrItem && <AdmissionQrDialog item={qrItem} onClose={() => setQrItem(null)}/>}
@@ -2638,7 +2765,7 @@ export function InstructorStudentsPage(props) {
 
     <div className="erp-banner blue" role="note">
       <BadgeCheck size={18}/>
-      <span>This Students view is limited to your active batches. You can create a basic walk-in student or enroll an existing same-branch student into your batch. Full student profiles, medical details, admission requests and portal access remain manager-only.</span>
+      <span>This Students view is limited to your active batches and scoped admission requests. You can create a basic walk-in student, enroll an existing same-branch student into your batch, and approve/reject public admission requests only into your teaching branches/batches. Full student profiles and medical details stay hidden.</span>
     </div>
 
     <div className="erp-grid erp-workspace-summary" aria-label="My student summary">
@@ -2650,7 +2777,7 @@ export function InstructorStudentsPage(props) {
 
     <section className="erp-panel">
       <div className="erp-panel-head">
-        <div><h2>New enrollment &amp; public admission URL</h2><p>Use guided enrollment for a walk-in or an existing student in your batch. Or share a public link and a manager will review the submitted admission.</p></div>
+        <div><h2>New enrollment &amp; public admission URL</h2><p>Use guided enrollment for a walk-in or an existing student in your batch. Or share a public registration link; submitted requests appear below for your scoped approval or rejection.</p></div>
         <div className="erp-actions">
           <button className="primary-button" onClick={openNewEnrollment} disabled={!ctx.instructorId || ownBatches.length === 0}><Sparkles size={16}/> New enrollment</button>
           {props.mode === 'supabase' && <button className="secondary-button" onClick={loadLinks} disabled={linkLoading || !online}><RefreshCw size={15}/> Refresh links</button>}
@@ -2663,11 +2790,13 @@ export function InstructorStudentsPage(props) {
         <AdmissionLinkCards
           linkInfo={linkInfo} branches={teachingBranches} notify={notify} onQr={setQrItem}
           emptyText={!online ? 'Reconnect to load the current public admission links.' : linkLoading ? 'Loading public admission links…' : 'Public admission links are not available for this account.'}/>
-        <p className="admission-link-note">Share the studio link anywhere, or use a branch link so the application arrives with your teaching branch pre-selected. The link does not show you the submitted request; an Owner, Co-owner or branch Admin reviews and confirms it.</p>
+        <p className="admission-link-note">Share the studio link anywhere, or use a branch link so the application arrives with your teaching branch pre-selected. Requests from the studio link and your teaching branches are listed below; approve only into a branch/batch you teach.</p>
       </>}
       {!ctx.instructorId && <p className="enrollment-warning">Choose your linked instructor record above before starting a new enrollment.</p>}
       {ctx.instructorId && ownBatches.length === 0 && <p className="enrollment-warning">No active batch is assigned to you in the selected branch, so new enrollment is unavailable. Ask a manager to assign you to a batch.</p>}
     </section>
+
+    {props.mode === 'supabase' && <AdmissionsPanel {...props} branches={teachingBranches} instructorMode/>}
 
     <section className="erp-panel">
       <div className="erp-panel-head">
@@ -2919,7 +3048,7 @@ function InstructorAccessDialog({instructor, branches, erp, ctx, onClose, onSave
       : `Instructor access removed for ${instructor.fullName}.`,
   );
 
-  return <Dialog title="Instructor sign-in access" sub={`${instructor.fullName} will see a Students view limited to students actively enrolled in their assigned batches, plus their schedule, rosters, attendance, new own-batch enrollment, public admission-link sharing, and dues/receipts for those students. Admission requests, full student profiles, subscription management, unrelated finance and payment setup stay hidden.`} onClose={onClose}>
+  return <Dialog title="Instructor sign-in access" sub={`${instructor.fullName} will see a Students view limited to students actively enrolled in their assigned batches, plus their schedule, rosters, attendance, new own-batch enrollment, public admission-link sharing, scoped admission requests for studio/teaching-branch applicants, and dues/receipts for those students. Full student profiles, medical details, subscription management, unrelated finance and payment setup stay hidden.`} onClose={onClose}>
     <div style={{display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16}}>
       <span className={`erp-badge ${isActive ? 'green' : instructor.accessStatus === 'suspended' ? 'amber' : 'grey'}`}>
         {isActive ? 'Sign-in active' : instructor.accessStatus === 'suspended' ? 'Sign-in suspended' : 'No sign-in access'}
@@ -3063,7 +3192,7 @@ export function RoleAccessPage(props) {
     ['Owner', 'All branches', 'Everything, including Co-owner access and organization ownership safeguards', 'Primary Owner cannot be removed here'],
     ['Co-owner', 'All branches', 'All operations, payment setup, and Admin/Instructor/Student access', 'Cannot add/remove Owner or Co-owner'],
     ['Admin', 'Selected branches', 'Branch operations and Instructor/Student access in assigned branches', 'Cannot manage Admins, Co-owners, plans, payment setup or other branches'],
-    ['Instructor', 'Assigned batches', 'Students view for own enrolled students; own schedule/rosters/attendance; new basic walk-in enrolment; public admission-link sharing; verified own-batch payment collection', 'No admission requests/details, full student editing, medical details, subscription lifecycle edits, payment voids, unrelated finance or access administration'],
+    ['Instructor', 'Assigned batches', 'Students view for own enrolled students; own schedule/rosters/attendance; new basic walk-in enrolment; public admission-link sharing; scoped admission approval into teaching branches/batches; verified own-batch payment collection', 'No unscoped admission details, full student editing, medical details, subscription lifecycle edits, payment voids, unrelated finance or access administration'],
     ['Student', 'Own records', 'View own batches, attendance, membership, dues, payments and PDFs', 'No ERP writes'],
   ];
 

@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.11.0 — 2026-11-01
+
+### Changed — Public admission is now student registration
+
+- **One-form public registration & admission:** the studio-wide and
+  branch-specific public admission links now open a registration/admission
+  form instead of asking the applicant to sign in first. The form keeps the
+  structured admission fields and adds **Password** / **Confirm password**,
+  so the account created by the form becomes the student's sign-in account;
+  Owner/Admin no longer need a separate portal-assignment step for an
+  approved public applicant. A branch link still arrives with that branch
+  pre-selected, while final branch/batch remain staff-controlled.
+- **Terms & Conditions:** the form requires a Terms & Conditions checkbox and
+  links to a dedicated Terms page. SQL stores the acceptance flag, timestamp
+  and terms version; submissions without acceptance are rejected.
+- **Instructor-and-above admission review:** submitted requests are available
+  to Owner/Co-owner, assigned-branch Admins and linked Instructors. An
+  Instructor sees studio-wide requests and requests for active branches
+  where they teach active batches, and may confirm only into a teaching
+  branch before continuing to their batch and a plan/pass. Approval is
+  blocked until the applicant confirms their email. Instructor review is
+  redacted server-side: DOB, Address, Pin Code, Medical / Physical issue and
+  Reasons to join yoga are hidden from the Instructor admission response,
+  even though the full submitted values are preserved for managers and the
+  student. Direct Student-portal grant RPC access remains manager-only; the
+  reviewed-admission confirmation creates the portal link inside the same
+  authorized transaction.
+
+### Database migration — SQL v12 (cumulative)
+
+- Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
+  Editor. SQL v12 adds admission terms columns, `setupVersion: 12`, a narrow
+  public admission target RPC, guarded anonymous submit for a fresh
+  metadata-bound Supabase Auth signup on that exact admission link, scoped
+  Instructor admission list/review helpers and explicit grants/revokes.
+  Passwords are handled only by Supabase Auth and are never sent to ERP SQL.
+  Existing pending admissions keep `terms_accepted=false` until the applicant
+  updates/resubmits with acceptance.
+
+### Validation
+
+- Production build passes. Browser coverage now includes the signed-out
+  one-form public registration with Terms, admission-link precedence over a
+  saved local session, manager confirmation, Instructor-scoped admission
+  review with hidden sensitive details and the review → enrolment handoff.
+  The SQL v12 PGlite role-access harness passes **112/112**, and the
+  SQL v11 → v12 upgrade harness passes **13/13**. Live five-role Supabase UAT
+  remains required after running SQL v12, including a real signed-out public
+  registration, email confirmation and Instructor/manager approval.
+
 ## 1.10.0 — 2026-11-01
 
 ### Added — Admissions, guided enrolment and Instructor students

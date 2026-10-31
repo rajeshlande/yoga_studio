@@ -148,6 +148,9 @@
 .admission-radio-row{display:flex;flex-wrap:wrap;gap:8px}
 .admission-radio-row label{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:10px 13px;border:1px solid #e7e0ed;border-radius:999px;background:#fdfcfe;color:#514559;font-size:12px;font-weight:700;cursor:pointer}
 .admission-radio-row input{width:18px;height:18px;min-height:18px;accent-color:#8664ba;flex-shrink:0}
+.admission-terms-row{align-items:flex-start;line-height:1.6}
+.admission-terms-row a{color:#7551aa;font-weight:800;text-decoration:underline;text-underline-offset:2px}
+:root[data-theme="dark"] .admission-terms-row a{color:#c9b1e8}
 .admission-link-row{display:grid;grid-template-columns:minmax(260px,1fr) auto minmax(180px,240px);gap:12px;align-items:end;margin:4px 0 16px}
 .erp-detail-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px}
 .erp-detail-list>div{border:1px solid #f0e9f5;background:#fdfcfe;border-radius:12px;padding:12px;min-width:0}

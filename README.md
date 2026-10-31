@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
 INR payments, payment setup and one-page A4 invoice PDFs.
 
-> **Current source release:** 1.10.0 · **Database setup:** SQL v11 in
+> **Current source release:** 1.11.0 · **Database setup:** SQL v12 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -140,15 +140,21 @@ into the application.
   Instructor Portal grants/removals are limited to the Owner, a Co-owner or
   an Admin acting within their assigned branches. Manual membership SQL is
   an emergency-repair fallback only.
-- **Public Student admissions:** a manager copies the studio-specific link
-  from **Students → Admission requests**. The applicant creates/confirms an
-  account with **Join an existing studio**, signs in and submits the form.
-  An Owner/Co-owner, or a branch Admin for an assigned branch, selects the
-  branch and joining date at review; confirmation atomically creates the
-  Student and grants Student portal access to the submitting account. The
-  **Medical / Physical issue** field is limited to Owner, Co-owner, the
-  student's branch Admin and the student; it is redacted from Instructor
-  snapshots.
+- **Public Student admissions:** a manager or Instructor shares the
+  studio-wide or branch-specific link from **Students → Admission requests**
+  / **Students → Share public admission URL**. The link opens one
+  **Student registration & admission** form—not a sign-in screen—where the
+  applicant enters the admission details, a password for their future
+  Student portal and accepts the linked **Terms & Conditions**. The request
+  is then pending for **Instructor and above** within server-enforced scope:
+  Owner/Co-owner across branches, branch Admin in assigned branches, and
+  Instructor for studio-wide or teaching-branch requests, confirming only
+  into a teaching branch. Approval requires the applicant email to be
+  confirmed, creates the Student, grants Student portal access to the
+  form-created account and continues to batch assignment and plan selection.
+  **Medical / Physical issue** remains limited to Owner, Co-owner, the
+  student's branch Admin and the student; Instructor admission review hides
+  medical/address/DOB/reason details server-side.
 
 ### Experience and platform
 
@@ -361,7 +367,7 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v10 without deleting business rows.
+   earlier ERP installs to SQL v12 without deleting business rows.
 3. Configure the production Site URL for
    `https://rajeshlande.github.io/yoga_studio/` and add the scoped redirect
    pattern `https://rajeshlande.github.io/yoga_studio/**` so email links can
@@ -375,10 +381,11 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    exact sign-in email in **Access** for Co-owner/Admin/Instructor roles,
    selecting branches for Admin/Instructor access, or in
    **Students → Portal access** for an existing Student. For a new Student,
-   a manager may instead share **Students → Admission requests → Public
-   admission link**; after account confirmation/sign-in the applicant
-   submits the form, and the reviewing manager chooses branch and joining
-   date. If a joining user signs in
+   a manager or Instructor may instead share **Students → Admission requests
+   → Public admission link**; the applicant completes one registration +
+   admission form with password and terms acceptance, confirms their email,
+   and an Instructor-or-above reviewer in scope approves/rejects it and
+   continues to batch + plan. If a joining user signs in
    before the grant, they see a dedicated **Waiting for studio access**
    screen with no ERP navigation, studio data or organization-creation
    controls. Access changes are online-only and never enter the offline
@@ -465,8 +472,9 @@ The suite includes:
   creation path; the student's personal view-only dashboard/assigned-batch
   portal without sync controls or **Studio ERP data** settings;
   Owner/Admin-only visibility of that settings panel; cleared studio
-  display after online revocation; the account-first public admission
-  submission plus manager confirmation into a Student + portal grant; and a
+  display after online revocation; the one-form public registration +
+  admission submission with Terms, manager/Instructor review, Student +
+  portal grant and enrolment continuation; and a
   mocked-Supabase subscription pause → resume → current-price renewal →
   history → cancellation journey;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
@@ -496,11 +504,13 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v11 in the real Supabase project, test real Owner, Co-owner,
+running SQL v12 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
-confirmed email; submit and confirm a public admission from a fresh
-account and verify branch scope, Student portal access and Instructor
-student-field redaction; verify a Student cannot see another student, an
+confirmed email; open a public admission link signed out and verify it shows
+the registration form (not sign-in), submit it with password + Terms,
+confirm the email, approve it as an in-scope Instructor/manager and verify
+branch scope, batch/plan continuation, Student portal access with the same
+email/password and Instructor admission-field redaction; verify a Student cannot see another student, an
 unrelated Plan or an assigned instructor's contact/profile fields; edit an
 Instructor's rich profile as each manager
 type; as that Instructor add/remove a same-branch active student in an
@@ -531,16 +541,16 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.10.0:
+Recommended go-live order for 1.11.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
 2. Ensure the complete current `supabase/erp_setup.sql` has installed
-   **SQL v11**. Version 1.10.0 requires SQL v11 for branch-aware admissions,
-   Instructor Students, Instructor active-plan visibility and the
-   `setupVersion: 11` context check. If upgrading from SQL v10 or earlier,
-   run the complete SQL v11 file instead of stopping at an older version; it
-   is cumulative and preserves existing business rows.
-3. Deploy the 1.10.0 web build with the two public Actions secrets.
+   **SQL v12**. Version 1.11.0 requires SQL v12 for the public registration
+   admission target/submit flow, terms acceptance, scoped Instructor
+   admission review and the `setupVersion: 12` context response. If upgrading
+   from SQL v11 or earlier, run the complete SQL v12 file instead of stopping
+   at an older version; it is cumulative and preserves existing business rows.
+3. Deploy the 1.11.0 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.

@@ -545,6 +545,19 @@ test('signed-in instructor is locked to their linked instructor record', async (
     amountPaise: 50000, method: 'upi', paidOn: '2026-10-02', note: 'First instalment',
     receiptNo: 'YS-2026-0009', status: 'recorded', createdAt: '2026-10-02T00:00:00Z', syncVersion: 1,
   });
+  const ADMISSION_STUDENT = 'abababab-abab-4aba-8aba-abababababab';
+  const instructorAdmission = {
+    id: ADMISSION, organizationId: ORG, applicantUserId: '99999999-9999-4999-8999-999999999999',
+    firstName: 'Riya', lastName: 'Patel', fullName: 'Riya Patel', dob: null,
+    phone: '9876543210', subject: 'New admission', email: 'riya@example.test',
+    address: '', pinCode: '', referredBy: '', yogaExperience: 'no_experience',
+    medicalPhysicalIssue: 'Secret issue must stay hidden', reasonToJoin: 'Hidden reason',
+    termsAccepted: true, termsVersion: '2026-11-01', applicantEmailConfirmed: true,
+    sensitiveDetailsHidden: true, status: 'pending', branchId: BRANCH, branchName: 'Panvel',
+    studentId: null, submittedAt: '2026-10-30T00:00:00Z', updatedAt: '2026-10-30T00:00:00Z',
+    reviewedAt: null, reviewNote: '', possibleDuplicateStudentId: null, possibleDuplicateStudentName: '',
+  };
+  const admissionReviewCalls = [];
   const syncRequests = [];
 
   await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
@@ -555,6 +568,30 @@ test('signed-in instructor is locked to their linked instructor record', async (
     if (name === 'erp_get_snapshot') return reply(structuredClone(server));
     if (name === 'erp_get_admission_link_info') {
       return reply({organizationId: ORG, organizationName: 'Yoga Studio', admissionCode: 'instructor-share-code'});
+    }
+    if (name === 'erp_list_admissions') {
+      const admissions = body.p_status === 'all' || instructorAdmission.status === body.p_status
+        ? [structuredClone(instructorAdmission)] : [];
+      return reply({admissions});
+    }
+    if (name === 'erp_review_admission') {
+      admissionReviewCalls.push(structuredClone(body));
+      instructorAdmission.status = body.p_action === 'confirm' ? 'confirmed' : 'rejected';
+      instructorAdmission.branchId = body.p_branch_id || instructorAdmission.branchId;
+      instructorAdmission.studentId = body.p_action === 'confirm' ? ADMISSION_STUDENT : null;
+      instructorAdmission.reviewNote = body.p_review_note || '';
+      if (body.p_action === 'confirm' && !server.students.some(student => student.id === ADMISSION_STUDENT)) {
+        server.students.push({
+          id: ADMISSION_STUDENT, branchId: body.p_branch_id, firstName: instructorAdmission.firstName,
+          lastName: instructorAdmission.lastName, fullName: instructorAdmission.fullName, phone: '', email: '',
+          gender: '', dob: '', joiningDate: body.p_joining_date, status: 'active', notes: '',
+          createdAt: '2026-10-30T00:00:00Z', syncVersion: 1,
+        });
+      }
+      return reply({
+        admissionId: ADMISSION, status: instructorAdmission.status, studentId: instructorAdmission.studentId,
+        email: instructorAdmission.email, portalAccessStatus: body.p_action === 'confirm' ? 'active' : 'none',
+      });
     }
     if (name === 'erp_sync_push') {
       syncRequests.push(structuredClone(body));
@@ -607,11 +644,30 @@ test('signed-in instructor is locked to their linked instructor record', async (
   await expect(page.getByRole('heading', {name: 'My students'})).toBeVisible();
   await expect(page.getByRole('row', {name: /Asha Patil.*Morning Hatha/})).toBeVisible();
   await expect(page.getByText('Nikhil Sharma')).toHaveCount(0);
-  await expect(page.getByRole('heading', {name: 'Admission requests'})).toHaveCount(0);
+  await expect(page.getByRole('heading', {name: 'Admission requests'})).toBeVisible();
   await expect(page.getByRole('button', {name: /Portal access/})).toHaveCount(0);
   await expect(page.getByLabel('Studio admission link', {exact: true})).toHaveValue(/admission=instructor-share-code/);
   await expect(page.getByLabel('Studio admission link', {exact: true})).not.toHaveValue(/branch=/);
   await expect(page.getByLabel('Panvel admission link', {exact: true})).toHaveValue(new RegExp(`branch=${BRANCH}`));
+  const instructorAdmissionCard = page.getByLabel('Riya Patel admission request');
+  await expect(instructorAdmissionCard).toBeVisible();
+  await expect(instructorAdmissionCard.getByText('Terms accepted')).toBeVisible();
+  await instructorAdmissionCard.getByRole('button', {name: 'Review & enroll'}).click();
+  const instructorAdmissionReview = page.getByRole('dialog', {name: 'Review admission'});
+  await expect(instructorAdmissionReview.getByText(/Instructor view:/)).toBeVisible();
+  await expect(instructorAdmissionReview.getByText('Secret issue must stay hidden')).toHaveCount(0);
+  await expect(instructorAdmissionReview.getByText('Hidden for Instructor').first()).toBeVisible();
+  await expect(instructorAdmissionReview.getByLabel('Admission branch')).toHaveValue(BRANCH);
+  await instructorAdmissionReview.getByRole('button', {name: /Confirm & continue enrolment/}).click();
+  const admissionWizard = page.getByRole('dialog', {name: 'Complete enrolment'});
+  await expect(admissionWizard).toBeVisible();
+  await expect(admissionWizard.getByRole('heading', {name: 'Who is enrolling?'})).toBeVisible();
+  await expect(admissionWizard.getByText('Riya Patel').first()).toBeVisible();
+  expect(admissionReviewCalls).toEqual([expect.objectContaining({
+    p_admission_id: ADMISSION, p_action: 'confirm', p_branch_id: BRANCH,
+  })]);
+  await admissionWizard.getByRole('button', {name: 'Cancel', exact: true}).click();
+  await expect(admissionWizard).toBeHidden();
   await page.getByRole('button', {name: 'New enrollment'}).first().click();
   const studentsWizard = page.getByRole('dialog', {name: 'Enroll student'});
   await expect(studentsWizard).toBeVisible();
@@ -736,7 +792,7 @@ test('instructor creates a basic walk-in student, enrolls them in an own batch a
   await expect(wizard.getByLabel('Assign to batch')).toHaveValue(BATCH);
   await expect(wizard.getByText(/Students enrolled/)).toBeVisible();
   await wizard.getByRole('button', {name: /Continue to Plan/}).click();
-  await expect(wizard.getByText('Instructor plans need the SQL v11 update')).toBeVisible();
+  await expect(wizard.getByText('Instructor plans need the SQL update')).toBeVisible();
   await expect(wizard.getByText(/Owners could receive the plan list but Instructors received no plans/)).toBeVisible();
   await expect(wizard.getByRole('button', {name: 'Reload plans'})).toBeVisible();
   setupVersion = 11;
@@ -1080,10 +1136,11 @@ test('prospective owner explicitly chooses the studio creation path', async ({pa
   await expect(page.getByText('Supabase · Synced')).toBeVisible();
 });
 
-test('applicant submits the account-first public admission form', async ({page}) => {
+test('applicant submits the one-form public registration and admission form', async ({page}) => {
   page.on('pageerror', error => console.error('Browser page error:', error.message));
   const authCalls = await mockAuth(page);
   let admission = null;
+  const targetCalls = [];
   const getCalls = [];
   const submitCalls = [];
 
@@ -1098,6 +1155,17 @@ test('applicant submits the account-first public admission form', async ({page})
       return route.fulfill({
         status: 400, contentType: 'application/json',
         body: JSON.stringify({code: 'P0001', message: 'NO_ORGANIZATION: create or join an organization first'}),
+      });
+    }
+    if (name === 'erp_get_public_admission_target') {
+      targetCalls.push(structuredClone(body));
+      return reply({
+        target: {
+          organizationName: 'Yoga Studio', admissionCode: ADMISSION_CODE,
+          branchId: body.p_branch_id, branchName: body.p_branch_id ? 'Main Branch' : '',
+          preferredBranchId: body.p_branch_id, preferredBranchName: body.p_branch_id ? 'Main Branch' : '',
+        },
+        termsVersion: '2026-11-01',
       });
     }
     if (name === 'erp_get_my_admission') {
@@ -1129,44 +1197,41 @@ test('applicant submits the account-first public admission form', async ({page})
   });
 
   await page.goto(`/?admission=${ADMISSION_CODE}&branch=${BRANCH}`);
-  await expect(page.getByText('You are applying for studio admission.')).toBeVisible();
-  await expect(page.getByRole('radio', {name: /Create my own studio/})).toHaveCount(0);
-  await page.getByRole('button', {name: 'Create an account'}).click();
-  await expect(page.getByRole('radio', {name: /Create my own studio/})).toHaveCount(0);
-  await page.getByLabel('Full name').fill('Asha Patil');
-  await page.getByLabel('Email address').fill(account.email);
-  await page.getByLabel('Password', {exact: true}).fill('valid-test-password');
-  await page.getByRole('button', {name: 'Create your account'}).click();
-  await expect(page.getByText(/complete the admission form/)).toBeVisible();
-  const signupCall = authCalls.find(call => call.path.endsWith('/signup'));
-  expect(signupCall?.data?.data).toEqual(expect.objectContaining({
-    account_intent: 'member', admission_code: ADMISSION_CODE, admission_branch_id: BRANCH,
-  }));
-  await page.getByRole('button', {name: 'Back to sign in'}).click();
-  await page.getByLabel('Email address').fill(account.email);
-  await page.getByLabel('Password', {exact: true}).fill('valid-test-password');
-  await page.getByRole('button', {name: 'Sign in', exact: true}).click();
-
   await expect(page.getByRole('heading', {name: /Admission form/})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Student registration & admission'})).toBeVisible();
+  await expect(page.getByText('Create your student account and submit your admission in one form.')).toBeVisible();
+  await expect(page.getByRole('radio', {name: /Create my own studio/})).toHaveCount(0);
   await expect(page.locator('.erp-banner', {hasText: 'Preferred branch:'})).toContainText('Main Branch');
-  expect(getCalls.at(-1)).toEqual({p_code: ADMISSION_CODE, p_branch_id: BRANCH});
+  expect(targetCalls.at(-1)).toEqual({p_code: ADMISSION_CODE, p_branch_id: BRANCH});
   await expect(page.getByRole('button', {name: 'Create organization'})).toHaveCount(0);
-  await expect(page.getByLabel('Your Email')).toHaveValue(account.email);
-  await expect(page.getByLabel('Your Email')).toHaveAttribute('readonly', '');
+  await expect(page.getByRole('link', {name: 'Terms & Conditions'})).toHaveAttribute('href', /terms=admission/);
   await page.getByLabel('First Name').fill('Asha');
   await page.getByLabel('Last Name').fill('Patil');
   await page.getByLabel('Date Of Birth').fill('2000-01-02');
   await page.getByLabel('Phone Number').fill('9876543210');
   await page.getByLabel('Subject').fill('New Admission in Personal yoga session');
+  await page.getByLabel('Your Email').fill(account.email);
+  await page.getByLabel('Create password').fill('valid-test-password');
+  await page.getByLabel('Confirm password').fill('valid-test-password');
   await page.getByLabel('Address').fill('Panvel, Maharashtra');
   await page.getByLabel('Pin Code').fill('410206');
   await page.getByLabel('Reference by').fill('A friend');
   await page.getByRole('radio', {name: 'Less Experienced'}).check();
   await page.getByLabel('Medical / Physical issue').fill('Mild knee discomfort');
   await page.getByLabel('Reasons to join yoga').fill('Improve flexibility and focus');
-  await page.getByRole('button', {name: 'Submit admission'}).click();
+  await page.locator('.admission-terms-row input[type="checkbox"]').check();
+  await page.getByRole('button', {name: 'Create account & submit admission'}).click();
 
-  await expect(page.getByText('Admission submitted — pending studio confirmation.')).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Check your email to activate your account'})).toBeVisible();
+  await expect(page.getByText(/admission request is now pending with the studio/)).toBeVisible();
+  const signupCall = authCalls.find(call => call.path.endsWith('/signup'));
+  expect(signupCall?.data?.email).toBe(account.email);
+  expect(signupCall?.data?.password).toBe('valid-test-password');
+  expect(signupCall?.data?.data).toEqual(expect.objectContaining({
+    full_name: 'Asha Patil', account_intent: 'member',
+    admission_code: ADMISSION_CODE, admission_branch_id: BRANCH,
+  }));
+  expect(getCalls).toEqual([]);
   expect(submitCalls).toEqual([{
     p_code: ADMISSION_CODE,
     p_payload: {
@@ -1174,19 +1239,37 @@ test('applicant submits the account-first public admission form', async ({page})
       subject: 'New Admission in Personal yoga session', email: account.email,
       address: 'Panvel, Maharashtra', pinCode: '410206', referredBy: 'A friend',
       yogaExperience: 'less_experienced', medicalPhysicalIssue: 'Mild knee discomfort',
-      reasonToJoin: 'Improve flexibility and focus',
+      reasonToJoin: 'Improve flexibility and focus', termsAccepted: true,
+      termsVersion: '2026-11-01', applicantUserId: account.id,
     },
     p_branch_id: BRANCH,
   }]);
+  await page.goto('/?terms=admission');
+  await expect(page.getByRole('heading', {name: /Terms & Conditions/})).toBeVisible();
+  await expect(page.getByText(/Admission is confirmed only after studio approval/)).toBeVisible();
 });
 
 test('admission link takes precedence over a saved local-device session', async ({page}) => {
   page.on('pageerror', error => console.error('Browser page error:', error.message));
   await mockAuth(page);
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    if (name === 'erp_get_public_admission_target') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          target: {organizationName: 'Yoga Studio', admissionCode: ADMISSION_CODE, branchId: null, branchName: ''},
+          termsVersion: '2026-11-01',
+        }),
+      });
+    }
+    return route.fulfill({status: 404, contentType: 'application/json', body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'})});
+  });
   await page.addInitScript(() => localStorage.setItem('yoga-studio-local-session', '1'));
   await page.goto(`/?admission=${ADMISSION_CODE}`);
-  await expect(page.getByText('You are applying for studio admission.')).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Sign in', exact: true})).toBeVisible();
+  await expect(page.getByRole('heading', {name: /Admission form/})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Student registration & admission'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Sign in', exact: true}).first()).toBeVisible();
   await expect(page.getByRole('button', {name: 'Dashboard', exact: true})).toHaveCount(0);
 });
 

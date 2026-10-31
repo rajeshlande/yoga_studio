@@ -127,7 +127,7 @@ export function describeError(error, options = {}) {
       kind: 'setup',
       title: 'Database setup needs updating',
       message: 'Yoga Studio could not find one or more database functions required by this screen. The app and the Supabase setup are probably on different versions.',
-      solution: 'Ask the studio Owner to open Supabase → SQL Editor, run the full current supabase/erp_setup.sql file (SQL v11), wait for it to finish, then retry. Do not create tables/functions manually one by one.',
+      solution: 'Ask the studio Owner to open Supabase → SQL Editor, run the full current supabase/erp_setup.sql file (SQL v12), wait for it to finish, then retry. Do not create tables/functions manually one by one.',
       retryable: true,
     });
   }

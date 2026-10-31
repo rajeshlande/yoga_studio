@@ -1,15 +1,16 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 11.
--- Matches app version 1.10.0 (safer autosync, GST/UPI invoicing,
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 12.
+-- Matches app version 1.11.0 (safer autosync, GST/UPI invoicing,
 -- Owner/Co-owner payment configuration/readiness checks, Student portal
 -- access, Odoo-style fixed Role Access management for all five roles,
--- account-first public Student admissions with manager confirmation,
+-- public Student registration/admissions with staff confirmation,
 -- native Odoo-style subscription lifecycle and one-click renewals, and
 -- Odoo-style plan templates with a separate one-month-only offering,
 -- rich Instructor profiles, assigned-batch roster editing for a signed-in
--- Instructor, SQL v10 least-privilege field/record hardening, and SQL v11
+-- Instructor, SQL v10 least-privilege field/record hardening, SQL v11
 -- branch-aware admissions plus narrow Instructor walk-in enrolment and
--- own-batch verified-payment collection).
+-- own-batch verified-payment collection, and SQL v12 public admission
+-- registration with terms acceptance plus scoped Instructor admission review).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -31,12 +32,15 @@
 --      For a new Student, a manager may instead share Students ->
 --      Admission requests -> the studio-wide Public admission link or an
 --      active branch's link/QR. A linked Instructor may share the same
---      link-only URLs from Students, but cannot list or review requests.
+--      URLs from Students and may list/review only scoped admission
+--      requests for studio-link or teaching-branch applicants.
 --      A branch link only pre-selects that branch.
---      The applicant signs up/signs in with Join an existing studio,
---      submits the Admission form, and a manager confirms the final branch;
---      confirmation creates the Student and grants that same account
---      Student portal access atomically.
+--      The applicant completes one public registration form (student
+--      details + password + terms). Supabase Auth creates the applicant
+--      account and the app submits a pending admission request. An
+--      authorized manager, or a scoped Instructor confirming into a
+--      teaching branch, confirms the final branch; confirmation creates
+--      the Student and grants that same account Student portal access.
 --
 -- SECURITY MODEL
 --   * Tables have Row Level Security enabled with NO direct-access policies
@@ -49,10 +53,12 @@
 --   * Fixed roles are Owner (primary, protected), Co-owner
 --     (organization-wide operations + Admin/Instructor/Student access),
 --     Admin (selected branches only), Instructor (assigned batches,
---     own enrolled Students, rosters/attendance and link-only public
---     admission sharing, plus the SQL v11 create-only basic walk-in,
---     plan-exact initial membership and final verified-payment operations
---     for a student actively enrolled in the Instructor's own batch)
+--     own enrolled Students, rosters/attendance and public admission
+--     sharing, plus the SQL v11 create-only basic walk-in, plan-exact
+--     initial membership and final verified-payment operations for a
+--     student actively enrolled in the Instructor's own batch, and the
+--     SQL v12 scoped admission review into a teaching branch with
+--     sensitive admission fields redacted)
 --     and Student (own portal records only). One active account has one
 --     ERP role in one organization; Admin/Instructor branch assignments are
 --     explicit branch-member rows. This follows Odoo's two-layer model:
@@ -420,6 +426,12 @@ create unique index if not exists erp_admissions_pending_email_idx
   on public.erp_admissions(org_id, lower(email)) where status = 'pending';
 create unique index if not exists erp_admissions_student_idx
   on public.erp_admissions(student_id) where student_id is not null;
+alter table public.erp_admissions
+  add column if not exists terms_accepted boolean not null default false;
+alter table public.erp_admissions
+  add column if not exists terms_accepted_at timestamptz;
+alter table public.erp_admissions
+  add column if not exists terms_version text not null default '';
 
 create index if not exists erp_branches_org_idx on public.erp_branches(org_id);
 create index if not exists erp_students_org_branch_idx on public.erp_students(org_id, branch_id);
@@ -856,6 +868,17 @@ returns uuid language sql stable security definer set search_path = public as $$
    limit 1
 $$;
 
+create or replace function public.erp__instructor_branch_ids(p_org uuid)
+returns uuid[] language sql stable security definer set search_path = public as $$
+  select coalesce(array_agg(distinct b.branch_id), '{}'::uuid[])
+    from public.erp_batches b
+    join public.erp_branches br on br.id = b.branch_id
+   where b.org_id = p_org and br.org_id = p_org
+     and b.status = 'active' and br.status = 'active'
+     and public.erp_my_instructor_id() is not null
+     and b.instructor_id = public.erp_my_instructor_id()
+$$;
+
 create or replace function public.erp__require_org()
 returns uuid language plpgsql stable security definer set search_path = public as $$
 declare v_org uuid;
@@ -1160,7 +1183,7 @@ begin
   if auth.uid() is null then raise exception 'UNAUTHENTICATED'; end if;
   v_org := public.erp_current_org();
   if v_org is null then
-    return jsonb_build_object('organizationId', null, 'roles', '[]'::jsonb, 'setupVersion', 11);
+    return jsonb_build_object('organizationId', null, 'roles', '[]'::jsonb, 'setupVersion', 12);
   end if;
   select name into v_name from public.erp_organizations where id = v_org;
   v_roles := public.erp_my_roles();
@@ -1199,7 +1222,7 @@ begin
     'branchIds', to_jsonb(v_branch_ids),
     'instructorId', public.erp_my_instructor_id(),
     'studentId', v_student,
-    'setupVersion', 11
+    'setupVersion', 12
   );
 end $$;
 
@@ -1816,13 +1839,18 @@ end $$;
 -- The shareable studio link contains the organization admission code; a
 -- branch link additionally contains an active branch id that is validated
 -- against that organization and stored only as the applicant's preferred
--- branch. Neither selector is authorization. The applicant first
--- creates/confirms a normal account with "Join an existing studio" and
--- signs in; these RPCs derive identity from auth.uid(), use the account
--- email as the future portal sign-in, and never accept anonymous
--- business-data writes. A manager selects the final branch/joining date
--- during review. Confirmation inserts the Student and calls the audited,
--- server-checked Student portal grant in the same transaction.
+-- branch. Neither selector is authorization. SQL v12 uses a one-form
+-- public registration: the browser first calls Supabase Auth signUp with
+-- the applicant's email/password and code-bound metadata, then calls
+-- erp_submit_admission. A signed-in confirmed applicant updates their own
+-- request as before. A no-session call is accepted only for a fresh,
+-- still-unconfirmed signup whose Auth metadata carries this admission
+-- code; the request is then pending staff review, while confirmation
+-- still requires the applicant email to be confirmed. Terms acceptance is
+-- recorded on the admission row. An authorized manager, or a scoped
+-- Instructor confirming into a teaching branch, selects the final
+-- branch/joining date during review. Confirmation inserts the Student and
+-- the audited Student portal branch link in the same transaction.
 -- ----------------------------------------------------------------------------
 create or replace function public.erp__admission_json(p_admission public.erp_admissions)
 returns jsonb language sql stable security definer set search_path = public as $$
@@ -1843,6 +1871,13 @@ returns jsonb language sql stable security definer set search_path = public as $
     'yogaExperience', p_admission.yoga_experience,
     'medicalPhysicalIssue', p_admission.medical_physical_issue,
     'reasonToJoin', p_admission.reason_to_join,
+    'termsAccepted', coalesce(p_admission.terms_accepted, false),
+    'termsAcceptedAt', p_admission.terms_accepted_at,
+    'termsVersion', coalesce(p_admission.terms_version, ''),
+    'applicantEmailConfirmed', exists (
+      select 1 from auth.users applicant
+       where applicant.id = p_admission.applicant_user_id
+         and coalesce(applicant.email_confirmed_at, applicant.confirmed_at) is not null),
     'status', p_admission.status,
     'branchId', p_admission.branch_id,
     'branchName', coalesce((
@@ -1867,6 +1902,33 @@ $$;
 -- signatures prevents PostgREST overload ambiguity when p_branch_id is used.
 drop function if exists public.erp_get_my_admission(text);
 drop function if exists public.erp_submit_admission(text, jsonb);
+
+create or replace function public.erp_get_public_admission_target(
+  p_code text, p_branch_id uuid default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_org uuid;
+  v_org_name text := '';
+  v_branch_name text := '';
+begin
+  v_org := public.erp__admission_org(p_code);
+  if v_org is null then raise exception 'ADMISSION_LINK_INVALID'; end if;
+  select name into v_org_name from public.erp_organizations where id = v_org;
+  if p_branch_id is not null then
+    select name into v_branch_name from public.erp_branches
+     where id = p_branch_id and org_id = v_org and status = 'active';
+    if v_branch_name is null then raise exception 'ADMISSION_BRANCH_INVALID'; end if;
+  end if;
+  return jsonb_build_object(
+    'target', jsonb_build_object(
+      'organizationName', coalesce(v_org_name, ''),
+      'admissionCode', lower(btrim(coalesce(p_code, ''))),
+      'branchId', p_branch_id,
+      'branchName', coalesce(v_branch_name, ''),
+      'preferredBranchId', p_branch_id,
+      'preferredBranchName', coalesce(v_branch_name, '')),
+    'termsVersion', '2026-11-01');
+end $$;
 
 create or replace function public.erp_get_my_admission(
   p_code text, p_branch_id uuid default null)
@@ -1915,11 +1977,16 @@ create or replace function public.erp_submit_admission(
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_actor uuid := auth.uid();
+  v_public_registration boolean := auth.uid() is null;
   v_org uuid;
   v_auth_email text := '';
   v_confirmed_at timestamptz;
   v_banned_until timestamptz;
   v_deleted_at timestamptz;
+  v_auth_created_at timestamptz;
+  v_auth_metadata jsonb := '{}'::jsonb;
+  v_terms_accepted boolean := false;
+  v_terms_version text := '';
   v_first_name text := btrim(coalesce(p_payload->>'firstName', ''));
   v_last_name text := btrim(coalesce(p_payload->>'lastName', ''));
   v_dob_text text := btrim(coalesce(p_payload->>'dob', ''));
@@ -1937,10 +2004,19 @@ declare
   v_saved public.erp_admissions%rowtype;
   v_action text := 'submit_admission';
 begin
-  if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
   if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
     raise exception 'VALIDATION_FAILED: admission';
   end if;
+  if v_actor is null then
+    v_actor := case
+      when coalesce(p_payload->>'applicantUserId', '') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        then (p_payload->>'applicantUserId')::uuid
+      else null
+    end;
+  end if;
+  if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
+  v_terms_accepted := coalesce(p_payload->'termsAccepted' = 'true'::jsonb, false);
+  v_terms_version := btrim(coalesce(p_payload->>'termsVersion', ''));
   v_org := public.erp__admission_org(p_code);
   if v_org is null then raise exception 'ADMISSION_LINK_INVALID'; end if;
   if p_branch_id is not null and not exists (
@@ -1952,14 +2028,32 @@ begin
   perform pg_advisory_xact_lock(hashtextextended('erp-admissions:' || v_org::text, 0));
 
   select lower(email::text), coalesce(email_confirmed_at, confirmed_at),
-         banned_until, deleted_at
-    into v_auth_email, v_confirmed_at, v_banned_until, v_deleted_at
+         banned_until, deleted_at, created_at,
+         coalesce(raw_user_meta_data, '{}'::jsonb)
+    into v_auth_email, v_confirmed_at, v_banned_until, v_deleted_at,
+         v_auth_created_at, v_auth_metadata
     from auth.users where id = v_actor;
   if v_auth_email is null or v_deleted_at is not null
      or (v_banned_until is not null and v_banned_until > now()) then
     raise exception 'ADMISSION_ACCOUNT_UNAVAILABLE';
   end if;
-  if v_confirmed_at is null then raise exception 'ADMISSION_ACCOUNT_UNCONFIRMED'; end if;
+  if v_public_registration then
+    -- Anonymous admission writes are limited to the browser's just-created
+    -- Supabase Auth signup for this exact link. Once the account is
+    -- confirmed the applicant must use the authenticated path above.
+    if v_confirmed_at is not null then raise exception 'UNAUTHENTICATED'; end if;
+    if lower(coalesce(v_auth_metadata->>'admission_code', ''))
+         <> lower(btrim(coalesce(p_code, '')))
+       or coalesce(v_auth_metadata->>'account_intent', '') <> 'member' then
+      raise exception 'UNAUTHENTICATED';
+    end if;
+    if v_auth_created_at is null
+       or v_auth_created_at < now() - interval '24 hours' then
+      raise exception 'UNAUTHENTICATED';
+    end if;
+  elsif v_confirmed_at is null then
+    raise exception 'ADMISSION_ACCOUNT_UNCONFIRMED';
+  end if;
   if exists (select 1 from public.erp_org_members
               where user_id = v_actor and status = 'active')
      or exists (select 1 from public.erp_branch_members
@@ -1977,6 +2071,9 @@ begin
   end if;
   if length(v_subject) not between 1 and 160 then raise exception 'VALIDATION_FAILED: subject'; end if;
   if v_email <> lower(v_auth_email) then raise exception 'ADMISSION_EMAIL_MISMATCH'; end if;
+  if not v_terms_accepted or length(v_terms_version) not between 1 and 40 then
+    raise exception 'VALIDATION_FAILED: termsAccepted';
+  end if;
   if length(v_address) not between 1 and 500 then raise exception 'VALIDATION_FAILED: address'; end if;
   if v_pin_code !~ '^[0-9]{6}$' then raise exception 'VALIDATION_FAILED: pinCode'; end if;
   if length(v_referred_by) > 120 then raise exception 'VALIDATION_FAILED: referredBy'; end if;
@@ -2011,7 +2108,9 @@ begin
       phone = v_phone, subject = v_subject, email = v_email, address = v_address,
       pin_code = v_pin_code, referred_by = v_referred_by,
       yoga_experience = v_experience, medical_physical_issue = v_medical,
-      reason_to_join = v_reason, status = 'pending', branch_id = p_branch_id,
+      reason_to_join = v_reason, terms_accepted = true,
+      terms_accepted_at = now(), terms_version = v_terms_version,
+      status = 'pending', branch_id = p_branch_id,
       student_id = null, submitted_at = case when status = 'rejected' then now() else submitted_at end,
       updated_at = now(), reviewed_by = null, reviewed_at = null, review_note = ''
      where id = v_existing.id
@@ -2020,17 +2119,21 @@ begin
     insert into public.erp_admissions(
       org_id, applicant_user_id, first_name, last_name, dob, phone, subject,
       email, address, pin_code, referred_by, yoga_experience,
-      medical_physical_issue, reason_to_join, branch_id)
+      medical_physical_issue, reason_to_join, terms_accepted,
+      terms_accepted_at, terms_version, branch_id)
     values (v_org, v_actor, v_first_name, v_last_name, v_dob, v_phone,
             v_subject, v_email, v_address, v_pin_code, v_referred_by,
-            v_experience, v_medical, v_reason, p_branch_id)
+            v_experience, v_medical, v_reason, true, now(), v_terms_version,
+            p_branch_id)
     returning * into v_saved;
   end if;
 
   insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
   values (v_org, v_actor, v_action, 'admission', v_saved.id,
           jsonb_build_object('email', v_email, 'status', 'pending',
-                             'branchId', p_branch_id));
+                             'branchId', p_branch_id,
+                             'termsVersion', v_terms_version,
+                             'publicRegistration', v_public_registration));
   return public.erp__admission_json(v_saved);
 end $$;
 
@@ -2043,8 +2146,8 @@ declare
 begin
   -- Managers review admission requests. A linked Instructor may also read
   -- this link-only response so Students -> Share public admission URL works;
-  -- it contains no applicant, student, medical or review data, and the
-  -- admission list/review RPCs below remain manager-only.
+  -- it contains no applicant, student, medical or review data. SQL v12
+  -- separately scopes the list/review RPCs for Instructors below.
   if not public.erp_can_manage()
      and public.erp_my_instructor_id() is null then
     raise exception 'FORBIDDEN';
@@ -2060,12 +2163,21 @@ end $$;
 create or replace function public.erp_list_admissions(p_status text default 'pending')
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
-  v_org uuid := public.erp__require_manager();
+  v_org uuid := public.erp__require_org();
+  v_is_manager boolean := public.erp_can_manage();
   v_org_mgr boolean := public.erp__is_org_manager(v_org);
   v_admin_branches uuid[] := public.erp__admin_branch_ids(v_org);
+  v_instructor uuid := public.erp_my_instructor_id();
+  v_instructor_branches uuid[] := case
+    when public.erp_my_instructor_id() is null then '{}'::uuid[]
+    else public.erp__instructor_branch_ids(v_org)
+  end;
   v_status text := lower(btrim(coalesce(nullif(p_status, ''), 'pending')));
   v_items jsonb := '[]'::jsonb;
 begin
+  if not v_is_manager and v_instructor is null then
+    raise exception 'FORBIDDEN';
+  end if;
   if v_status not in ('pending', 'confirmed', 'rejected', 'all') then
     raise exception 'VALIDATION_FAILED: admission status';
   end if;
@@ -2074,7 +2186,13 @@ begin
     from (
       select public.erp__admission_json(a) || jsonb_build_object(
                'possibleDuplicateStudentId', dup.student_id,
-               'possibleDuplicateStudentName', coalesce(dup.student_name, '')) as item,
+               'possibleDuplicateStudentName', coalesce(dup.student_name, ''))
+             || case when v_is_manager then '{}'::jsonb
+                     else jsonb_build_object(
+                       'dob', null, 'address', '', 'pinCode', '',
+                       'medicalPhysicalIssue', '', 'reasonToJoin', '',
+                       'sensitiveDetailsHidden', true)
+                end as item,
              a.submitted_at as submitted_sort
         from public.erp_admissions a
         left join lateral (
@@ -2083,16 +2201,24 @@ begin
            where s.org_id = v_org and s.email <> ''
              and lower(s.email) = lower(a.email)
              and (a.student_id is null or s.id <> a.student_id)
-             and (v_org_mgr or s.branch_id = any(v_admin_branches))
+             and (v_org_mgr
+                  or (v_is_manager and s.branch_id = any(v_admin_branches))
+                  or ((not v_is_manager) and s.branch_id = any(v_instructor_branches)))
            order by case s.status when 'active' then 0 else 1 end, s.created_at
            limit 1
         ) dup on true
        where a.org_id = v_org
          and (v_status = 'all' or a.status = v_status)
          -- Branch Admins triage only requests whose branch link/final branch
-         -- is one of their branches. Studio-wide (null-branch) requests stay
-         -- with Owner/Co-owner until a final branch is selected.
-         and (v_org_mgr or a.branch_id = any(v_admin_branches))
+         -- is one of their branches. SQL v12 lets a linked Instructor see
+         -- teaching-branch requests plus studio-wide (null-branch) requests
+         -- they may confirm into one of their teaching branches; sensitive
+         -- fields are redacted above for non-managers.
+         and (v_org_mgr
+              or (v_is_manager and a.branch_id = any(v_admin_branches))
+              or ((not v_is_manager) and v_instructor is not null
+                  and cardinality(v_instructor_branches) > 0
+                  and (a.branch_id is null or a.branch_id = any(v_instructor_branches))))
        order by a.submitted_at desc
        limit 100
     ) bounded;
@@ -2110,6 +2236,11 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_actor uuid := auth.uid();
   v_org uuid;
+  v_is_manager boolean := false;
+  v_org_mgr boolean := false;
+  v_admin_branches uuid[] := '{}'::uuid[];
+  v_instructor uuid;
+  v_instructor_branches uuid[] := '{}'::uuid[];
   v_action text := lower(btrim(coalesce(p_action, '')));
   v_note text := btrim(coalesce(p_review_note, ''));
   v_admission public.erp_admissions%rowtype;
@@ -2119,13 +2250,22 @@ declare
   v_confirmed_at timestamptz;
   v_banned_until timestamptz;
   v_deleted_at timestamptz;
-  v_grant jsonb;
 begin
   if v_actor is null then raise exception 'UNAUTHENTICATED'; end if;
   if p_admission_id is null or v_action not in ('confirm', 'reject') or length(v_note) > 500 then
     raise exception 'VALIDATION_FAILED: admission review';
   end if;
-  v_org := public.erp__require_manager();
+  v_org := public.erp__require_org();
+  v_is_manager := public.erp_can_manage();
+  v_org_mgr := public.erp__is_org_manager(v_org);
+  v_admin_branches := public.erp__admin_branch_ids(v_org);
+  v_instructor := public.erp_my_instructor_id();
+  if v_instructor is not null then
+    v_instructor_branches := public.erp__instructor_branch_ids(v_org);
+  end if;
+  if not v_is_manager and v_instructor is null then
+    raise exception 'FORBIDDEN';
+  end if;
 
   perform pg_advisory_xact_lock(hashtextextended('erp-role-access:' || v_org::text, 0));
   perform pg_advisory_xact_lock(hashtextextended('erp-admissions:' || v_org::text, 0));
@@ -2135,9 +2275,19 @@ begin
    for update;
   if v_admission.id is null then raise exception 'FORBIDDEN'; end if;
   if v_admission.status <> 'pending' then raise exception 'ADMISSION_NOT_PENDING'; end if;
-  if not public.erp__is_org_manager(v_org)
-     and (v_admission.branch_id is null
-       or not (v_admission.branch_id = any(public.erp__admin_branch_ids(v_org)))) then
+  if v_is_manager then
+    if not v_org_mgr
+       and (v_admission.branch_id is null
+         or not (v_admission.branch_id = any(v_admin_branches))) then
+      raise exception 'FORBIDDEN';
+    end if;
+  elsif v_instructor is not null then
+    if cardinality(v_instructor_branches) = 0
+       or not (v_admission.branch_id is null
+            or v_admission.branch_id = any(v_instructor_branches)) then
+      raise exception 'FORBIDDEN';
+    end if;
+  else
     raise exception 'FORBIDDEN';
   end if;
 
@@ -2155,7 +2305,15 @@ begin
   end if;
 
   if p_branch_id is null then raise exception 'VALIDATION_FAILED: admission branch'; end if;
-  perform public.erp__require_branch_manager(v_org, p_branch_id);
+  if v_is_manager then
+    perform public.erp__require_branch_manager(v_org, p_branch_id);
+  elsif v_instructor is not null then
+    if not (p_branch_id = any(v_instructor_branches)) then
+      raise exception 'FORBIDDEN';
+    end if;
+  else
+    raise exception 'FORBIDDEN';
+  end if;
   select status into v_branch_status
     from public.erp_branches where id = p_branch_id and org_id = v_org;
   if v_branch_status is null then raise exception 'FORBIDDEN'; end if;
@@ -2203,10 +2361,22 @@ begin
     v_admission.reason_to_join)
   returning id into v_student_id;
 
-  v_grant := public.erp_grant_student_access(v_student_id, v_admission.email);
-  if nullif(v_grant->>'studentUserId', '')::uuid is distinct from v_admission.applicant_user_id then
-    raise exception 'ADMISSION_EMAIL_MISMATCH';
-  end if;
+  -- Create the Student portal link inside this already-authorized review
+  -- transaction. The direct erp_grant_student_access RPC remains a
+  -- manager-only repair/assignment surface; the checks above have already
+  -- verified the applicant account, confirmed email, unlinked state and
+  -- exact admission email for both manager and scoped-Instructor review.
+  insert into public.erp_branch_members(
+    branch_id, user_id, role, student_id, status)
+  values (p_branch_id, v_admission.applicant_user_id, 'student',
+          v_student_id, 'active')
+  on conflict (branch_id, user_id, role) do update
+    set student_id = excluded.student_id, status = 'active';
+  insert into public.erp_audit_log(org_id, actor, action, entity, entity_id, detail)
+  values (v_org, v_actor, 'grant_student_access', 'student', v_student_id,
+          jsonb_build_object('studentUserId', v_admission.applicant_user_id,
+                             'email', lower(v_admission.email),
+                             'sourceAdmissionId', v_admission.id));
 
   update public.erp_admissions set
     status = 'confirmed', branch_id = p_branch_id, student_id = v_student_id,
@@ -4534,6 +4704,7 @@ revoke all on function public.erp__org_role(uuid) from public, anon, authenticat
 revoke all on function public.erp__is_org_manager(uuid) from public, anon, authenticated;
 revoke all on function public.erp__is_primary_owner(uuid) from public, anon, authenticated;
 revoke all on function public.erp__admin_branch_ids(uuid) from public, anon, authenticated;
+revoke all on function public.erp__instructor_branch_ids(uuid) from public, anon, authenticated;
 revoke all on function public.erp__can_manage_branch(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.erp__require_branch_manager(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.erp__require_org_manager() from public, anon, authenticated;
@@ -4555,10 +4726,12 @@ revoke all on function public.erp__require_manager() from public, anon, authenti
 revoke all on function public.erp__log(uuid, text, text, uuid) from public, anon, authenticated;
 
 -- ----------------------------------------------------------------------------
--- Function permissions: signed-in users only; never anonymous. Only the
+-- Function permissions: signed-in users only, except the two public
+-- admission-registration RPCs explicitly granted after this block. Only the
 -- application-facing RPCs below are granted. Each one re-checks the caller's
--- fixed role and record scope from auth.uid(); the grant itself is not the
--- authorization decision.
+-- fixed role and record scope from auth.uid() (or, for the public admission
+-- submit, the fresh code-bound Supabase Auth signup); the grant itself is
+-- not the authorization decision.
 -- ----------------------------------------------------------------------------
 do $$
 declare f text;
@@ -4585,6 +4758,17 @@ begin
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;
 end $$;
+
+-- Public admission registration surface. The target RPC returns only the
+-- studio/branch display names for a valid share link. The submit RPC is in
+-- the authenticated grant list above and is additionally callable by anon
+-- solely so the browser can finish the request immediately after Supabase
+-- Auth signUp when email confirmation means there is no session yet; the
+-- function itself rejects every anon call except a fresh, unconfirmed,
+-- metadata-bound signup for the exact admission code.
+revoke all on function public.erp_get_public_admission_target(text, uuid) from public;
+grant execute on function public.erp_get_public_admission_target(text, uuid) to anon, authenticated;
+grant execute on function public.erp_submit_admission(text, jsonb, uuid) to anon;
 
 -- ============================================================================
 -- AFTER SETUP — giving other people access

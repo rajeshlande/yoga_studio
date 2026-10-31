@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.10.0)
+# Yoga Studio ERP — Core (v1.11.0)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
@@ -48,7 +48,11 @@ details. Version 1.10.0 expands admissions into studio-wide and
 branch-specific public links, adds the guided Student → Batch → Plan →
 Payment enrolment wizard, gives Instructors a scoped Students workspace with
 basic walk-in creation and final own-batch payment collection under SQL v11,
-and centralizes actionable error notices.
+and centralizes actionable error notices. Version 1.11.0 / SQL v12 turns
+the public admission link into a one-form student registration + admission
+flow with password creation and Terms & Conditions acceptance, and lets
+Instructor-and-above reviewers approve/reject scoped requests before batch
+assignment and plan selection.
 This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
@@ -58,14 +62,14 @@ saved-method autopay.
 |---|---|
 | Dashboard | KPIs (active students, today's classes, collected this month, pending dues), today's class list, subscriptions expiring in 7 days, first-run setup checklist; role-specific cards for Instructor/Student |
 | Branches & batches | Manager workspace with **Branches**, **Batches** and **Instructor profiles** tabs; branch summary KPIs and searchable/sortable branch health cards (students, active batches, enrolled seats/fill, instructors teaching, weekly/today classes, recent attendance and next class), drill-down to that branch's Batches or Students, add/edit/archive branches, and searchable Instructor cards with bio, specialties/styles, qualifications/certifications, experience, joining date, status, assigned batches/students and next class |
-| Students | Add/edit/deactivate, search, branch, split name/contact/admission profile, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email, and studio/branch public admission links with pending/confirmed/rejected manager review and guided enrolment |
+| Students | Add/edit/deactivate, search, branch, split name/contact/admission profile, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email, and studio/branch public registration links with pending/confirmed/rejected Instructor-and-above scoped review and guided enrolment |
 | Batches | Manager tab under Branches & batches; standalone assigned-batch view remains for Instructor/Student. Role-tailored summary cards, searchable/filterable/sortable batch cards and a recurring weekly Schedule view; next class, recent attendance and (except for Students) enrolled/capacity/seats-left progress. Managers can duplicate batch settings, and the batch form warns about capacity below current enrollment or an instructor time overlap without silently blocking an intentional exception. Roster dialog includes fill/search plus enroll/remove with capacity guard. A signed-in Instructor may edit only the roster of an active batch assigned to them and only with existing active students from that branch; a Student sees only assigned batches/schedule and no roster or capacity counts |
 | Attendance | Date + batch picker (today's batch auto-selected), Present/Absent/Late per student, mark-all-present, history + CSV; students see only their own |
 | Subscriptions | Odoo-style Plan templates (type, ₹ price, billing period in months, default alignment, renewal default, Active/Archived); subscription periods with **calendar-month or joining-date** billing, amount/offering snapshots, lifecycle, pause/resume, cancellation reasons, renewal tracking/history, one-click current-price renewal, active/paused/renewals-due/MRR summary and dues. **One-month passes** are shown separately and cannot pause/renew or enter MRR |
 | Payments | Payment history, Record verified payment for subscriptions or one-month passes, server receipt numbers `YS-YYYY-NNNN`, CSV export, Owner/Co-owner Payment setup with optional GST/UPI/bank/public-gateway readiness, and exactly-one-page A4 portrait PDFs for unpaid/partial invoices and paid receipts with dynamic UPI QR only while outstanding; synced payments are append-only and corrected by audited void |
 | Offline sync | Signed-in Supabase mode downloads a per-user device copy, applies ERP changes locally while offline, queues them in a durable mirrored outbox, requests persistent storage, and pushes in dependency order when internet returns; the global top bar plus ERP toolbar/Settings show Online/Offline, synced, waiting, syncing, setup-needed and conflict states |
 | Conflicts | Server row versions detect concurrent edits. Sync never uses last-write-wins: a review dialog compares **This device** with **Supabase now**; Keep Supabase discards the local proposal, while Keep mine reapplies only the fields changed on that device |
-| Access & portals | Five fixed server-enforced roles: protected primary Owner; all-branch Co-owner; selected-branch Admin; Instructor limited to linked batches/rosters/attendance, own-student enrolment and scoped own-batch final payment collection; Student limited to a view-only own-record portal. **Access** manages Co-owner/Admin/Instructor sign-ins by confirmed email; **Students → Portal access** manages Student sign-ins |
+| Access & portals | Five fixed server-enforced roles: protected primary Owner; all-branch Co-owner; selected-branch Admin; Instructor limited to linked batches/rosters/attendance, own-student enrolment, scoped own-batch final payment collection and scoped/redacted public-admission review into teaching branches; Student limited to a view-only own-record portal. **Access** manages Co-owner/Admin/Instructor sign-ins by confirmed email; **Students → Portal access** manages Student sign-ins |
 | Account profile | Role-aware signed-in **Profile** with editable name/phone/personal bio, read-only sign-in email, organization, ERP role/access scope, shortcuts and a linked Instructor teaching-profile or Student-record summary where applicable |
 | Appearance | Light/Dark/System theme from `feature_development`, adapted to every ERP screen, dialog, table and form; persisted as `ys-theme`, with pre-paint bootstrap and OS-preference sync |
 
@@ -270,43 +274,60 @@ place.
 
 ### Public Student admissions
 
-**Students → Admission requests** shows managers a copyable studio-specific
-link containing the organization's `admission_code`. That code selects the
-target studio only; it is not authorization and no anonymous business-data
-RPC is exposed. The applicant opens the link, creates/confirms a normal
-account with **Join an existing studio**, signs in, and completes First Name,
-Last Name, Date Of Birth, Phone Number, Subject, read-only sign-in Email,
+**Students → Admission requests** shows managers copyable studio-wide and
+branch-specific links containing the organization's `admission_code`;
+Instructors can share the same public links from **Students**. That code
+selects the target studio only; it is not authorization. Opening a link
+while signed out shows one **Student registration & admission** form, not a
+sign-in screen. The applicant completes First Name, Last Name, Date Of
+Birth, Phone Number, Subject, Email, **Password** and **Confirm password**,
 Address, Pin Code, optional Reference by, Experience in yoga, Medical /
-Physical issue and Reasons to join yoga. Submission and review are
-online-only typed RPCs: `erp_get_my_admission(text)`,
-`erp_submit_admission(text, jsonb)`, `erp_get_admission_link_info()`,
-`erp_list_admissions(text)` and
-`erp_review_admission(uuid, text, uuid, date, text)`. The locked
-`erp_admissions` table has no browser table grants.
+Physical issue and Reasons to join yoga, and must accept the linked
+**Terms & Conditions** (`?terms=admission`). The password is sent only to
+Supabase Auth to create the future Student-portal account; it is never sent
+to ERP SQL. Submission and review are online-only typed RPCs:
+`erp_get_public_admission_target(text, uuid)`,
+`erp_get_my_admission(text, uuid)`, `erp_submit_admission(text, jsonb, uuid)`,
+`erp_get_admission_link_info()`, `erp_list_admissions(text)` and
+`erp_review_admission(uuid, text, uuid, date, text)`. Only the public target
+and the guarded submit are anon-callable; the locked `erp_admissions` table
+has no browser table grants.
 
-The server requires a confirmed, usable account with no active ERP role,
-requires the submitted email to equal the Auth email, and bounds/validates
-all fields (including a six-digit PIN code and the fixed yoga-experience
-values). A pending applicant may update their request; a rejected applicant
-may correct and resubmit the same request; a confirmed request cannot be
-changed. Branch is deliberately absent from the public form. During review
-the Owner or Co-owner may choose any active branch, while a branch Admin may
-view unassigned organization requests but can confirm only into an assigned
-active branch. The manager also selects joining date and may add a review
-note or reject the request.
+For the signed-in path, the server requires a confirmed, usable account with
+no active ERP role. For the signed-out public-registration path, SQL accepts
+only a fresh (≤24-hour), still-unconfirmed Supabase Auth user whose signup
+metadata is `account_intent='member'` for that exact admission code; this
+lets the request become pending before email confirmation, while approval
+still requires a confirmed applicant email. In both paths the submitted
+email must equal the Auth email, terms acceptance/version are required, and
+all fields are bounded/validated (including a six-digit PIN code and the
+fixed yoga-experience values). A pending applicant may update their request;
+a rejected applicant may correct and resubmit the same request; a confirmed
+request cannot be changed. A branch link pre-selects that branch, but final
+branch/batch remain staff-controlled. During review the Owner or Co-owner
+may choose any active branch; a branch Admin is limited to assigned-branch
+requests/final branches; a linked Instructor may review studio-wide or
+teaching-branch requests and confirm only into a teaching branch. The
+reviewer selects joining date/final branch and may add a review note or
+reject the request, then approval continues into batch assignment and plan
+selection.
 
-Confirmation runs in one transaction: it rechecks the applicant account,
-blocks an exact-email possible duplicate instead of silently creating a
-second Student, inserts the Student, calls the existing audited
-`erp_grant_student_access` for the submitting account, verifies that the
-granted user is the applicant, and marks the admission confirmed. Structured
+Confirmation runs in one transaction: it rechecks scope, pending status,
+confirmed applicant account/email and unlinked state, blocks an exact-email
+possible duplicate instead of silently creating a second Student, inserts
+the Student, creates the audited Student portal link for the form-created
+account inside that same authorized review transaction, and marks the
+admission confirmed. The separate `erp_grant_student_access` RPC remains a
+manager-only repair/assignment surface. Structured
 admission values are copied to the Student profile (`firstName`, `lastName`,
 address, PIN code, subject, reference, yoga experience, medical/physical
 issue and reason to join) and are editable later by an authorized manager.
 `fullName` remains the canonical display name composed from first/last.
 Medical / Physical issue is returned only to Owner/Co-owner, an Admin of the
 student's branch and that student; Instructor snapshots deliberately carry
-an empty value. SQL v10 redacts contact/address/notes/admission fields for
+an empty value, and SQL v12 Instructor admission list responses additionally
+blank DOB/address/PIN/medical/reason with `sensitiveDetailsHidden: true`.
+SQL v10 redacts contact/address/notes/admission fields for
 both enrolled students and not-yet-enrolled roster candidates in the
 Instructor snapshot. The
 student can view their own confirmed admission details
@@ -505,10 +526,10 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.10.0 the required database is **SQL v11**. Version 1.10.0 changes
-   admission RPCs/snapshot authorization, so rerun the complete SQL file if
-   SQL v10 or earlier is live. Upgrading from an earlier release installs SQL
-   v11: all prior sync,
+   For v1.11.0 the required database is **SQL v12**. Version 1.11.0 changes
+   public admission registration/review authorization, so rerun the complete
+   SQL file if SQL v11 or earlier is live. Upgrading from an earlier release installs SQL
+   v12: all prior sync,
    billing and Student-access objects; SQL v5 Co-owner/selected-branch
    authorization and staff-access RPCs; the SQL v6 organization admission
    code, locked `erp_admissions` workflow and structured Student profile;
@@ -522,11 +543,13 @@ a backup.
    scoping, and revocation of direct browser access to internal helpers;
    plus SQL v11 branch-aware admission RPCs/Admin scope, Instructor
    active-plan/billing snapshot visibility with own-batch finance only,
-   server-enforced Instructor walk-in/enrolment/payment rules, and
-   `setupVersion: 11` in the context response. It is additive and does not
+   server-enforced Instructor walk-in/enrolment/payment rules; plus SQL v12
+   admission terms columns, the narrow public target/guarded-submit flow,
+   scoped Instructor admission review with server-side redaction, and
+   `setupVersion: 12` in the context response. It is additive and does not
    delete business rows. Existing Instructors preserve
-   name/contact/home branch/status and gain an empty profile. Run SQL v11
-   (rather than stopping at v10 or v9) before using the deployed 1.10.0 app.
+   name/contact/home branch/status and gain an empty profile. Run SQL v12
+   (rather than stopping at v11 or v10) before using the deployed 1.11.0 app.
    If the new app reaches an older
    database, supported older sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and a queued one-month operation
@@ -540,9 +563,11 @@ a backup.
 4. For every other person, have them sign up with **Join an existing studio**
    selected and confirm their email first. Then use **Access** online for
    Co-owner, Admin or Instructor sign-ins and **Students → Portal access**
-   for an existing Student. For a brand-new Student, a manager may instead
-   share **Students → Admission requests → Public admission link** and
-   review the signed-in applicant's submission in that panel. Manual membership SQL at the bottom of the setup file is
+   for an existing Student. For a brand-new Student, a manager or Instructor
+   may instead share **Students → Admission requests → Public admission link**;
+   the signed-out applicant completes the registration + admission form,
+   confirms their email, and an in-scope Instructor-or-above reviewer
+   approves/rejects it in that panel before batch/plan assignment. Manual membership SQL at the bottom of the setup file is
    now an emergency-repair fallback only and bypasses in-app conflict
    checks, so it must not be the normal provisioning path.
 
@@ -582,9 +607,10 @@ rule), keeping it idempotent and non-destructive.
   organization-creation path, the signed-in student's personal dashboard,
   assigned-batch-only/no-roster or capacity details in List/Schedule,
   hidden sync controls, Owner/Admin-only
-  **Studio ERP data** settings, online revocation display clearing, an
-  account-first applicant admission submission, manager confirmation
-  creating the Student while granting portal access, and a manager
+  **Studio ERP data** settings, online revocation display clearing, a
+  one-form public registration/admission submission with Terms, manager and
+  Instructor-scoped confirmation creating the Student while granting portal
+  access and continuing to enrolment, and a manager
   subscription pause → resume/end-date extension → current-Plan-price
   renewal → linked History → cancellation/replacement-availability journey.
 - During development the full SQL file was also executed twice (idempotent
@@ -634,7 +660,7 @@ rule), keeping it idempotent and non-destructive.
   harness still passes 24/24, and v9 → v10 and v8 → v10 upgrade simulations
   pass 7/7 and 6/6. Those harnesses are not shipped and are not live
   Supabase UAT.
-- Production UAT still required after running SQL v10 in the real project:
+- Production UAT still required after running SQL v12 in the real project:
   sign in as Owner and wait for **Online · synced**; save Payment setup as
   Owner/Co-owner; go offline and mark attendance + record a payment; verify
   the close warning, reconnect and verify automatic sync and one receipt
@@ -645,10 +671,13 @@ rule), keeping it idempotent and non-destructive.
   Instructor and Student accounts to grant/revoke access and verify each
   role's branch/own-record visibility, including that revoked accounts stop
   loading fresh studio data on their next successful online refresh; and
-  copy the public admission link, submit it from a new confirmed account,
-  verify a branch Admin cannot confirm outside assigned branches, confirm
-  into the correct branch, verify the applicant opens the Student portal,
-  and verify an Instructor's roster/snapshot does not expose Medical /
+  copy the public admission link, open it signed out, submit the one-form
+  registration with password + Terms, confirm the applicant email, verify a
+  branch Admin cannot confirm outside assigned branches and an Instructor
+  can confirm only studio/teaching-branch requests into a teaching branch,
+  continue to batch/plan, verify the applicant opens the Student portal with
+  the same email/password, and verify an Instructor's admission review,
+  roster and snapshot do not expose Medical /
   Physical issue or any enrolled/candidate private fields, and a Student
   cannot see another student, an unrelated Plan or assigned-instructor
   contact/profile fields; edit that Instructor's
