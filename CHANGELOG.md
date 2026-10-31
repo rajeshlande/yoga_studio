@@ -6,6 +6,79 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.8.0 — 2026-10-31
+
+### Added — Rich Instructor profiles and assigned-batch roster editing
+
+- **Instructor profile cards:** **Branches & batches → Instructor profiles**
+  now has search, status filtering and summary counts plus cards showing the
+  instructor's home/teaching branches, contact details, status, teaching
+  bio, specialties/styles, qualifications/certifications, experience,
+  joining date, active batch/student counts and next class. Owner,
+  Co-owner and authorized branch Admins can create and edit the profile;
+  Instructor Portal sign-in linking remains a separate Access workflow.
+- **Instructor roster writes, narrowly scoped:** a signed-in Instructor can
+  open **Roster** from **Batches** and add/remove existing active students
+  only in an active batch assigned to that Instructor and only when the
+  student belongs to the batch branch. Capacity and seats-left are shown and
+  enforced. The Instructor still cannot create/edit Student records, edit a
+  batch's schedule/capacity, access Subscriptions/Payments, set up
+  Instructor profiles or administer role access.
+- **Privacy-preserving candidates:** to make Add possible, the Instructor
+  snapshot now includes active same-branch candidates in branches where the
+  Instructor teaches, but only with name/branch/status/joining fields.
+  Candidate phone, email, address, notes and admission details are blank;
+  Medical / Physical issue remains manager-and-self-only. Students already
+  enrolled in the Instructor's batches keep the roster fields previously
+  available, still without medical text.
+
+### Changed — Role-aware account Profile and A4 invoice PDFs
+
+- **Profile** replaces the generic “Studio member” summary with the user's
+  actual Owner, Co-owner, Admin, Instructor or Student role. It now supports
+  editable name, phone and personal bio; shows the read-only sign-in email,
+  organization, account type and branch/access scope; and displays a linked
+  Instructor teaching profile (bio, specialties, qualifications and assigned
+  batches) or Student record/batch summary where applicable. Role and branch
+  assignments remain manager-controlled and are not editable there.
+- **Invoice/receipt print output is fixed to one A4 portrait page.** The
+  stylesheet declares a 210 × 297 mm sheet with 10 mm margins and constrains
+  the invoice to the printable page with compact print typography and a
+  light print palette. The button is now **Print / Save A4 PDF**. Automated
+  Chromium coverage generates both due and paid PDFs and asserts one page
+  plus the A4 PDF MediaBox (595.28 × 841.89 pt).
+
+### Database migration — SQL v9 (includes SQL v8, v7, v6 and v5)
+
+- Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
+  Editor; do not stop at SQL v8. SQL v9 adds Instructor `bio`, bounded
+  `specialties`, `qualifications`, `experience_years` and `joining_date`,
+  profile constraints/indexes and snapshot/direct/sync persistence. Existing
+  Instructor rows preserve name, contact details, home branch and status and
+  gain an empty teaching profile.
+- SQL v9 adds a shared server roster-authorization helper used by
+  `erp_enroll_student`, `erp_end_enrollment` and enrollment operations in
+  `erp_sync_push`. It preserves manager branch scope, allows the assigned
+  Instructor only on an active own batch with an active branch link,
+  requires an active same-branch student for activation, and preserves the
+  capacity checks in the writers. Student-record and batch sync writes stay
+  manager-only; the new private helpers are revoked from browser roles.
+
+### Validation
+
+- Node logic coverage adds Instructor profile normalization (specialty
+  parsing/deduplication, text bounds, experience clamping and strict joining
+  dates). Browser coverage exercises rich profile create/edit, local and
+  mocked-Supabase Instructor roster add/remove, the Instructor account
+  Profile, general profile phone persistence, and one-page A4 PDF output.
+- Ephemeral PGlite validation passes **24/24** dedicated SQL v9 checks
+  (profile snapshot/persistence, candidate redaction, direct/sync roster
+  authorization, capacity—including a sync move into a full batch—forbidden
+  other-batch and Student-record writes,
+  manager cleanup after a branch move, and idempotent rerun) and **6/6**
+  SQL v8 → v9 upgrade checks preserving an existing Instructor. Live
+  Supabase UAT remains required after running SQL v9 in the real project.
+
 ## 1.7.0 — 2026-10-31
 
 ### Changed — Subscription, Payments and branch navigation

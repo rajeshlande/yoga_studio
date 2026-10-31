@@ -20,6 +20,36 @@ export const ROLES = [
   {id: 'instructor', label: 'Instructor'},
   {id: 'student', label: 'Student'},
 ];
+/**
+ * Instructor records are operational profiles, not only sign-in links. Keep
+ * the optional teaching profile bounded and predictable across the local
+ * store, offline queue and SQL v9 RPCs.
+ */
+export function normalizeInstructorProfile(record = {}) {
+  const rawSpecialties = Array.isArray(record.specialties)
+    ? record.specialties
+    : String(record.specialties || '').split(',');
+  const seen = new Set();
+  const specialties = [];
+  for (const value of rawSpecialties) {
+    const specialty = String(value || '').trim().slice(0, 60);
+    const key = specialty.toLocaleLowerCase('en-IN');
+    if (!specialty || seen.has(key)) continue;
+    seen.add(key);
+    specialties.push(specialty);
+    if (specialties.length >= 12) break;
+  }
+  const joiningText = String(record.joiningDate || '').trim().slice(0, 10);
+  const joining = /^\d{4}-\d{2}-\d{2}$/.test(joiningText) ? parseISODate(joiningText) : null;
+  return {
+    bio: String(record.bio || '').trim().slice(0, 1000),
+    specialties,
+    qualifications: String(record.qualifications || '').trim().slice(0, 500),
+    experienceYears: Math.min(80, Math.max(0, Math.trunc(Number(record.experienceYears) || 0))),
+    joiningDate: joining && toISODate(joining) === joiningText ? joiningText : '',
+  };
+}
+
 export const PLAN_TYPES = [
   {id: 'subscription', label: 'Subscription'},
   {id: 'one_month', label: 'One-month only (no subscription)'},

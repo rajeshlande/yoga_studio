@@ -9,7 +9,8 @@
 
 import {
   uid, toISODate, membershipEnd, membershipOfferingType, emptySnapshot,
-  normalizePlanTemplate, normalizePlanType, normalizeSubscriptionLifecycle,
+  normalizeInstructorProfile, normalizePlanTemplate, normalizePlanType,
+  normalizeSubscriptionLifecycle,
   normalizeBillingSettings, validateBillingSettings,
 } from './logic.js';
 
@@ -108,10 +109,13 @@ export const localStore = {
 
   async saveInstructor(payload) {
     const db = loadDb();
+    const previous = db.instructors.find(instructor => instructor.id === payload.id) || {};
+    const profile = normalizeInstructorProfile({...previous, ...payload});
     upsert(db.instructors, {
       id: payload.id || uid(), branchId: payload.branchId || '', fullName: payload.fullName?.trim(),
-      phone: payload.phone || '', email: payload.email || '',
-      status: payload.status || 'active', createdAt: payload.createdAt || nowISO(),
+      phone: payload.phone || '', email: payload.email || '', ...profile,
+      status: payload.status || previous.status || 'active',
+      createdAt: previous.createdAt || payload.createdAt || nowISO(),
     });
     return saveDb(db);
   },
@@ -137,7 +141,17 @@ export const localStore = {
 
   async enrollStudent({batchId, studentId}) {
     const db = loadDb();
+    const batch = db.batches.find(b => b.id === batchId);
+    const student = db.students.find(s => s.id === studentId);
+    if (!batch || !student) throw new Error('That batch or student is no longer available.');
+    if (student.status !== 'active' || student.branchId !== batch.branchId) {
+      throw new Error('Only an active student from this batch branch can be enrolled.');
+    }
     const existing = db.enrollments.find(e => e.batchId === batchId && e.studentId === studentId);
+    if (existing?.status !== 'active') {
+      const activeCount = db.enrollments.filter(e => e.batchId === batchId && e.status === 'active').length;
+      if (activeCount >= (Number(batch.capacity) || 0)) throw new Error('This batch is full.');
+    }
     if (existing) existing.status = 'active';
     else db.enrollments.push({id: uid(), batchId, studentId, joinedOn: toISODate(), status: 'active'});
     return saveDb(db);

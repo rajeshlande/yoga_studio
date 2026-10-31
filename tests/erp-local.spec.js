@@ -25,10 +25,11 @@ function expectAlignedPair(boxes) {
 
 async function expectPrintableInvoice(page, {paid}) {
   const originalViewport = page.viewportSize();
-  // 703 x 1032 CSS px is the printable area of A4 with the invoice's
-  // 12 mm page margins. This catches the old failure where the invoice was
-  // positioned inside the scrolling dialog and only a central strip printed.
-  await page.setViewportSize({width: 703, height: 1032});
+  // 719 x 1047 CSS px is the printable area of A4 portrait with the
+  // invoice's 10 mm page margins. This catches the old failure where the
+  // invoice was positioned inside the scrolling dialog and only a central
+  // strip printed.
+  await page.setViewportSize({width: 719, height: 1047});
   await page.emulateMedia({media: 'print'});
   const layout = await page.evaluate(() => {
     const appRoot = document.querySelector('#root');
@@ -61,8 +62,10 @@ async function expectPrintableInvoice(page, {paid}) {
   expect(layout.invoice).not.toBeNull();
   expect(layout.invoice.left).toBeGreaterThanOrEqual(0);
   expect(layout.invoice.top).toBeGreaterThanOrEqual(0);
-  expect(layout.invoice.right).toBeLessThanOrEqual(704);
-  expect(layout.invoice.height).toBeLessThanOrEqual(1032);
+  expect(layout.invoice.right).toBeLessThanOrEqual(720);
+  expect(layout.invoice.width).toBeGreaterThanOrEqual(710);
+  expect(layout.invoice.height).toBeLessThanOrEqual(1047);
+  expect(layout.invoice.height).toBeGreaterThanOrEqual(1035);
   expect(layout.header.top).toBeGreaterThanOrEqual(layout.invoice.top);
   expect(layout.footer.bottom).toBeLessThanOrEqual(layout.invoice.bottom + 1);
   expect(layout.invoiceScrollHeight).toBeLessThanOrEqual(layout.invoiceClientHeight + 1);
@@ -81,7 +84,13 @@ async function expectPrintableInvoice(page, {paid}) {
 
   const pdf = await page.pdf({format: 'A4', printBackground: true, preferCSSPageSize: true});
   expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
-  expect((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) || []).length).toBe(1);
+  const pdfText = pdf.toString('latin1');
+  expect((pdfText.match(/\/Type\s*\/Page\b/g) || []).length).toBe(1);
+  const mediaBox = pdfText.match(/\/MediaBox\s*\[([^\]]+)\]/)?.[1].trim().split(/\s+/).map(Number);
+  expect(mediaBox).toHaveLength(4);
+  expect(Math.abs((mediaBox[2] - mediaBox[0]) - 595.28)).toBeLessThanOrEqual(2);
+  expect(Math.abs((mediaBox[3] - mediaBox[1]) - 841.89)).toBeLessThanOrEqual(2);
+  expect(mediaBox[3] - mediaBox[1]).toBeGreaterThan(mediaBox[2] - mediaBox[0]);
   await page.emulateMedia({media: 'screen'});
   if (originalViewport) await page.setViewportSize(originalViewport);
   return pdf;
@@ -139,7 +148,23 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await page.getByRole('button', {name: 'Add instructor'}).click();
   expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Instructor name').fill('Meera Joshi');
+  await page.getByLabel('Specialties / styles').fill('Hatha, Breathwork');
+  await page.getByLabel('Experience (years)').fill('8');
+  await page.getByLabel('Joining date').fill('2024-04-15');
+  await page.getByLabel('Qualifications / certifications').fill('RYT-500 · Prenatal certificate');
+  await page.getByLabel('Instructor bio').fill('Gentle morning classes with a breath-led pace.');
   await page.getByRole('button', {name: 'Save instructor'}).click();
+  const instructorCard = page.locator('.erp-instructor-card', {hasText: 'Meera Joshi'});
+  await expect(instructorCard).toContainText('Hatha');
+  await expect(instructorCard).toContainText('RYT-500');
+  await expect(instructorCard).toContainText('8 yrs');
+  await expect(instructorCard).toContainText('15 Apr 2024');
+  await instructorCard.getByRole('button', {name: 'Edit profile'}).click();
+  await page.getByLabel('Specialties / styles').fill('Hatha, yin, Breathwork');
+  await page.getByLabel('Instructor bio').fill('Gentle, breath-led morning and evening classes.');
+  await page.getByRole('button', {name: 'Save instructor'}).click();
+  await expect(instructorCard).toContainText('yin');
+  await expect(instructorCard).toContainText('breath-led morning and evening');
   await page.getByRole('tab', {name: 'Batches'}).click();
   await page.getByRole('button', {name: 'Add batch'}).click();
   // Regression: Branch used to sit 21px below Batch name because an
@@ -155,6 +180,23 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await expect(page.getByRole('dialog').getByText('Asha Patil')).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('button', {name: 'Close Morning Hatha — roster'}).click();
+
+  // The signed-in/local Instructor role can add/remove existing students
+  // only through the roster of a batch assigned to that instructor.
+  await page.getByLabel('Portal role').selectOption('instructor');
+  await page.getByLabel('Acting instructor').selectOption({label: 'Meera Joshi'});
+  await expect(page.getByRole('button', {name: 'Branches & batches', exact: true})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Batches', exact: true}).click();
+  await page.getByRole('button', {name: /Roster/}).click();
+  const instructorRoster = page.getByRole('dialog', {name: 'Morning Hatha — roster'});
+  await expect(instructorRoster).toContainText('This is your assigned batch');
+  await instructorRoster.getByRole('button', {name: 'Remove'}).click();
+  await expect(instructorRoster.locator('.erp-att-row')).toHaveCount(0);
+  await instructorRoster.getByLabel('Add student to batch').selectOption({label: 'Asha Patil'});
+  await instructorRoster.getByRole('button', {name: 'Enroll student'}).click();
+  await expect(instructorRoster.locator('.erp-att-row')).toContainText('Asha Patil');
+  await page.getByRole('button', {name: 'Close Morning Hatha — roster'}).click();
+  await page.getByLabel('Portal role').selectOption('owner');
 
   // Attendance
   await page.getByRole('button', {name: 'Attendance', exact: true}).click();

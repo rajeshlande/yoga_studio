@@ -11,7 +11,8 @@ import {
   ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, PLAN_TYPES, ROLES, attendanceSummary, batchTimeLabel,
   emptySnapshot, formatDate, formatINR, initials, isBatchOnDate, isOneMonthMembership,
   membershipEnd, membershipOfferingType, monthlyRecurringRevenuePaise, nextRenewalDate,
-  normalizePlanTemplate, normalizePlanType, paiseToRupees, pauseDaysBetween,
+  normalizeInstructorProfile, normalizePlanTemplate, normalizePlanType, paiseToRupees,
+  pauseDaysBetween,
   planBillingPeriodLabel, payableBalance, renewalStartDate, rupeesToPaise, subscriptionLifecycle,
   toCSV, toISODate, addDaysISO,
   INDIA_STATE_CODES, billingReadiness, buildUpiUri, calculateInvoiceTax,
@@ -265,6 +266,14 @@ function membershipKindLabel(data, membership) {
   return isOneMonthMembership(membership, plan) ? 'One-month pass' : 'Subscription';
 }
 function inBranch(ctx, branchId) { return !ctx.branchId || ctx.branchId === 'all' || ctx.branchId === branchId; }
+function nextBatchDate(batch, today = toISODate()) {
+  if (!batch) return '';
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const date = addDaysISO(today, offset);
+    if (isBatchOnDate(batch, date)) return date;
+  }
+  return '';
+}
 function renewalChildByPrevious(data) {
   const byPrevious = new Map();
   for (const membership of data.memberships || []) {
@@ -412,6 +421,8 @@ const SYNC_FIELD_LABELS = {
   renewalNumber: 'Renewal number', pausedFrom: 'Paused from', pausedUntil: 'Expected resume date',
   pauseReason: 'Pause reason', totalPausedDays: 'Total paused days',
   cancelledAt: 'Cancelled at', cancelReason: 'Cancellation reason',
+  bio: 'Instructor bio', specialties: 'Specialties / styles',
+  qualifications: 'Qualifications / certifications', experienceYears: 'Experience (years)',
 };
 
 const YOGA_EXPERIENCE_OPTIONS = [
@@ -588,6 +599,11 @@ const canManage = ctx => ctx.role === 'owner' || ctx.role === 'co_owner' || ctx.
 const canManageOrg = ctx => ctx.role === 'owner' || ctx.role === 'co_owner';
 const canManageAccess = ctx => canManage(ctx);
 const canSetupInstructorProfiles = ctx => canManage(ctx);
+const canEditBatchRoster = (ctx, batch) => Boolean(batch) && (
+  canManage(ctx)
+  || (ctx.role === 'instructor' && ctx.instructorId
+    && batch.instructorId === ctx.instructorId && batch.status === 'active')
+);
 
 /* ---------------- dashboard ---------------- */
 
@@ -887,7 +903,7 @@ export function BranchesPage(props) {
     </div>
     {tab === 'branches' && <BranchesSection {...props}/>}
     {tab === 'batches' && <BatchesSection {...props} onShowBranches={() => setTab('branches')}/>}
-    {tab === 'instructors' && canSetupInstructorProfiles(ctx) && <InstructorProfilesSection {...props}/>}
+    {tab === 'instructors' && canSetupInstructorProfiles(ctx) && <InstructorProfilesSection {...props} onShowBatches={() => setTab('batches')}/>}
   </>;
 }
 
@@ -1114,7 +1130,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v8) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v9) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
@@ -1785,22 +1801,170 @@ export function RoleAccessPage(props) {
 /* ---------------- batches & instructors ---------------- */
 
 function InstructorProfilesSection(props) {
-  const {erp, ctx, go} = props; const {data} = erp;
-  const [newInstructor, setNewInstructor] = useState(null);
-  const saveInstructor = async e => { e.preventDefault(); if (!canSetupInstructorProfiles(ctx)) return; if (await erp.act(c => c.saveInstructor(newInstructor), 'Instructor saved.')) setNewInstructor(null); };
+  const {erp, ctx, go, onShowBatches} = props; const {data} = erp;
+  const [form, setForm] = useState(null);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const today = toISODate();
+
+  const statsFor = instructor => {
+    const batches = data.batches.filter(batch => batch.instructorId === instructor.id);
+    const activeBatches = batches.filter(batch => batch.status === 'active');
+    const batchIds = new Set(activeBatches.map(batch => batch.id));
+    const studentIds = new Set(data.enrollments
+      .filter(enrollment => enrollment.status === 'active' && batchIds.has(enrollment.batchId))
+      .map(enrollment => enrollment.studentId));
+    const nextClasses = activeBatches
+      .map(batch => ({batch, date: nextBatchDate(batch, today)}))
+      .filter(item => item.date)
+      .sort((a, b) => a.date.localeCompare(b.date)
+        || String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || ''))
+        || a.batch.name.localeCompare(b.batch.name));
+    const taughtBranchIds = [...new Set(activeBatches.map(batch => batch.branchId).filter(Boolean))];
+    return {
+      activeBatches,
+      studentCount: studentIds.size,
+      nextClass: nextClasses[0] || null,
+      taughtBranches: taughtBranchIds.map(id => branchName(data, id)),
+    };
+  };
+
+  const canEditInstructor = instructor => canManageOrg(ctx)
+    || (ctx.role === 'admin' && instructor.branchId
+      && data.branches.some(branch => branch.id === instructor.branchId && branch.status !== 'archived'));
+
+  const visibleInstructors = data.instructors
+    .map(instructor => ({instructor, profile: normalizeInstructorProfile(instructor), stats: statsFor(instructor)}))
+    .filter(({instructor, profile, stats}) => {
+      const branchRelevant = inBranch(ctx, instructor.branchId)
+        || !instructor.branchId
+        || stats.activeBatches.some(batch => inBranch(ctx, batch.branchId));
+      if (!branchRelevant) return false;
+      if (statusFilter !== 'all' && (instructor.status || 'active') !== statusFilter) return false;
+      const needle = query.trim().toLocaleLowerCase('en-IN');
+      if (!needle) return true;
+      return [instructor.fullName, instructor.email, instructor.phone, profile.bio,
+        profile.qualifications, ...profile.specialties]
+        .join(' ').toLocaleLowerCase('en-IN').includes(needle);
+    })
+    .sort((a, b) => Number((b.instructor.status || 'active') === 'active')
+      - Number((a.instructor.status || 'active') === 'active')
+      || a.instructor.fullName.localeCompare(b.instructor.fullName));
+
+  const summary = {
+    active: data.instructors.filter(instructor => (instructor.status || 'active') === 'active').length,
+    batches: data.batches.filter(batch => batch.status === 'active' && batch.instructorId).length,
+    students: new Set(data.enrollments.filter(enrollment => enrollment.status === 'active'
+      && data.batches.some(batch => batch.id === enrollment.batchId && batch.instructorId)).map(enrollment => enrollment.studentId)).size,
+    specialties: new Set(data.instructors.flatMap(instructor => normalizeInstructorProfile(instructor).specialties
+      .map(specialty => specialty.toLocaleLowerCase('en-IN')))).size,
+  };
+
+  const openNew = () => setForm({
+    fullName: '', phone: '', email: '', branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''),
+    bio: '', specialties: '', qualifications: '', experienceYears: 0, joiningDate: today, status: 'active',
+  });
+  const openEdit = instructor => {
+    const profile = normalizeInstructorProfile(instructor);
+    setForm({
+      ...instructor,
+      ...profile,
+      specialties: profile.specialties.join(', '),
+      status: instructor.status || 'active',
+    });
+  };
+  const saveInstructor = async event => {
+    event.preventDefault();
+    if (!canSetupInstructorProfiles(ctx)) return;
+    const payload = {...form, ...normalizeInstructorProfile(form)};
+    if (await erp.act(c => c.saveInstructor(payload), form.id ? 'Instructor profile updated.' : 'Instructor saved.')) {
+      setForm(null);
+    }
+  };
+
   if (!canSetupInstructorProfiles(ctx)) return null;
   return <>
-    {canSetupInstructorProfiles(ctx) && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Instructor profiles</h2><p>{data.instructors.length} instructor(s) · Profile setup is limited to the Owner, Co-owner and authorized branch Admins.</p></div>
-      <div className="erp-actions"><button className="secondary-button" onClick={() => go('access')}><KeyRound size={15}/> Portal access</button><button className="secondary-button" onClick={() => setNewInstructor({fullName: '', phone: '', email: '', branchId: data.branches[0]?.id || ''})}><Plus size={15}/> Add instructor</button></div></div>
-      {data.instructors.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No instructors yet. Add one before creating a batch.</p> :
-      <div className="erp-actions">{data.instructors.map(i => <span key={i.id} className="erp-badge lavender" style={{padding: '8px 12px', fontSize: 12}}>{i.fullName}{i.branchId ? ` · ${branchName(data, i.branchId)}` : ''}</span>)}</div>}
-    </section>}
-    {newInstructor && canSetupInstructorProfiles(ctx) && <Dialog title="Add instructor" onClose={() => setNewInstructor(null)}><form className="erp-form" onSubmit={saveInstructor}>
-      <label className="erp-field">Instructor name<input required value={newInstructor.fullName} onChange={e => setNewInstructor({...newInstructor, fullName: e.target.value})}/></label>
-      <label className="erp-field">Branch<select required={!canManageOrg(ctx)} value={newInstructor.branchId} onChange={e => setNewInstructor({...newInstructor, branchId: e.target.value})}>{canManageOrg(ctx) ? <option value="">All branches</option> : <option value="">Choose branch…</option>}{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
-      <label className="erp-field">Phone<input type="tel" value={newInstructor.phone} onChange={e => setNewInstructor({...newInstructor, phone: e.target.value})}/></label>
-      <label className="erp-field">Email<input type="email" value={newInstructor.email} onChange={e => setNewInstructor({...newInstructor, email: e.target.value})}/></label>
-      <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setNewInstructor(null)}>Cancel</button><button className="primary-button">Save instructor</button></div></form></Dialog>}
+    <section className="erp-panel">
+      <div className="erp-panel-head align-end">
+        <div>
+          <h2>Instructor profiles</h2>
+          <p>{data.instructors.length} instructor(s) · Teaching profiles can be set up only by the Owner, Co-owner or an authorized branch Admin.</p>
+        </div>
+        <div className="erp-actions">
+          <span className="erp-search"><Search size={15}/><input aria-label="Search instructors" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or specialty…"/></span>
+          <label className="erp-field erp-instructor-status-filter">Status<select aria-label="Instructor status filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+          <button className="secondary-button" onClick={() => go('access')}><KeyRound size={15}/> Portal access</button>
+          <button className="primary-button" onClick={openNew}><Plus size={15}/> Add instructor</button>
+        </div>
+      </div>
+
+      <div className="erp-instructor-summary" aria-label="Instructor summary">
+        <span><strong>{summary.active}</strong> active instructor(s)</span>
+        <span><strong>{summary.batches}</strong> assigned active batch(es)</span>
+        <span><strong>{summary.students}</strong> student(s) taught</span>
+        <span><strong>{summary.specialties}</strong> specialty/style tag(s)</span>
+      </div>
+
+      {data.instructors.length === 0 ? <Empty icon={Users} title="No instructors yet" text="Add an instructor profile before assigning a teacher to a batch." action={<button className="primary-button" onClick={openNew}><Plus size={15}/> Add first instructor</button>}/>
+        : visibleInstructors.length === 0 ? <Empty icon={Search} title="No matching instructors" text="Try a different name, specialty or status filter."/>
+        : <div className="erp-instructor-grid">
+          {visibleInstructors.map(({instructor, profile, stats}) => {
+            const status = instructor.status || 'active';
+            const editable = canEditInstructor(instructor);
+            return <article className={`erp-instructor-card ${status === 'inactive' ? 'inactive' : ''}`} key={instructor.id}>
+              <header>
+                <span className="erp-instructor-avatar" aria-hidden="true">{initials(instructor.fullName)}</span>
+                <div>
+                  <h3>{instructor.fullName}</h3>
+                  <p><Building2 size={13}/> {instructor.branchId ? branchName(data, instructor.branchId) : 'All branches'}</p>
+                </div>
+                <span className={`erp-badge ${status === 'active' ? 'green' : 'grey'}`}>{status}</span>
+              </header>
+
+              <p className="erp-instructor-bio">{profile.bio || 'No instructor bio added yet.'}</p>
+              {profile.specialties.length > 0 && <div className="erp-instructor-tags" aria-label="Instructor specialties">
+                {profile.specialties.map(specialty => <span key={specialty}>{specialty}</span>)}
+              </div>}
+
+              <dl className="erp-instructor-stats">
+                <div><dt>Batches</dt><dd>{stats.activeBatches.length}</dd></div>
+                <div><dt>Students</dt><dd>{stats.studentCount}</dd></div>
+                <div><dt>Experience</dt><dd>{profile.experienceYears ? `${profile.experienceYears} yr${profile.experienceYears === 1 ? '' : 's'}` : '—'}</dd></div>
+                <div><dt>Joined</dt><dd>{profile.joiningDate ? formatDate(profile.joiningDate) : '—'}</dd></div>
+              </dl>
+
+              <div className="erp-instructor-details">
+                {profile.qualifications && <p><Check size={14}/><span><strong>Qualifications:</strong> {profile.qualifications}</span></p>}
+                {stats.taughtBranches.length > 0 && <p><Building2 size={14}/><span><strong>Teaches at:</strong> {stats.taughtBranches.join(', ')}</span></p>}
+                {stats.nextClass && <p><CalendarClock size={14}/><span><strong>Next class:</strong> {stats.nextClass.batch.name} · {stats.nextClass.date === today ? 'Today' : formatDate(stats.nextClass.date)} · {batchTimeLabel(stats.nextClass.batch)}</span></p>}
+                {(instructor.phone || instructor.email) && <p><Users size={14}/><span>{[instructor.phone, instructor.email].filter(Boolean).join(' · ')}</span></p>}
+              </div>
+
+              <footer>
+                <button className="erp-link-btn" disabled={!editable} aria-label={`Edit profile for ${instructor.fullName}`} title={editable ? '' : 'Only an Owner, Co-owner or this instructor’s branch Admin can edit this profile.'} onClick={() => openEdit(instructor)}><Pencil size={13}/> Edit profile</button>
+                {onShowBatches && <button className="erp-link-btn" aria-label={`View batches for ${instructor.fullName}`} onClick={onShowBatches}><Clock size={13}/> View batches</button>}
+                <button className="erp-link-btn" aria-label={`Portal access for ${instructor.fullName}`} onClick={() => go('access')}><KeyRound size={13}/> Portal access</button>
+              </footer>
+            </article>;
+          })}
+        </div>}
+    </section>
+
+    {form && <Dialog title={form.id ? 'Edit instructor profile' : 'Add instructor'} sub="Profile setup is separate from sign-in access. Grant or change the Instructor portal login in Access after saving." onClose={() => setForm(null)} className="erp-dialog-wide">
+      <form className="erp-form" onSubmit={saveInstructor}>
+        <label className="erp-field">Instructor name<input required value={form.fullName} onChange={event => setForm({...form, fullName: event.target.value})} placeholder="e.g. Meera Joshi"/></label>
+        <label className="erp-field">Branch<select required={!canManageOrg(ctx)} value={form.branchId || ''} onChange={event => setForm({...form, branchId: event.target.value})}>{canManageOrg(ctx) ? <option value="">All branches</option> : <option value="">Choose branch…</option>}{data.branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+        <label className="erp-field">Phone<input type="tel" value={form.phone || ''} onChange={event => setForm({...form, phone: event.target.value})} autoComplete="tel"/></label>
+        <label className="erp-field">Email<input type="email" value={form.email || ''} onChange={event => setForm({...form, email: event.target.value})} autoComplete="email"/></label>
+        <label className="erp-field full">Specialties / styles<input value={form.specialties || ''} onChange={event => setForm({...form, specialties: event.target.value})} placeholder="Hatha, yin, Breathwork" maxLength={500}/><small>Separate up to 12 styles with commas.</small></label>
+        <label className="erp-field">Experience (years)<input type="number" min={0} max={80} step={1} value={form.experienceYears ?? 0} onChange={event => setForm({...form, experienceYears: event.target.value})}/></label>
+        <label className="erp-field">Joining date<input type="date" value={form.joiningDate || ''} onChange={event => setForm({...form, joiningDate: event.target.value})}/></label>
+        <label className="erp-field full">Qualifications / certifications<textarea rows={2} maxLength={500} value={form.qualifications || ''} onChange={event => setForm({...form, qualifications: event.target.value})} placeholder="e.g. RYT-500 · Prenatal yoga certificate"/></label>
+        <label className="erp-field full">Instructor bio<textarea rows={4} maxLength={1000} value={form.bio || ''} onChange={event => setForm({...form, bio: event.target.value})} placeholder="Teaching approach, class focus and experience…"/></label>
+        <label className="erp-field">Profile status<select value={form.status || 'active'} onChange={event => setForm({...form, status: event.target.value})}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setForm(null)}>Cancel</button><button className="primary-button">Save instructor</button></div>
+      </form>
+    </Dialog>}
   </>;
 }
 
@@ -1813,10 +1977,16 @@ function BatchesSection(props) {
     && (ctx.role !== 'student' || data.enrollments.some(e => e.batchId === b.id && e.studentId === ctx.studentId && e.status === 'active')));
   const toggleDay = day => setEditing(prev => ({...prev, days: prev.days.includes(day) ? prev.days.filter(d => d !== day) : [...prev.days, day]}));
   const saveBatch = async e => { e.preventDefault(); if (!editing.days.length) return; if (await erp.act(c => c.saveBatch(editing), 'Batch saved.')) setEditing(null); };
-  const rosterList = roster ? data.enrollments.filter(e => e.batchId === roster.id && e.status === 'active') : [];
-  const addable = roster ? data.students.filter(s => s.status === 'active' && s.branchId === roster.branchId && !rosterList.some(e => e.studentId === s.id)) : [];
+  const rosterList = roster ? data.enrollments
+    .filter(e => e.batchId === roster.id && e.status === 'active')
+    .sort((a, b) => studentName(data, a.studentId).localeCompare(studentName(data, b.studentId))) : [];
+  const addable = roster ? data.students
+    .filter(s => s.status === 'active' && s.branchId === roster.branchId && !rosterList.some(e => e.studentId === s.id))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName)) : [];
+  const rosterEditable = canEditBatchRoster(ctx, roster);
+  const seatsLeft = roster ? Math.max(0, Number(roster.capacity || 0) - rosterList.length) : 0;
   return <>
-    <section className="erp-panel"><div className="erp-panel-head"><div><h2>{ctx.role === 'instructor' ? 'My batches' : ctx.role === 'student' ? 'My batches' : 'All batches'}</h2><p>{batches.length} batch(es)</p></div>
+    <section className="erp-panel"><div className="erp-panel-head"><div><h2>{ctx.role === 'instructor' ? 'My batches' : ctx.role === 'student' ? 'My batches' : 'All batches'}</h2><p>{batches.length} batch(es){ctx.role === 'instructor' ? ' · Open Roster to add or remove students in your assigned batches.' : ''}</p></div>
       {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), instructorId: '', days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20})}><Plus size={16}/> Add batch</button>}</div>
       {data.branches.length === 0 && canManage(ctx) ? <Empty icon={Building2} title="Add a branch first" text="Batches run at a branch." action={<button className="primary-button" onClick={() => (onShowBranches ? onShowBranches() : go('branches'))}>Go to Branches</button>}/> :
       batches.length === 0 ? <Empty icon={Clock} title={ctx.role === 'student' ? 'No assigned batches yet' : 'No batches here'} text={ctx.role === 'instructor' && !ctx.instructorId ? 'Choose “Acting instructor” above to see assigned batches.' : ctx.role === 'student' && !ctx.studentId ? 'Choose “Acting student” above to see assigned batches.' : ctx.role === 'student' ? 'When the studio enrolls you in a batch, it will appear here.' : 'Create a batch with days and a start time, then enroll students.'}/> :
@@ -1843,13 +2013,16 @@ function BatchesSection(props) {
         <div className="erp-field full"><span>Class days</span><div className="erp-days">{DAY_LABELS.map((label, day) => <button type="button" key={label} className={`erp-day ${editing.days.includes(day) ? 'on' : ''}`} aria-pressed={editing.days.includes(day)} onClick={() => toggleDay(day)}>{label}</button>)}</div></div>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button">Save batch</button></div>
       </form></Dialog>}
-    {roster && ctx.role !== 'student' && <Dialog title={`${roster.name} — roster`} sub={`${branchName(data, roster.branchId)} · ${rosterList.length}/${roster.capacity} enrolled`} onClose={() => setRoster(null)}>
+    {roster && ctx.role !== 'student' && <Dialog title={`${roster.name} — roster`} sub={`${branchName(data, roster.branchId)} · ${instructorName(data, roster.instructorId)} · ${rosterList.length}/${roster.capacity} enrolled · ${seatsLeft} seat(s) left`} onClose={() => setRoster(null)}>
+      {ctx.role === 'instructor' && <p className="erp-roster-scope">{rosterEditable
+        ? 'This is your assigned batch. You may add or remove existing active students from this branch; student records and batch settings remain manager-only.'
+        : 'This batch is read-only because it is not an active batch assigned to you.'}</p>}
       {rosterList.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No students enrolled yet.</p> :
-      rosterList.map(e => <div className="erp-att-row" key={e.id}><span className="erp-person"><span className="avatar">{initials(studentName(data, e.studentId))}</span><strong>{studentName(data, e.studentId)}</strong></span>
-        {canManage(ctx) && <button className="erp-link-btn erp-danger" onClick={() => erp.act(c => c.endEnrollment(e.id), 'Removed from batch.')}>Remove</button>}</div>)}
-      {canManage(ctx) && <form className="erp-form" style={{marginTop: 16}} onSubmit={async ev => { ev.preventDefault(); if (!addStudentId) return; if (rosterList.length >= roster.capacity) return props.notify('This batch is full.'); await erp.act(c => c.enrollStudent({batchId: roster.id, studentId: addStudentId}), 'Student enrolled.'); setAddStudentId(''); }}>
-        <label className="erp-field">Add student to batch<select value={addStudentId} onChange={e => setAddStudentId(e.target.value)}><option value="">Choose student…</option>{addable.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <div className="erp-form-actions"><button className="primary-button">Enroll student</button></div></form>}
+      rosterList.map(e => <div className="erp-att-row" key={e.id}><span className="erp-person"><span className="avatar">{initials(studentName(data, e.studentId))}</span><span><strong>{studentName(data, e.studentId)}</strong><small>Joined {formatDate(e.joinedOn)}</small></span></span>
+        {rosterEditable && <button className="erp-link-btn erp-danger" onClick={() => erp.act(c => c.endEnrollment(e.id), 'Removed from batch.')}>Remove</button>}</div>)}
+      {rosterEditable && <form className="erp-form" style={{marginTop: 16}} onSubmit={async ev => { ev.preventDefault(); if (!addStudentId) return; if (rosterList.length >= roster.capacity) return props.notify('This batch is full.'); if (await erp.act(c => c.enrollStudent({batchId: roster.id, studentId: addStudentId}), 'Student enrolled.')) setAddStudentId(''); }}>
+        <label className="erp-field">Add student to batch<select value={addStudentId} onChange={e => setAddStudentId(e.target.value)} disabled={seatsLeft === 0 || addable.length === 0}><option value="">{seatsLeft === 0 ? 'This batch is full' : addable.length === 0 ? 'No other active students in this branch' : 'Choose student…'}</option>{addable.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select><small>Only existing active students from {branchName(data, roster.branchId)} can be added.</small></label>
+        <div className="erp-form-actions"><button className="primary-button" disabled={!addStudentId || seatsLeft === 0}>Enroll student</button></div></form>}
     </Dialog>}
   </>;
 }
@@ -1910,7 +2083,7 @@ export function AttendancePage(props) {
       </div></div>
       {batch && !isBatchOnDate(batch, date) && <div className="erp-banner"><AlertCircle size={18}/><span><b>{batch.name}</b> is not scheduled on {formatDate(date)} ({DAY_LABELS[new Date(`${date}T12:00:00`).getDay()]}). You can still record a special class.</span></div>}
       {batches.length === 0 ? <Empty icon={Clock} title="No batch to mark" text="Create a batch and enroll students first."/> :
-      roster.length === 0 ? <Empty icon={Users} title="Roster is empty" text="Enroll students into this batch from Branches & batches → Batches."/> :
+      roster.length === 0 ? <Empty icon={Users} title="Roster is empty" text={ctx.role === 'instructor' ? 'Add existing students from Batches → Roster in this assigned batch.' : 'Enroll students into this batch from Branches & batches → Batches.'}/> :
       roster.map(s => <div className="erp-att-row" key={s.id}>
         <span className="erp-person"><span className="avatar">{initials(s.fullName)}</span><span><strong>{s.fullName}</strong><small>{attendanceSummary(data.attendance.filter(a => a.studentId === s.id)).rate ?? '—'}% overall</small></span></span>
         <span className="erp-att-btns" role="group" aria-label={`Attendance for ${s.fullName}`}>{ATTENDANCE_STATUSES.map(st =>
@@ -2260,7 +2433,7 @@ function InvoiceDialog({data, invoice, onClose}) {
     </article>
   );
 
-  return <Dialog title="Payment invoice" sub="Preview follows the app theme. Choose “Print / Save as PDF”, then select Save as PDF as the destination to download the file." onClose={onClose} className="erp-dialog-wide">
+  return <Dialog title="Payment invoice" sub="This document is formatted for exactly one A4 portrait page (210 × 297 mm). Choose “Print / Save A4 PDF”, then select Save as PDF as the destination." onClose={onClose} className="erp-dialog-wide">
     {settings.gstEnabled && <div className="erp-form erp-no-print" style={{marginBottom: 14}}>
       <label className="erp-field">Place of supply<select value={placeCode} onChange={e => setPlaceCode(e.target.value)}>
         {INDIA_STATE_CODES.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
@@ -2276,7 +2449,7 @@ function InvoiceDialog({data, invoice, onClose}) {
 
     <div className="erp-form-actions erp-no-print">
       <button className="secondary-button" onClick={onClose}>Close</button>
-      <button className="primary-button" onClick={printInvoice}><Printer size={15}/> Print / Save as PDF</button>
+      <button className="primary-button" onClick={printInvoice}><Printer size={15}/> Print / Save A4 PDF</button>
     </div>
     {createPortal(
       <div className="erp-print-root" aria-hidden="true">{invoiceDocument}</div>,

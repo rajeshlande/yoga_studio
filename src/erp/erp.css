@@ -281,18 +281,55 @@
  .erp-panel-head.align-end .erp-actions>.primary-button{flex:1.25 1 170px}
 }
 .erp-print-root{display:none}
-@page{size:A4;margin:12mm}
+/* Invoice PDFs are deliberately one ISO A4 portrait sheet: 210 × 297 mm.
+   With 10 mm printer margins the printable sheet is 190 × 277 mm; the
+   invoice is held 0.5 mm inside that height to avoid a rounding spill. */
+@page{size:210mm 297mm;margin:10mm}
 @media print{
  :root[data-theme="dark"]{color-scheme:light!important}
- html,body{width:auto!important;height:auto!important;min-height:0!important;overflow:visible!important;background:#fff!important}
+ html,body{width:190mm!important;height:auto!important;min-height:0!important;margin:0!important;overflow:visible!important;background:#fff!important}
  body.erp-invoice-open>#root{display:none!important}
- body.erp-invoice-open>.erp-print-root{display:block!important;position:static!important;width:100%!important;margin:0!important;padding:0!important;visibility:visible!important}
- .erp-print-root .erp-invoice{position:static!important;width:100%!important;max-width:none!important;margin:0!important;box-shadow:none!important;border-radius:0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ body.erp-invoice-open>.erp-print-root{display:block!important;position:static!important;width:190mm!important;height:276.5mm!important;margin:0!important;padding:0!important;overflow:hidden!important;visibility:visible!important}
+ .erp-print-root .erp-invoice{position:static!important;display:flex!important;flex-direction:column!important;width:190mm!important;height:276.5mm!important;max-width:190mm!important;max-height:276.5mm!important;margin:0!important;padding:7mm!important;box-sizing:border-box!important;overflow:hidden!important;background:#fff!important;color:#332b3d!important;border-color:#ded1ef!important;box-shadow:none!important;border-radius:0!important;font-size:9pt!important;line-height:1.35!important;break-inside:avoid!important;page-break-inside:avoid!important;break-after:avoid!important;page-break-after:avoid!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
  .erp-print-root .erp-invoice *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
- .erp-print-root .erp-invoice-table-wrap{overflow:visible!important}
- .erp-print-root .erp-invoice-table{min-width:0!important}
+ .erp-print-root .erp-invoice p{line-height:1.4!important}
+ .erp-print-root .erp-invoice-header{display:flex!important;flex:0 0 auto!important;gap:6mm!important;padding-bottom:4mm!important;border-bottom-color:#eee7f7!important}
+ .erp-print-root .erp-invoice-brand{gap:2.5mm!important;margin-bottom:2mm!important;color:#8664ba!important}
+ .erp-print-root .erp-invoice-brand h3{font-size:16pt!important;color:#3d3547!important}
+ .erp-print-root .erp-invoice-seller p{font-size:8.5pt!important;color:#7c6c8c!important}
+ .erp-print-root .erp-invoice-meta{min-width:58mm!important;text-align:right!important}
+ .erp-print-root .erp-invoice-title{font-size:16pt!important;color:#8664ba!important}
+ .erp-print-root .erp-invoice-status{margin:2mm 0 3mm!important;padding:1.2mm 2.8mm!important;font-size:8pt!important}
+ .erp-print-root .erp-invoice-status.paid{background:#e9f3ed!important;color:#2f6b45!important;border-color:#bcd8c5!important}
+ .erp-print-root .erp-invoice-status.unpaid{background:#fbeaea!important;color:#a34c4c!important;border-color:#efcaca!important}
+ .erp-print-root .erp-invoice-status.void{background:#f1edf5!important;color:#6d5d7d!important;border-color:#d8cde3!important}
+ .erp-print-root .erp-invoice-meta dl,.erp-print-root .erp-invoice-details{gap:1.2mm 4mm!important;font-size:8.5pt!important}
+ .erp-print-root .erp-invoice-meta dd,.erp-print-root .erp-invoice-details dd{color:#3d3547!important;text-align:right!important}
+ .erp-print-root .erp-invoice-billgrid{display:grid!important;flex:0 0 auto!important;grid-template-columns:1fr 1fr!important;gap:6mm!important;padding:4mm 0!important}
+ .erp-print-root .erp-invoice-billgrid h4,.erp-print-root .erp-invoice-payment h4{font-size:8pt!important;margin-bottom:2mm!important;color:#a295ae!important}
+ .erp-print-root .erp-invoice-billgrid p{font-size:9pt!important;color:#514559!important}
+ .erp-print-root .erp-invoice-table-wrap{flex:0 1 auto!important;overflow:visible!important;border-color:#ece6f1!important;border-radius:2mm!important}
+ .erp-print-root .erp-invoice-table{min-width:0!important;font-size:8.5pt!important}
+ .erp-print-root .erp-invoice-table th{padding:2mm!important;font-size:7.5pt!important}
+ .erp-print-root .erp-invoice-table td{padding:2.2mm 2mm!important;color:#40364c!important}
  .erp-print-root .erp-invoice-table thead{display:table-header-group}
  .erp-print-root .erp-invoice-table tr,.erp-print-root .erp-invoice-paycard,.erp-print-root .erp-invoice-summary{break-inside:avoid}
+ .erp-print-root .erp-invoice-footer{display:grid!important;flex:0 1 auto!important;grid-template-columns:1.25fr .95fr!important;gap:6mm!important;padding-top:4mm!important}
+ .erp-print-root .erp-invoice-paycard{display:flex!important;gap:4mm!important;padding:3mm!important;background:#eef8f1!important;border-color:#cfe3d5!important;border-radius:2mm!important}
+ .erp-print-root .erp-invoice-bank{font-size:8.5pt!important;color:#405447!important}
+ .erp-print-root .erp-invoice-bank p{margin-bottom:1mm!important}
+ .erp-print-root .erp-invoice-qr{width:30mm!important}
+ .erp-print-root .erp-invoice-qr img,.erp-print-root .erp-invoice-qr-placeholder{width:26mm!important;height:26mm!important}
+ .erp-print-root .erp-invoice-qr span{font-size:7pt!important;color:#3f6f50!important;margin-top:1.5mm!important}
+ .erp-print-root .erp-invoice-note{font-size:7.5pt!important;color:#8d7d99!important;margin-top:2mm!important}
+ .erp-print-root .erp-invoice-warning{font-size:8.5pt!important;padding:3mm!important;background:#fffaf2!important;border-color:#f3dcbd!important;color:#7a5527!important}
+ .erp-print-root .erp-invoice-summary{padding:3mm!important;background:#fdfcfe!important;border-color:#ece6f1!important;border-radius:2mm!important}
+ .erp-print-root .erp-invoice-summary>div{padding:1.2mm 0!important;font-size:8.5pt!important;color:#6b5a7c!important}
+ .erp-print-root .erp-invoice-summary strong{color:#3d3547!important}
+ .erp-print-root .erp-invoice-summary .grand{font-size:10pt!important;margin-top:2mm!important;padding-top:2.5mm!important;border-top-color:#ded1ef!important}
+ .erp-print-root .erp-invoice-summary .grand strong{color:#7551aa!important}
+ .erp-print-root .erp-invoice-summary p{font-size:7pt!important;margin-top:2mm!important;color:#a295ae!important}
+ .erp-print-root .erp-invoice-disclaimer{margin-top:auto!important;padding-top:3mm!important;border-top-color:#eee7f7!important;color:#a295ae!important;font-size:7.5pt!important;line-height:1.45!important}
  .erp-no-print{display:none!important}
 }
 
@@ -357,3 +394,41 @@
 :root[data-theme="dark"] .auth-local{border-top-color:#342a49}
 :root[data-theme="dark"] .auth-local p{color:#a89abb}
 @media print{:root[data-theme="dark"] .erp-receipt{background:#fff;color:#171320}:root[data-theme="dark"] .erp-receipt dt{color:#6b5c76}:root[data-theme="dark"] .erp-receipt dd{color:#171320}}
+
+/* Instructor profiles and assigned-batch rosters */
+.erp-field small{font-size:10px;font-weight:400;letter-spacing:0;color:#a295ae;line-height:1.45}
+.erp-link-btn:disabled{opacity:.45;cursor:not-allowed}
+.erp-instructor-status-filter{width:min(190px,100%)}
+.erp-instructor-summary{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 16px}
+.erp-instructor-summary span{display:inline-flex;gap:6px;align-items:center;border:1px solid #f0e9f5;background:#fdfcfe;border-radius:999px;padding:8px 12px;font-size:11px;color:#8d7d99}
+.erp-instructor-summary strong{color:#3d3547;font-size:13px}
+.erp-instructor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr));gap:14px}
+.erp-instructor-card{display:flex;flex-direction:column;border:1px solid #f0e9f5;background:#fdfcfe;border-radius:16px;padding:18px;min-width:0}
+.erp-instructor-card.inactive{opacity:.72}
+.erp-instructor-card>header{display:flex;align-items:flex-start;gap:12px}
+.erp-instructor-avatar{display:flex;align-items:center;justify-content:center;width:50px;height:50px;border-radius:50%;background:#8664ba;color:#fff;font-family:'Manrope',sans-serif;font-size:17px;font-weight:800;flex-shrink:0;box-shadow:0 8px 20px #8664ba25}
+.erp-instructor-card>header>div{flex:1;min-width:0}
+.erp-instructor-card h3{font-size:17px;color:#3d3547;line-height:1.3;overflow-wrap:anywhere}
+.erp-instructor-card>header p{display:flex;gap:5px;align-items:center;font-size:12px;color:#9b92a4;margin-top:4px}
+.erp-instructor-bio{font-size:13px;color:#665873;line-height:1.7;margin:15px 0 0;overflow-wrap:anywhere}
+.erp-instructor-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.erp-instructor-tags span{display:inline-flex;padding:5px 9px;border-radius:999px;background:#eee7f7;color:#7551aa;font-size:10px;font-weight:800;letter-spacing:.02em}
+.erp-instructor-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:16px 0 0}
+.erp-instructor-stats>div{border:1px solid #f0e9f5;background:#fff;border-radius:11px;padding:10px;min-width:0}
+.erp-instructor-stats dt{font-size:9px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#a295ae}
+.erp-instructor-stats dd{margin:4px 0 0;font-size:13px;font-weight:800;color:#3d3547;line-height:1.35;overflow-wrap:anywhere}
+.erp-instructor-details{display:grid;gap:8px;margin-top:14px}
+.erp-instructor-details p{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:#7d6b8f;line-height:1.6;margin:0;overflow-wrap:anywhere}
+.erp-instructor-details svg{flex-shrink:0;margin-top:2px;color:#8664ba}
+.erp-instructor-card>footer{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:auto;padding-top:14px}
+.erp-roster-scope{border:1px solid #ded1ef;background:#f6f1fb;color:#5c4377;border-radius:11px;padding:11px 13px;font-size:12px;line-height:1.65;margin:0 0 6px}
+:root[data-theme="dark"] .erp-field small{color:#aa99bd}
+:root[data-theme="dark"] .erp-instructor-summary span,:root[data-theme="dark"] .erp-instructor-card,:root[data-theme="dark"] .erp-instructor-stats>div{background:#251f34;border-color:#3a304d;color:#aa99bd}
+:root[data-theme="dark"] .erp-instructor-summary strong,:root[data-theme="dark"] .erp-instructor-card h3,:root[data-theme="dark"] .erp-instructor-stats dd{color:#f0e8f7}
+:root[data-theme="dark"] .erp-instructor-card>header p,:root[data-theme="dark"] .erp-instructor-bio,:root[data-theme="dark"] .erp-instructor-details p{color:#c3b2d4}
+:root[data-theme="dark"] .erp-instructor-tags span{background:#312649;color:#cdb1eb}
+:root[data-theme="dark"] .erp-roster-scope{background:#2d2344;border-color:#493761;color:#d8c7f1}
+@media(max-width:650px){
+ .erp-instructor-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .erp-instructor-status-filter{flex:1 1 190px;width:auto}
+}

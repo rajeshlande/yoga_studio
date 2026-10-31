@@ -6,6 +6,7 @@ import {readStoredTheme, writeStoredTheme, applyTheme, resolveTheme, nextTheme} 
 import {ArrowRight, ArrowLeft, Building2, CalendarCheck, Check, CheckCircle2, ChevronRight, Download, Eye, EyeOff, Layers, LayoutDashboard, Leaf, LockKeyhole, LogOut, Mail, Menu, Monitor, Moon, Settings, ShieldCheck, Sun, Repeat, CreditCard, UserRound, Users, Wallet, Wifi, WifiOff, X} from 'lucide-react';
 import {useErpData, ErpBlockingState, ErpDashboardSection, BranchesPage, StudentsPage, RoleAccessPage, BatchesPage, AttendancePage, SubscriptionsPage, PaymentsPage, PublicAdmissionPanel, downloadJSON} from './erp/ErpApp';
 import {exportLocalData, importLocalData, clearLocalData} from './lib/erp/localStore.js';
+import {DAY_LABELS, batchTimeLabel, formatDate, normalizeInstructorProfile} from './lib/erp/logic.js';
 
 const LOCAL_SESSION_KEY='yoga-studio-local-session';
 const LOCAL_PROFILE_KEY='yoga-studio-local-profile';
@@ -24,7 +25,7 @@ function Botanical({className=''}){return <svg className={className} viewBox="0 
 export default function App(){
  const [session,setSession]=useState(null);
  const [loading,setLoading]=useState(!!supabase),[screen,setScreen]=useState('login'),[page,setPage]=useState('dashboard');
- const [profile,setProfile]=useState({name:'',email:'',bio:''}),[drawer,setDrawer]=useState(false),[toast,setToast]=useState(''),[installPrompt,setInstallPrompt]=useState(null),[installHelp,setInstallHelp]=useState(false),[installed,setInstalled]=useState(window.matchMedia('(display-mode: standalone)').matches);
+ const [profile,setProfile]=useState({name:'',email:'',phone:'',bio:''}),[drawer,setDrawer]=useState(false),[toast,setToast]=useState(''),[installPrompt,setInstallPrompt]=useState(null),[installHelp,setInstallHelp]=useState(false),[installed,setInstalled]=useState(window.matchMedia('(display-mode: standalone)').matches);
  const [theme,setTheme]=useState(()=>readStoredTheme());
  const setThemeValue=t=>{setTheme(t);writeStoredTheme(t);applyTheme(t)};
  const [localSession,setLocalSession]=useState(()=>{try{return localStorage.getItem(LOCAL_SESSION_KEY)==='1'}catch{return false}});
@@ -34,12 +35,12 @@ export default function App(){
  const [admissionCodeFromLink]=useState(initialAdmissionCode);
  useEffect(()=>{try{localStorage.setItem('yoga-studio-erp-mode',erpMode)}catch{}},[erpMode]);
  useEffect(()=>{try{localStorage.setItem('yoga-studio-erp-context',JSON.stringify(erpCtx))}catch{}},[erpCtx]);
- useEffect(()=>{if(localSession&&!session){try{const saved=JSON.parse(localStorage.getItem(LOCAL_PROFILE_KEY)||'null');setProfile(saved||{name:'Studio Owner',email:'',bio:''})}catch{setProfile({name:'Studio Owner',email:'',bio:''})}}},[localSession,session]);
+ useEffect(()=>{if(localSession&&!session){try{const saved=JSON.parse(localStorage.getItem(LOCAL_PROFILE_KEY)||'null');setProfile({name:'Studio Owner',email:'',phone:'',bio:'',...(saved||{})})}catch{setProfile({name:'Studio Owner',email:'',phone:'',bio:''})}}},[localSession,session]);
  const recovery=useRef(window.location.hash.includes('type=recovery'));
  useFocusTrap(installHelp,'.install-dialog');
  useFocusTrap(drawer&&window.matchMedia('(max-width:650px)').matches,'.sidebar');
  useEffect(()=>{const hash=new URLSearchParams(window.location.hash.slice(1));if(hash.has('error')){setToast('This account link is invalid or has expired. Please request a new link.');setScreen('forgot');history.replaceState(null,'',authRedirectUrl)}},[]);
- useEffect(()=>{if(!supabase)return;let alive=true;supabase.auth.getSession().then(({data,error})=>{if(!alive)return;setSession(data.session);setLoading(false);if(error)setToast(authMessage(error))}).catch(()=>{if(alive){setLoading(false);setToast('Unable to connect. Please try signing in again.')}});const {data}=supabase.auth.onAuthStateChange((event,next)=>{if(!alive)return;setSession(next);setLoading(false);if(event==='PASSWORD_RECOVERY'||(recovery.current&&next)){setScreen('reset');recovery.current=false}if(next){const m=next.user.user_metadata||{};setProfile({name:typeof m.full_name==='string'&&m.full_name.trim()?m.full_name:(next.user.email?.split('@')[0]||'You'),email:next.user.email||'',bio:typeof m.bio==='string'?m.bio:''})}if(event==='SIGNED_OUT'){setScreen('login');setPage('dashboard')}});return()=>{alive=false;data.subscription.unsubscribe()}},[]);
+ useEffect(()=>{if(!supabase)return;let alive=true;supabase.auth.getSession().then(({data,error})=>{if(!alive)return;setSession(data.session);setLoading(false);if(error)setToast(authMessage(error))}).catch(()=>{if(alive){setLoading(false);setToast('Unable to connect. Please try signing in again.')}});const {data}=supabase.auth.onAuthStateChange((event,next)=>{if(!alive)return;setSession(next);setLoading(false);if(event==='PASSWORD_RECOVERY'||(recovery.current&&next)){setScreen('reset');recovery.current=false}if(next){const m=next.user.user_metadata||{};setProfile({name:typeof m.full_name==='string'&&m.full_name.trim()?m.full_name:(next.user.email?.split('@')[0]||'You'),email:next.user.email||'',phone:typeof m.phone==='string'?m.phone:'',bio:typeof m.bio==='string'?m.bio:''})}if(event==='SIGNED_OUT'){setScreen('login');setPage('dashboard')}});return()=>{alive=false;data.subscription.unsubscribe()}},[]);
  useEffect(()=>{const show=e=>{e.preventDefault();setInstallPrompt(e)},done=()=>{setInstalled(true);setInstallPrompt(null)};window.addEventListener('beforeinstallprompt',show);window.addEventListener('appinstalled',done);return()=>{window.removeEventListener('beforeinstallprompt',show);window.removeEventListener('appinstalled',done)}},[]);
  useEffect(()=>{applyTheme(theme);if(!window.matchMedia)return;const mql=window.matchMedia('(prefers-color-scheme: dark)');const onChange=()=>{if(theme==='system')applyTheme('system')};mql.addEventListener?.('change',onChange);return()=>mql.removeEventListener?.('change',onChange)},[theme]);
  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(''),4500);return()=>clearTimeout(t)},[toast]);
@@ -51,7 +52,7 @@ export default function App(){
  const erp=useErpData(effectiveMode,setToast,loggedIn&&screen!=='reset',remote=>{const roles=Array.isArray(remote?.roles)?remote.roles:[];setErpCtx(prev=>{const role=roles.includes(prev.role)?prev.role:(remote?.primaryRole&&roles.includes(remote.primaryRole)?remote.primaryRole:(['owner','co_owner','admin','instructor','student'].find(r=>roles.includes(r))||prev.role));return {...prev,role,instructorId:remote?.organizationId?(remote.instructorId||''):prev.instructorId,studentId:remote?.organizationId?(remote.studentId||''):prev.studentId}})},session?.user?.id||'');
  const metadataIntent=session?.user?.user_metadata?.account_intent;
  const accountIntent=accountIntentChoice&&session?.user?.id&&accountIntentChoice.userId===session.user.id?accountIntentChoice.intent:(metadataIntent==='owner'||metadataIntent==='member'?metadataIntent:'');
- const chooseAccountIntent=async intent=>{if(intent!=='owner'&&intent!=='member')return false;setAccountIntentChoice({userId:session?.user?.id||'',intent});if(!supabase||!session)return true;try{const m=session.user.user_metadata||{};const {error}=await supabase.auth.updateUser({data:{full_name:typeof m.full_name==='string'?m.full_name:profile.name,bio:typeof m.bio==='string'?m.bio:profile.bio,account_intent:intent}});if(error)throw error;return true}catch(err){setToast(authMessage(err));return false}};
+ const chooseAccountIntent=async intent=>{if(intent!=='owner'&&intent!=='member')return false;setAccountIntentChoice({userId:session?.user?.id||'',intent});if(!supabase||!session)return true;try{const m=session.user.user_metadata||{};const {error}=await supabase.auth.updateUser({data:{full_name:typeof m.full_name==='string'?m.full_name:profile.name,phone:typeof m.phone==='string'?m.phone:profile.phone,bio:typeof m.bio==='string'?m.bio:profile.bio,account_intent:intent}});if(error)throw error;return true}catch(err){setToast(authMessage(err));return false}};
  const noOrganization=!!session&&effectiveMode==='supabase'&&!!erp.remoteContext&&!erp.remoteContext.organizationId;
  const navItems=NAV_ITEMS.filter(n=>n.roles.includes(erpCtx.role));
  const isStudentPortal=erpCtx.role==='student';
@@ -64,7 +65,7 @@ export default function App(){
  const importBackup=async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{erp.setData(importLocalData(await file.text()));setToast('Backup imported on this device.')}catch(err){setToast(err.message||'Could not import that file.')}};
  const clearDevice=()=>{if(window.confirm('Remove all studio data stored on this device? Export a backup first if you need it.')){erp.setData(clearLocalData());setToast('Device data cleared.')}};
  const clearOfflineCopy=async()=>{if(!window.confirm('Reset the synced offline copy on this device? Supabase data will not be deleted; a fresh copy will download while you remain signed in.'))return;try{await erp.clearSyncCache();setToast('Offline copy reset on this device.');erp.load()}catch(err){setToast(err.message||'Could not reset the offline copy.')}};
- const logout=async()=>{const pendingSync=effectiveMode==='supabase'&&(erp.syncState?.pendingCount>0||erp.syncState?.conflictCount>0);if(pendingSync&&!window.confirm('You have ERP changes or conflicts that have not finished syncing. Sign out anyway? They will remain on this device for this account until you sign in and sync again.'))return;if(supabase&&session){const {error}=await supabase.auth.signOut();if(error){setToast(authMessage(error));return}if(effectiveMode==='supabase'&&!pendingSync){try{await erp.clearSyncCache()}catch{}}}try{localStorage.removeItem(LOCAL_SESSION_KEY)}catch{} setLocalSession(false);setSession(null);setAccountIntentChoice(null);setProfile({name:'',email:'',bio:''});setScreen('login');setPage('dashboard');setDrawer(false)};
+ const logout=async()=>{const pendingSync=effectiveMode==='supabase'&&(erp.syncState?.pendingCount>0||erp.syncState?.conflictCount>0);if(pendingSync&&!window.confirm('You have ERP changes or conflicts that have not finished syncing. Sign out anyway? They will remain on this device for this account until you sign in and sync again.'))return;if(supabase&&session){const {error}=await supabase.auth.signOut();if(error){setToast(authMessage(error));return}if(effectiveMode==='supabase'&&!pendingSync){try{await erp.clearSyncCache()}catch{}}}try{localStorage.removeItem(LOCAL_SESSION_KEY)}catch{} setLocalSession(false);setSession(null);setAccountIntentChoice(null);setProfile({name:'',email:'',phone:'',bio:''});setScreen('login');setPage('dashboard');setDrawer(false)};
  const install=async()=>{if(installPrompt){await installPrompt.prompt();const {outcome}=await installPrompt.userChoice;if(outcome==='accepted')setToast('Your studio is ready to install.');setInstallPrompt(null)}else setInstallHelp(true)};
  return <>{loading?<div className="loading"><Logo/><span className="loader"/><p>Opening your mindful space…</p></div>:(!loggedIn||screen==='reset')?<Auth key={screen} screen={screen} setScreen={setScreen} theme={theme} onCycleTheme={()=>setThemeValue(nextTheme(theme))} onLocalMode={enterLocalMode} admissionCode={admissionCode} onReset={()=>{setScreen('login');setToast('Password updated. You’re ready for a fresh start.')}}/>:noOrganization?<NoOrganizationScreen erpProps={erpProps} profile={profile} admissionCode={admissionCode} theme={theme} onCycleTheme={()=>setThemeValue(nextTheme(theme))} onLogout={logout}/>:<div className="workspace">
  {drawer&&<div className="drawer-backdrop" onClick={()=>setDrawer(false)}/>}
@@ -80,7 +81,7 @@ export default function App(){
  {page==='subscriptions'&&<SubscriptionsPage {...erpProps}/>}
  {page==='payments'&&<PaymentsPage {...erpProps}/>}
  {page==='fees'&&<PaymentsPage {...erpProps}/>}
- {page==='profile'&&<Profile profile={profile} setProfile={setProfile} notify={setToast} localAccount={!session} accountIntent={accountIntent}/>}
+ {page==='profile'&&<Profile profile={profile} setProfile={setProfile} notify={setToast} localAccount={!session} accountIntent={accountIntent} erp={erp} ctx={erpCtx} mode={effectiveMode} go={go}/>}
  {page==='settings'&&<><div className="page-heading"><div className="eyebrow">KEEP THINGS SIMPLE</div><h1>Your settings<span className="flower">✳</span></h1><p>A few essentials, all in one place.</p></div><section className="panel"><div className="panel-heading"><span className="small-icon lavender"><ShieldCheck size={19}/></span><div><h2>Your account</h2><p>A safe space starts with the basics.</p></div></div><div className="settings-row"><div><h3>Email address</h3><p>{profile.email}</p></div><span className="subtle-pill">Connected account</span></div><div className="settings-row"><div><h3>Password</h3><p>Send a secure password reset link to your email.</p></div><ResetButton email={profile.email} notify={setToast}/></div></section><section className="panel"><div className="panel-heading"><span className="small-icon lavender"><Sun size={19}/></span><div><h2>Appearance</h2><p>Choose a theme that feels right for your space.</p></div></div><div className="settings-row"><div><h3>Theme</h3><p>Light is soft and airy; Dark is gentle on the eyes at night; System follows your device.</p></div><div className="theme-segment" role="radiogroup" aria-label="Theme preference">{[{id:'light',label:'Light',icon:Sun},{id:'dark',label:'Dark',icon:Moon},{id:'system',label:'System',icon:Monitor}].map(opt=><button key={opt.id} type="button" role="radio" aria-checked={theme===opt.id} className={theme===opt.id?'active':''} onClick={()=>setThemeValue(opt.id)}><opt.icon size={14}/>{opt.label}</button>)}</div></div></section><section className="panel"><div className="panel-heading"><span className="small-icon mint"><Download size={19}/></span><div><h2>Your studio, on the go</h2><p>A little closer to your everyday.</p></div></div><div className="settings-row"><div><h3>{installed?'You’re all set':'Install Yoga Studio'}</h3><p>{installed?'The app is installed on this device.':'Add the app to your home screen for easy access.'}</p></div><button className="secondary-button" onClick={install} disabled={installed}>{installed?<Check size={15}/>:<Download size={15}/>} {installed?'Installed':'Install app'}</button></div><div className="offline-note"><CheckCircle2 size={14}/>{isStudentPortal?'After your first signed-in online visit, the app and your student records can open offline. New sign-ins and password actions still need a connection.':'After your first signed-in online visit, the app shell and your synced ERP copy work offline. New sign-ins and password actions still need a connection.'}</div></section>{canSeeStudioDataSettings&&<section className="panel"><div className="panel-heading"><span className="small-icon lavender"><Wallet size={19}/></span><div><h2>Studio ERP data</h2><p>Where students, batches, attendance, subscriptions and payments are stored.</p></div></div><div className="settings-row"><div><h3>Data mode</h3><p>{effectiveMode==='local'?'On this device — works offline. Data does not leave this browser.':'Supabase — shared across devices, with offline changes saved on this device and synced when internet returns.'}</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button className="secondary-button" disabled={effectiveMode==='local'} onClick={()=>setErpMode('local')}>This device</button><button className="secondary-button" disabled={!supabase||effectiveMode==='supabase'} onClick={()=>setErpMode('supabase')}>Supabase</button></div></div><div className="settings-row"><div><h3>Connect Supabase</h3><p>{supabase?'Run supabase/erp_setup.sql in your Supabase SQL Editor, then choose Supabase above.':'Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then run supabase/erp_setup.sql in the SQL Editor.'}</p></div><span className="subtle-pill">{supabase?'Auth connected':'Not configured'}</span></div>{effectiveMode==='supabase'&&<div className="settings-row"><div><h3>Offline sync</h3><p>{erp.syncState?.conflictCount?`${erp.syncState.conflictCount} conflict(s) need review from an ERP screen.`:erp.syncState?.pendingCount?`${erp.syncState.pendingCount} change(s) saved on this device are waiting to sync.`:erp.syncState?.lastSyncedAt?`Synced ${new Date(erp.syncState.lastSyncedAt).toLocaleString('en-IN')}.`:'Your signed-in ERP copy syncs automatically when internet returns.'} {erp.syncState?.storagePersistent===true?'Persistent device storage is on.':erp.syncState?.storagePersistent===false?'Persistent storage is not granted yet—do not clear site data while changes are waiting.':''}</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button className="secondary-button" onClick={()=>erp.syncNow()} disabled={erp.syncState?.syncing}>Sync now</button><button className="secondary-button" onClick={clearOfflineCopy}>Reset offline copy</button></div></div>}<div className="settings-row"><div><h3>Local-device backup</h3><p>Export or restore the separate “This device” ERP mode as a file. This does not export the signed-in offline sync queue.</p></div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button className="secondary-button" onClick={exportBackup}><Download size={15}/> Export backup</button><label className="secondary-button">Import backup<input type="file" accept="application/json" hidden aria-label="Import backup file" onChange={importBackup}/></label><button className="secondary-button" onClick={clearDevice}>Clear device data</button></div></div></section>}<section className="panel version-panel"><div className="panel-heading"><span className="small-icon lavender"><Leaf size={19}/></span><div><h2>{APP_NAME}</h2><p>Application version</p></div></div><div className="settings-row"><div><h3>Current version</h3><p>Version numbers follow semantic versioning.</p></div><span className="subtle-pill" aria-label="App version">v{APP_VERSION}</span></div></section><section className="panel signout-panel"><div><h2>Until your next mindful moment.</h2><p>Sign out of your account on this device.</p></div><button className="secondary-button" onClick={logout}><LogOut size={15}/>Sign out</button></section></>}
  <footer className="page-footer"><Leaf size={13}/> A mindful space, made for you.<span>{APP_NAME} · v{APP_VERSION}</span></footer></main></div></div>}
  {toast&&<div className="toast" role="status"><CheckCircle2 size={18}/><span>{toast}</span><button className="icon-button" aria-label="Dismiss message" onClick={()=>setToast('')}><X size={15}/></button></div>}
@@ -114,5 +115,194 @@ function Auth({screen,setScreen,onReset,onLocalMode,theme,onCycleTheme,admission
  {!forgot&&!reset&&!success&&<p className="auth-switch">{signup?'Already have an account?':'New to Yoga Studio?'} <button onClick={()=>setScreen(signup?'login':'signup')}>{signup?'Sign in':'Create an account'}</button></p>}
  {screen==='login'&&!success&&!admissionPath&&<div className="auth-local"><button type="button" className="secondary-button full" onClick={onLocalMode}>Use this device only — offline mode</button><p>For studio use without an account on this device. This separate local mode stays in this browser; signed-in Supabase mode has its own offline sync.</p></div>}<div className="auth-security"><ShieldCheck size={14}/>Your space is personal. Let’s keep it that way.</div></div></section></main><footer className="auth-footer"><span>© {new Date().getFullYear()} {APP_NAME} · v{APP_VERSION}</span><span>Mindfully made, just for you. <Leaf size={12}/></span></footer></div>
 }
-function Profile({profile,setProfile,notify,localAccount=false,accountIntent=''}){const [form,setForm]=useState(profile),[busy,setBusy]=useState(false);useEffect(()=>setForm(profile),[profile]);const save=async e=>{e.preventDefault();if(!form.name.trim()){notify('Please enter your name.');return}setBusy(true);try{const next={...form,name:form.name.trim()};if(localAccount){try{localStorage.setItem(LOCAL_PROFILE_KEY,JSON.stringify(next))}catch{}}else{const {error}=await supabase.auth.updateUser({data:{full_name:next.name,bio:next.bio,...(accountIntent?{account_intent:accountIntent}:{})}});if(error)throw error}setProfile(next);notify('Your profile has been updated.')}catch(err){notify(authMessage(err))}finally{setBusy(false)}};return <><div className="page-heading"><div className="eyebrow">A LITTLE MORE YOU</div><h1>Your profile<span className="flower">✳</span></h1><p>Your space. Your story. Your own kind of balance.</p></div><div className="profile-layout"><aside className="profile-summary"><div className="profile-cover"><Leaf size={60}/></div><Avatar name={profile.name} large/><h2>{profile.name}</h2><span className="subtle-pill">Studio member</span><p>{profile.bio||'Your story starts here.'}</p><div className="profile-summary-footer"><Leaf size={14}/>Growing at your own pace.</div></aside><form className="panel profile-form" onSubmit={save}><h2>Personal details</h2><p className="panel-subtitle">Nice to meet the person behind the practice.</p><label>Full name<input autoComplete="name" value={form.name} maxLength={80} required onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email address<input type="email" autoComplete="email" value={form.email} readOnly={!localAccount} onChange={e=>setForm({...form,email:e.target.value})}/><small>{localAccount?'Stored on this device only.':'Your sign-in email is managed with your account.'}</small></label><label>A little about you<textarea rows={4} maxLength={250} placeholder="Tell us a little about yourself…" value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/><small className="char-count">{form.bio.length}/250</small></label><div className="form-actions"><span><ShieldCheck size={13}/>Thoughtfully kept.</span><button className="primary-button" disabled={busy}>{busy?'Saving…':'Save changes'}<Check size={16}/></button></div></form></div></>}
+function Profile({profile, setProfile, notify, localAccount = false, accountIntent = '', erp, ctx, mode = 'local', go}) {
+  const [form, setForm] = useState(profile);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setForm({name: '', email: '', phone: '', bio: '', ...profile}), [profile]);
+
+  const data = erp?.data || {};
+  const branches = data.branches || [];
+  const students = data.students || [];
+  const instructors = data.instructors || [];
+  const batches = data.batches || [];
+  const enrollments = data.enrollments || [];
+  const remote = erp?.remoteContext || {};
+  const awaitingAccess = !localAccount && mode !== 'local' && !remote.organizationId;
+  const role = ctx?.role || remote.primaryRole || 'owner';
+  const roleLabel = awaitingAccess
+    ? (accountIntent === 'member' ? 'Awaiting studio access' : 'Studio account')
+    : (ROLE_LABELS[role] || role);
+  const branchName = id => branches.find(branch => branch.id === id)?.name || '—';
+  const organization = remote.organizationName || (mode === 'local' || localAccount ? 'This device' : 'Yoga Studio workspace');
+
+  const instructor = role === 'instructor'
+    ? instructors.find(record => record.id === (ctx?.instructorId || remote.instructorId))
+    : null;
+  const instructorProfile = instructor ? normalizeInstructorProfile(instructor) : null;
+  const instructorBatches = instructor
+    ? batches.filter(batch => batch.instructorId === instructor.id && batch.status === 'active')
+      .sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || '')) || a.name.localeCompare(b.name))
+    : [];
+  const instructorStudentCount = new Set(enrollments
+    .filter(enrollment => enrollment.status === 'active'
+      && instructorBatches.some(batch => batch.id === enrollment.batchId))
+    .map(enrollment => enrollment.studentId)).size;
+
+  const student = role === 'student'
+    ? students.find(record => record.id === (ctx?.studentId || remote.studentId))
+    : null;
+  const studentBatchIds = new Set(enrollments
+    .filter(enrollment => enrollment.studentId === student?.id && enrollment.status === 'active')
+    .map(enrollment => enrollment.batchId));
+  const studentBatches = student
+    ? batches.filter(batch => studentBatchIds.has(batch.id) && batch.status === 'active')
+      .sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || '')) || a.name.localeCompare(b.name))
+    : [];
+
+  const adminBranchNames = (Array.isArray(remote.adminBranchIds) && remote.adminBranchIds.length
+    ? remote.adminBranchIds.map(branchName)
+    : branches.filter(branch => branch.status !== 'archived').map(branch => branch.name));
+  const instructorBranchNames = [...new Set(instructorBatches.map(batch => branchName(batch.branchId)))];
+  const accessScope = awaitingAccess
+    ? 'No ERP role linked to this account yet'
+    : role === 'owner'
+    ? 'All branches and organization settings'
+    : role === 'co_owner'
+      ? 'All branches; primary Owner remains protected'
+      : role === 'admin'
+        ? (adminBranchNames.length ? adminBranchNames.join(', ') : 'No active branch assigned yet')
+        : role === 'instructor'
+          ? `${instructorBatches.length} assigned active batch(es)${instructorBranchNames.length ? ` · ${instructorBranchNames.join(', ')}` : ''}`
+          : student
+            ? `${branchName(student.branchId)} · ${studentBatches.length} assigned batch(es)`
+            : 'Your own student record';
+
+  const details = [
+    ['ERP role', roleLabel],
+    ['Organization', organization],
+    ['Sign-in email', profile.email || '—'],
+    ['Access scope', accessScope],
+    ['Account type', localAccount ? 'Device-only profile' : 'Supabase account'],
+    ['Phone', profile.phone || 'Not added'],
+  ];
+  if (instructor) {
+    details.push(
+      ['Instructor record', `${instructor.fullName} · ${instructor.status || 'active'}`],
+      ['Home branch', instructor.branchId ? branchName(instructor.branchId) : 'All branches'],
+      ['Teaching load', `${instructorBatches.length} batch(es) · ${instructorStudentCount} student(s)`],
+      ['Experience', instructorProfile.experienceYears ? `${instructorProfile.experienceYears} year(s)` : '—'],
+      ['Instructor joining date', instructorProfile.joiningDate ? formatDate(instructorProfile.joiningDate) : '—'],
+    );
+  }
+  if (student) {
+    details.push(
+      ['Student record', `${student.fullName} · ${student.status || 'active'}`],
+      ['Student branch', branchName(student.branchId)],
+      ['Student joining date', student.joiningDate ? formatDate(student.joiningDate) : '—'],
+    );
+  }
+
+  const save = async event => {
+    event.preventDefault();
+    const phone = String(form.phone || '').trim();
+    if (!form.name.trim()) { notify('Please enter your name.'); return; }
+    if (phone && !/^[+()\-.\s\d]{7,24}$/.test(phone)) { notify('Please enter a valid phone number, or leave Phone blank.'); return; }
+    setBusy(true);
+    try {
+      const next = {
+        name: form.name.trim(),
+        email: localAccount ? String(form.email || '').trim() : profile.email,
+        phone,
+        bio: form.bio || '',
+      };
+      if (localAccount) {
+        try { localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(next)); } catch {}
+      } else {
+        const {error} = await supabase.auth.updateUser({data: {
+          full_name: next.name,
+          phone: next.phone,
+          bio: next.bio,
+          ...(accountIntent ? {account_intent: accountIntent} : {}),
+        }});
+        if (error) throw error;
+      }
+      setProfile(next);
+      notify('Your profile has been updated.');
+    } catch (err) {
+      notify(authMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const batchSummary = batch => `${(batch.days || []).map(day => DAY_LABELS[day] || day).join(' ')} · ${batchTimeLabel(batch)} · ${branchName(batch.branchId)}`;
+  const quickActions = awaitingAccess
+    ? [['dashboard', 'Dashboard']]
+    : role === 'instructor'
+    ? [['batches', 'My batches'], ['attendance', 'Attendance']]
+    : role === 'student'
+      ? [['batches', 'My batches'], ['subscriptions', 'Subscriptions'], ['payments', 'Payments']]
+      : [['branches', 'Branches & batches'], ['access', 'Access'], ['dashboard', 'Dashboard']];
+
+  return <>
+    <div className="page-heading">
+      <div className="eyebrow">YOUR STUDIO ACCOUNT</div>
+      <h1>Your profile<span className="flower">✳</span></h1>
+      <p>Your sign-in details, ERP role and the studio record linked to this account.</p>
+    </div>
+    <div className="profile-layout">
+      <aside className="profile-summary">
+        <div className="profile-cover"><Leaf size={60}/></div>
+        <Avatar name={profile.name} large/>
+        <h2>{profile.name}</h2>
+        <span className="subtle-pill">{roleLabel}</span>
+        <p>{profile.bio || 'Your story starts here.'}</p>
+        <div className="profile-summary-meta">
+          <span><strong>Organization</strong>{organization}</span>
+          <span><strong>Access</strong>{accessScope}</span>
+        </div>
+        <div className="profile-summary-footer"><Leaf size={14}/>Growing at your own pace.</div>
+      </aside>
+
+      <form className="panel profile-form" onSubmit={save}>
+        <h2>Personal details</h2>
+        <p className="panel-subtitle">Name, phone and bio belong to your sign-in profile. ERP role and branch access are granted by an authorized studio manager and cannot be changed here.</p>
+
+        <dl className="profile-detail-grid" aria-label="Account access summary">
+          {details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+        </dl>
+
+        {instructor && <section className="profile-linked-record" aria-labelledby="profile-instructor-heading">
+          <h3 id="profile-instructor-heading">My instructor profile</h3>
+          <p>{instructorProfile.bio || 'No teaching bio has been added yet.'}</p>
+          {instructorProfile.specialties.length > 0 && <div className="profile-tag-list">{instructorProfile.specialties.map(specialty => <span key={specialty}>{specialty}</span>)}</div>}
+          {instructorProfile.qualifications && <p><strong>Qualifications:</strong> {instructorProfile.qualifications}</p>}
+          {instructorBatches.length > 0
+            ? <ul>{instructorBatches.map(batch => <li key={batch.id}><strong>{batch.name}</strong><span>{batchSummary(batch)}</span></li>)}</ul>
+            : <p>No active batch is assigned to this instructor record yet.</p>}
+          <small>An Owner, Co-owner or authorized branch Admin maintains this teaching profile in Branches &amp; batches → Instructor profiles.</small>
+        </section>}
+
+        {student && <section className="profile-linked-record" aria-labelledby="profile-student-heading">
+          <h3 id="profile-student-heading">My student record</h3>
+          <p>{student.fullName} · {branchName(student.branchId)}{student.joiningDate ? ` · joined ${formatDate(student.joiningDate)}` : ''}</p>
+          {studentBatches.length > 0
+            ? <ul>{studentBatches.map(batch => <li key={batch.id}><strong>{batch.name}</strong><span>{batchSummary(batch)}</span></li>)}</ul>
+            : <p>No active batch is assigned to this student record yet.</p>}
+          <small>Your studio maintains the student record. This portal remains view-only for batches, fees and payments.</small>
+        </section>}
+
+        {go && <div className="profile-quick-actions" aria-label="Profile shortcuts">
+          {quickActions.map(([page, label]) => <button type="button" className="secondary-button" key={page} aria-label={`Open ${label} from profile`} onClick={() => go(page)}>{label}<ArrowRight size={14}/></button>)}
+        </div>}
+
+        <label>Full name<input autoComplete="name" value={form.name || ''} maxLength={80} required onChange={event => setForm({...form, name: event.target.value})}/></label>
+        <label>Email address<input type="email" autoComplete="email" value={form.email || ''} readOnly={!localAccount} onChange={event => setForm({...form, email: event.target.value})}/><small>{localAccount ? 'Stored on this device only.' : 'Your sign-in email is managed with your account and is read-only here.'}</small></label>
+        <label>Phone<input type="tel" autoComplete="tel" value={form.phone || ''} maxLength={24} placeholder="Optional contact number" onChange={event => setForm({...form, phone: event.target.value})}/></label>
+        <label>A little about you<textarea rows={4} maxLength={250} placeholder="Tell us a little about yourself…" value={form.bio || ''} onChange={event => setForm({...form, bio: event.target.value})}/><small className="char-count">{(form.bio || '').length}/250</small></label>
+        <div className="form-actions"><span><ShieldCheck size={13}/>Thoughtfully kept.</span><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}<Check size={16}/></button></div>
+      </form>
+    </div>
+  </>;
+}
 function ResetButton({email,notify}){const [busy,setBusy]=useState(false);return <button className="secondary-button" disabled={busy} onClick={async()=>{setBusy(true);try{const {error}=await supabase.auth.resetPasswordForEmail(email.trim(),{redirectTo:authRedirectUrl});if(error)throw error;notify('Check your email for a secure password reset link.')}catch(err){notify(authMessage(err))}finally{setBusy(false)}}}>{busy?'Sending…':'Reset password'}<ArrowRight size={14}/></button>}

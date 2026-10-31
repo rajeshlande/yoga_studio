@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.7.0)
+# Yoga Studio ERP — Core (v1.8.0)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
@@ -16,7 +16,7 @@ signed-in **Student portal access** workflow. Version 1.6.0 generalizes that
 server-checked account-linking model to **fixed Role Access for all five
 roles**: each person creates/confirms a dedicated account first, then an
 authorized manager links the exact sign-in email in **Access** (or
-**Students → Portal access** for a Student). SQL v8 enforces the role,
+**Students → Portal access** for a Student). SQL v9 enforces the role,
 selected-branch and own-record rules on snapshot, direct RPC and offline-sync
 paths; there is no custom permission-group/module editor. It also adds an
 account-first public Student admission link: a signed-in applicant submits
@@ -29,6 +29,10 @@ and manager-confirmed one-click renewals at the current Plan price. Version
 into operational templates with type/period/alignment/renewal defaults, and
 adds a distinct **One-month only** Plan/pass that does not pause or renew.
 Manager batch and instructor-profile work moves under **Branches & batches**.
+Version 1.8.0 turns Instructor records into rich teaching profiles, lets a
+signed-in Instructor add/remove existing active same-branch students in an
+active batch assigned to them, makes the signed-in account **Profile**
+role-aware, and fixes invoice/receipt print output to one A4 portrait page.
 This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
@@ -37,15 +41,16 @@ saved-method autopay.
 | Area | Included |
 |---|---|
 | Dashboard | KPIs (active students, today's classes, collected this month, pending dues), today's class list, subscriptions expiring in 7 days, first-run setup checklist; role-specific cards for Instructor/Student |
-| Branches & batches | Manager workspace with **Branches**, **Batches** and **Instructor profiles** tabs; add/edit/archive branches, per-branch student & batch counts, and branch filtering everywhere |
+| Branches & batches | Manager workspace with **Branches**, **Batches** and **Instructor profiles** tabs; add/edit/archive branches, per-branch student & batch counts, branch filtering everywhere, and searchable Instructor cards with bio, specialties/styles, qualifications/certifications, experience, joining date, status, assigned batches/students and next class |
 | Students | Add/edit/deactivate, search, branch, split name/contact/admission profile, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email, and a copyable public admission link with pending/confirmed/rejected manager review |
-| Batches | Manager tab under Branches & batches; standalone assigned-batch view remains for Instructor/Student. Instructors, recurring days + start time (60 min default), capacity, roster enroll/remove with capacity guard |
+| Batches | Manager tab under Branches & batches; standalone assigned-batch view remains for Instructor/Student. Instructors, recurring days + start time (60 min default), capacity, and roster enroll/remove with capacity guard. A signed-in Instructor may edit only the roster of an active batch assigned to them and only with existing active students from that branch |
 | Attendance | Date + batch picker (today's batch auto-selected), Present/Absent/Late per student, mark-all-present, history + CSV; students see only their own |
 | Subscriptions | Odoo-style Plan templates (type, ₹ price, billing period in months, default alignment, renewal default, Active/Archived); subscription periods with **calendar-month or joining-date** billing, amount/offering snapshots, lifecycle, pause/resume, cancellation reasons, renewal tracking/history, one-click current-price renewal, active/paused/renewals-due/MRR summary and dues. **One-month passes** are shown separately and cannot pause/renew or enter MRR |
-| Payments | Payment history, Record verified payment for subscriptions or one-month passes, server receipt numbers `YS-YYYY-NNNN`, CSV export, Owner/Co-owner Payment setup with optional GST/UPI/bank/public-gateway readiness, and themed A4 PDFs for unpaid/partial invoices and paid receipts with dynamic UPI QR only while outstanding; synced payments are append-only and corrected by audited void |
+| Payments | Payment history, Record verified payment for subscriptions or one-month passes, server receipt numbers `YS-YYYY-NNNN`, CSV export, Owner/Co-owner Payment setup with optional GST/UPI/bank/public-gateway readiness, and exactly-one-page A4 portrait PDFs for unpaid/partial invoices and paid receipts with dynamic UPI QR only while outstanding; synced payments are append-only and corrected by audited void |
 | Offline sync | Signed-in Supabase mode downloads a per-user device copy, applies ERP changes locally while offline, queues them in a durable mirrored outbox, requests persistent storage, and pushes in dependency order when internet returns; the global top bar plus ERP toolbar/Settings show Online/Offline, synced, waiting, syncing, setup-needed and conflict states |
 | Conflicts | Server row versions detect concurrent edits. Sync never uses last-write-wins: a review dialog compares **This device** with **Supabase now**; Keep Supabase discards the local proposal, while Keep mine reapplies only the fields changed on that device |
 | Access & portals | Five fixed server-enforced roles: protected primary Owner; all-branch Co-owner; selected-branch Admin; Instructor limited to linked batches/rosters/attendance; Student limited to a view-only own-record portal. **Access** manages Co-owner/Admin/Instructor sign-ins by confirmed email; **Students → Portal access** manages Student sign-ins |
+| Account profile | Role-aware signed-in **Profile** with editable name/phone/personal bio, read-only sign-in email, organization, ERP role/access scope, shortcuts and a linked Instructor teaching-profile or Student-record summary where applicable |
 | Appearance | Light/Dark/System theme from `feature_development`, adapted to every ERP screen, dialog, table and form; persisted as `ys-theme`, with pre-paint bootstrap and OS-preference sync |
 
 Deferred: **live** online-gateway checkout and webhook-verified automatic
@@ -101,7 +106,7 @@ the last successful pull; the sync RPC re-checks current permission on push.
 
 ### Role access and Student portal access
 
-Version 1.7.0 continues five fixed authorization roles, adapting Odoo's
+Version 1.8.0 continues five fixed authorization roles, adapting Odoo's
 security-group and record-rule ideas to this ERP:
 
 | Role | Scope | May manage access for | Important restrictions |
@@ -109,7 +114,7 @@ security-group and record-rule ideas to this ERP:
 | **Owner** | All branches | Co-owner, Admin, Instructor, Student | Primary Owner is protected; ownership transfer/removal is not offered in the app |
 | **Co-owner** | All branches | Admin, Instructor, Student | Cannot add/remove Owner or Co-owner |
 | **Admin** | Explicitly selected branches | Instructor and Student in those branches | Cannot manage Admins/Co-owners, plans, Payment setup or unassigned branches |
-| **Instructor** | Own linked instructor record and batches in authorized branches | Nobody | No fees, payments, student editing, Instructor profile setup or access administration |
+| **Instructor** | Own linked instructor record and batches in authorized branches | Nobody | May add/remove existing active same-branch students in an active assigned batch, subject to capacity; no fees/payments, Student-record creation/editing, batch schedule/capacity editing, Instructor profile setup or access administration |
 | **Student** | Own student record and assigned batches | Nobody | Personal view-only dashboard; no ERP writes, studio roster/class counts, sync badges/controls or **Studio ERP data** settings |
 
 The matrix is deliberately fixed. This release does not provide custom
@@ -119,14 +124,28 @@ None/View/Manage permission editors. The SQL snapshot, direct RPCs and
 hiding a screen in React is not treated as authorization.
 
 Instructor profile setup and Instructor Portal authorization are separate
-manager-only steps. **Branches & batches → Instructor profiles** creates the teaching
-record, while **Access → Instructor sign-ins** links a confirmed account to
-that record for explicit branches. Only the Owner, a Co-owner or an Admin
-acting within assigned branches can perform either step. The React screens
-hide both controls from Instructor and Student accounts, and
+manager-only steps. **Branches & batches → Instructor profiles** creates and
+edits the teaching record (name, home branch, phone, contact email, bio,
+specialties/styles, qualifications/certifications, experience years, joining
+date and status), while **Access → Instructor sign-ins** links a confirmed
+account to that record for explicit branches. Only the Owner, a Co-owner or
+an Admin acting within assigned branches can perform either step. The React
+screens hide both controls from Instructor and Student accounts, and
 `erp_save_instructor`, `erp_sync_push`, `erp_list_role_access`,
 `erp_grant_instructor_access` and `erp_revoke_instructor_access` re-check
 the same manager/branch boundary in SQL.
+
+Roster editing is the one narrow Instructor write added in SQL v9. The
+snapshot gives an Instructor full roster fields for students already enrolled
+in their batches and only name/branch/status/joining fields for active
+same-branch candidates in a branch where they teach; candidate contact,
+address, notes, admission details and medical text are blank. The direct
+`erp_enroll_student`/`erp_end_enrollment` RPCs and the enrollment branch of
+`erp_sync_push` call the same server helper: managers keep their branch
+scope, while an Instructor must be the active batch's assigned instructor
+with an active branch link. Activation requires an active student in the
+batch branch and the writers still enforce capacity. Student-record and
+batch writers remain manager-only.
 
 The **Settings → Studio ERP data** panel—data-mode selection, Supabase
 connection status, offline-copy reset and local-device backup import/export
@@ -261,7 +280,9 @@ issue and reason to join) and are editable later by an authorized manager.
 `fullName` remains the canonical display name composed from first/last.
 Medical / Physical issue is returned only to Owner/Co-owner, an Admin of the
 student's branch and that student; Instructor snapshots deliberately carry
-an empty value. The student can view their own confirmed admission details
+an empty value. SQL v9 also redacts a not-yet-enrolled roster candidate's
+contact/address/notes/admission fields from the Instructor snapshot. The
+student can view their own confirmed admission details
 on the personal dashboard but remains view-only.
 
 ### Native subscriptions and renewals
@@ -436,9 +457,11 @@ device store, direct RPCs and sync RPCs.
   calculation/display only—not GST filing, e-invoicing/IRN generation or a
   substitute for CA/accounting review.
 - PDF output is the browser's print-to-PDF pipeline. The print stylesheet
-  isolates the A4 invoice, preserves the current Light/Dark theme colours and
-  uses the invoice/receipt reference as the document title. PDFs are generated
-  on demand and are not stored in Supabase.
+  declares a 210 × 297 mm page with 10 mm margins and constrains the invoice
+  to the 190 × 276.5 mm printable sheet, producing exactly one A4 portrait
+  page with a light print palette; the screen preview still follows the app
+  theme. It uses the invoice/receipt reference as the document title. PDFs
+  are generated on demand and are not stored in Supabase.
 
 ### Why not PGlite (yet)
 
@@ -455,18 +478,20 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.7.0 this upgrades the database to **SQL v8**: all prior sync,
+   For v1.8.0 this upgrades the database to **SQL v9**: all prior sync,
    billing and Student-access objects; SQL v5 Co-owner/selected-branch
    authorization and staff-access RPCs; the SQL v6 organization admission
    code, locked `erp_admissions` workflow and structured Student profile;
-   SQL v7 subscription lifecycle/lineage rules; and SQL v8 Plan
-   `plan_type`, `billing_cycle` and `renewal_enabled_default`, membership
-   `offering_type`, one-month schema constraints/indexes, snapshot fields
-   and matching direct/sync normalization. It is additive and does not
-   delete business rows. Existing Plans/periods backfill as subscriptions
-   with joining-date template alignment and renewal tracking enabled, while
-   preserving amounts and period dates. Run SQL v8 before using One-month
-   only Plans/passes from the deployed app. If the new app reaches an older
+   SQL v7 subscription lifecycle/lineage rules; SQL v8 Plan-template and
+   one-month offering fields; and SQL v9 Instructor `bio`, `specialties`,
+   `qualifications`, `experience_years` and `joining_date`, profile
+   constraints/index/snapshot fields, candidate-redacted Instructor student
+   visibility, and matching direct/sync assigned-batch roster authorization.
+   It is additive and does not delete business rows. Existing Instructors
+   preserve name/contact/home branch/status and gain an empty profile. Run
+   SQL v9 (rather than stopping at v8) before using rich Instructor profiles
+   or Instructor roster editing from the deployed app. If the new app reaches
+   an older
    database, supported older sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and a queued one-month operation
    may need to be discarded and re-entered after the SQL upgrade.
@@ -490,8 +515,9 @@ rule), keeping it idempotent and non-destructive.
 
 ## Verification
 
-- The Node suite in `npm test` includes 36 checks: security configuration,
-  billing and subscription dates/lifecycle/MRR/money, attendance, sync
+- The Node suite in `npm test` includes 38 checks: security configuration,
+  billing and subscription dates/lifecycle/MRR/money, Instructor profile
+  normalization, attendance, sync
   coalescing/dependency waves (including source-before-renewal),
   natural-key attendance, equality reconciliation, field-level conflict
   rebasing, per-user persistence, pending receipts/void balances, GST
@@ -499,10 +525,12 @@ rule), keeping it idempotent and non-destructive.
   payment-setup validation, corrupt-primary sync-state recovery, and proof
   that student portal metadata never enters an offline student upsert.
 - `npm test` also runs twenty-one Playwright tests: the existing auth suite,
-  `tests/erp-local.spec.js` for separate local mode (including GST Payment
-  setup, subscription pause/resume/renewal persistence, dynamic UPI QR,
-  unpaid vs paid invoice behaviour and generation of a
-  real `%PDF` through Chromium), and `tests/erp-sync.spec.js`, which mocks
+  `tests/erp-local.spec.js` for separate local mode (including rich
+  Instructor profile create/edit, local Instructor roster remove/add, GST
+  Payment setup, subscription pause/resume/renewal persistence, dynamic UPI
+  QR, unpaid vs paid invoice behaviour and generation of a real one-page
+  A4 `%PDF` with an asserted MediaBox through Chromium), and
+  `tests/erp-sync.spec.js`, which mocks
   Supabase at the network boundary and drives offline edit → concurrent
   change → conflict review → resolution → dependency-ordered creates,
   offline Payment setup → mirrored queue/close guard → automatic sync,
@@ -510,7 +538,9 @@ rule), keeping it idempotent and non-destructive.
   Co-owner and branch-Admin Instructor Portal grants, hiding of Instructor
   profile setup/portal controls from Instructor and Student accounts,
   branch-Admin hiding of organization-role and Owner/Co-owner setup actions,
-  signed-in Instructor identity locking, a waiting student's dedicated
+  signed-in Instructor identity locking, assigned-batch roster enrollment
+  sync add/remove, the Instructor's role-aware account Profile with the
+  linked teaching profile, a waiting student's dedicated
   no-access screen and Retry after grant, an explicit prospective-Owner
   organization-creation path, the signed-in student's personal dashboard,
   assigned-batch-only/no-roster portal, hidden sync controls, Owner/Admin-only
@@ -546,13 +576,22 @@ rule), keeping it idempotent and non-destructive.
   direct/sync one-month normalization, mismatch and pause rejection,
   renewal-source conflicts and one-month payments; a separate v7 → v8
   simulation preserves active/paused periods and backfills subscription
-  template/offering fields. Those harnesses are not shipped and are not
-  live Supabase UAT.
-- Production UAT still required after running SQL v8 in the real project:
+  template/offering fields. A dedicated SQL v9 harness passes 24
+  fresh-install checks for rich profile normalization/snapshot fields,
+  candidate inclusion with private-field redaction, other-branch/inactive
+  exclusion, direct and sync assigned-batch roster add/remove, capacity
+  including rejection of a sync move into a full batch,
+  other-Instructor and Student-record-write denial, manager cleanup after a
+  student branch move, profile sync persistence and idempotent rerun; a
+  separate SQL v8 → v9 simulation passes 6 checks preserving an existing
+  Instructor while adding the empty profile and allowing a later rich
+  update. Those harnesses are not shipped and are not live Supabase UAT.
+- Production UAT still required after running SQL v9 in the real project:
   sign in as Owner and wait for **Online · synced**; save Payment setup as
   Owner/Co-owner; go offline and mark attendance + record a payment; verify
   the close warning, reconnect and verify automatic sync and one receipt
-  only; generate unpaid and paid invoice PDFs and scan the unpaid UPI QR;
+  only; generate unpaid and paid invoice PDFs, confirm each file is one
+  A4 portrait page, and scan the unpaid UPI QR;
   use two accounts to edit the same student concurrently and resolve the
   conflict both ways; then use separate confirmed Co-owner, Admin,
   Instructor and Student accounts to grant/revoke access and verify each
@@ -562,7 +601,12 @@ rule), keeping it idempotent and non-destructive.
   verify a branch Admin cannot confirm outside assigned branches, confirm
   into the correct branch, verify the applicant opens the Student portal,
   and verify an Instructor's roster/snapshot does not expose Medical /
-  Physical issue; pause/resume a subscription and verify its end date moves
+  Physical issue or a candidate's private fields; edit that Instructor's
+  bio/specialties/qualifications/experience/joining date, sign in as the
+  Instructor, add/remove a same-branch active student in an assigned batch,
+  fill the batch to capacity, confirm another Instructor's batch, inactive
+  and other-branch students are denied, and check the role-aware Profile;
+  pause/resume a subscription and verify its end date moves
   by the paused days, change its Plan price and verify a manager-created
   renewal uses the new price, verify a cancelled future renewal can be
   replaced, create a One-month only Plan/pass and verify no pause/renewal

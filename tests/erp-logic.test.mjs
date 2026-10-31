@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   attendanceSummary, formatINR, membershipBalance, membershipEnd,
-  monthlyRecurringRevenuePaise, nextRenewalDate, normalizePlanTemplate,
+  monthlyRecurringRevenuePaise, nextRenewalDate, normalizeInstructorProfile,
+  normalizePlanTemplate,
   normalizeSubscriptionLifecycle, pauseDaysBetween, planBillingPeriodLabel,
   renewalStartDate, rupeesToPaise, subscriptionLifecycle, isBatchOnDate,
 } from '../src/lib/erp/logic.js';
@@ -113,4 +114,31 @@ test('batch schedule matches the weekday of a date', () => {
   // 2026-10-29 is a Thursday.
   assert.equal(isBatchOnDate({days: [4]}, '2026-10-29'), true);
   assert.equal(isBatchOnDate({days: [1, 3, 5]}, '2026-10-29'), false);
+});
+
+test('instructor profiles normalize specialties, experience and joining date', () => {
+  assert.deepEqual(normalizeInstructorProfile({
+    bio: '  Gentle morning teacher.  ',
+    specialties: ' Hatha, yin, Hatha, , Breathwork ',
+    qualifications: '  RYT-500 · Prenatal certificate  ',
+    experienceYears: '7.8',
+    joiningDate: '2024-04-15',
+  }), {
+    bio: 'Gentle morning teacher.',
+    specialties: ['Hatha', 'yin', 'Breathwork'],
+    qualifications: 'RYT-500 · Prenatal certificate',
+    experienceYears: 7,
+    joiningDate: '2024-04-15',
+  });
+  assert.deepEqual(normalizeInstructorProfile({
+    specialties: ['Power', ' power ', 'Meditation'],
+    experienceYears: 99,
+    joiningDate: '15/04/2024',
+  }), {
+    bio: '',
+    specialties: ['Power', 'Meditation'],
+    qualifications: '',
+    experienceYears: 80,
+    joiningDate: '',
+  });
 });

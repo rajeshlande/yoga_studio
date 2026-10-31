@@ -2,9 +2,9 @@
 
 A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
-INR payments, payment setup and themed invoice PDFs.
+INR payments, payment setup and one-page A4 invoice PDFs.
 
-> **Current source release:** 1.7.0 · **Database setup:** SQL v8 in
+> **Current source release:** 1.8.0 · **Database setup:** SQL v9 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -59,11 +59,15 @@ into the application.
 - Student records with branch, split first/last name, contact and admission
   profile details, joining date, batches, attendance history/percentage,
   search and CSV export.
-- Instructor records and recurring batches with weekdays, start time,
-  duration, capacity and roster management. Managers manage them from
-  **Branches & batches → Batches** and **Branches & batches → Instructor
-  profiles**; Instructors and Students keep their standalone assigned-batch
-  view.
+- Rich Instructor profiles and recurring batches with weekdays, start time,
+  duration, capacity and roster management. A manager-maintained profile can
+  include a teaching bio, specialties/styles, qualifications/certifications,
+  experience, joining date, contact/home branch, status, assigned batches,
+  active-student counts and the next class. Managers manage profiles from
+  **Branches & batches → Instructor profiles**; Instructors and Students keep
+  their standalone assigned-batch view. A signed-in Instructor may open
+  **Roster** on an active batch assigned to them and add/remove existing
+  active students from that batch's branch, subject to capacity.
 - Attendance by date and batch using **Present**, **Absent** and **Late**,
   including mark-all-present, history and CSV export.
 - INR fee plans as reusable Odoo-style templates in **Subscriptions → Plans**.
@@ -105,9 +109,10 @@ into the application.
   - **Admin:** operations plus Instructor/Student access only in explicitly
     selected branches; cannot manage Admins/Co-owners, plans, payment setup
     or other branches.
-  - **Instructor:** own linked batches, rosters and attendance only; no
-    fees, payments, student editing, Instructor profile setup or access
-    administration.
+  - **Instructor:** own linked batches, rosters and attendance only. They
+    may add/remove existing active same-branch students in those batches,
+    but cannot create/edit Student records, change batch settings/capacity,
+    see fees/payments, set up Instructor profiles or administer access.
   - **Student:** a personal, view-only dashboard for their assigned batches,
     next classes, attendance, subscription lifecycle/next renewal, dues,
     payments and invoices. Students can open their own subscription history
@@ -134,6 +139,10 @@ into the application.
 
 ### Experience and platform
 
+- A role-aware **Profile** page for every signed-in user: editable name,
+  phone and personal bio; read-only sign-in email; ERP role, organization and
+  access scope; and the linked Instructor or Student record summary where one
+  exists. Role/branch assignments remain manager-controlled.
 - Responsive phone, tablet and desktop layouts with keyboard-focus handling.
 - Installable PWA with an offline app shell after the first successful visit.
 - Light, Dark and System themes with a top-bar quick toggle, a Settings
@@ -258,9 +267,12 @@ payment. The same themed document supports both cases:
 - **VOID:** preserves the receipt history and void reason and cannot be used
   to request payment.
 
-**Print / Save as PDF** uses the browser print dialog; choose **Save as PDF**
-as the destination there to download the complete document. The A4 layout, colors and dark/light appearance follow the current app
-theme. The in-app filename/title uses the invoice/receipt reference.
+**Print / Save A4 PDF** uses the browser print dialog; choose **Save as PDF**
+as the destination there to download the complete document. The print sheet
+is fixed to exactly one **A4 portrait page (210 × 297 mm)** with 10 mm
+margins and a light print palette; the on-screen preview still follows the
+app theme. The browser test verifies the generated PDF's one-page count and
+A4 MediaBox. The in-app filename/title uses the invoice/receipt reference.
 
 ### GST behaviour
 
@@ -336,7 +348,7 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v8 without deleting business rows.
+   earlier ERP installs to SQL v9 without deleting business rows.
 3. Configure the production Site URL for
    `https://rajeshlande.github.io/yoga_studio/` and add the scoped redirect
    pattern `https://rajeshlande.github.io/yoga_studio/**` so email links can
@@ -395,7 +407,10 @@ them. `.env.local` is ignored by Git.
 9. With separate confirmed test accounts, verify each role: Owner grants a
    Co-owner; Co-owner grants an Admin to one selected branch; that Admin
    grants an Instructor and Student only in that branch; Instructor sees
-   only their batches/attendance; Student sees only their own records. Then
+   only their batches/attendance, can add/remove an existing active
+   same-branch student in an assigned batch, and is denied another
+   Instructor's batch or a Student-record edit; Student sees only their own
+   records. Then
    remove each test link and verify the studio no longer loads for that
    account on the next online Retry/Sync.
 10. As a manager in the Student's branch, pause and resume a test
@@ -418,18 +433,21 @@ npm test
 
 The suite includes:
 
-- Node tests for security configuration, ERP money/dates, GST/UPI billing,
-  sync coalescing/dependencies/conflicts/payments, mirrored-state recovery
-  and theme helpers;
+- Node tests for security configuration, ERP money/dates, Instructor profile
+  normalization, GST/UPI billing, sync coalescing/dependencies/conflicts/
+  payments, mirrored-state recovery and theme helpers;
 - Playwright tests for authenticated UI flows, the separate local-device ERP
-  flow (including GST invoice, dynamic QR and real PDF generation), and a
-  mocked-Supabase offline → conflict → resolution flow;
+  flow (including rich Instructor profile create/edit, Instructor roster
+  add/remove, GST invoice, dynamic QR and a real one-page A4 PDF generation
+  check), and a mocked-Supabase offline → conflict → resolution flow;
 - mocked-Supabase role-access tests proving Owner grant/remove for Student,
   Co-owner, selected-branch Admin and Instructor accounts by registered
   email; Co-owner and branch-Admin Instructor Portal grants; hiding of
   Instructor profile setup and portal-access controls from Instructor and
   Student accounts; branch-Admin hiding of organization roles/plans/payment
-  setup; signed-in Instructor identity locking; a waiting student's
+  setup; signed-in Instructor identity locking, assigned-batch roster
+  add/remove sync operations and the linked rich Instructor account profile;
+  a waiting student's
   dedicated no-access screen and Retry flow; an explicit prospective-Owner
   creation path; the student's personal view-only dashboard/assigned-batch
   portal without sync controls or **Studio ERP data** settings;
@@ -465,11 +483,15 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v8 in the real Supabase project, test real Owner, Co-owner,
+running SQL v9 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
 confirmed email; submit and confirm a public admission from a fresh
 account and verify branch scope, Student portal access and Instructor
-medical-field redaction; verify other branch and own-record scoping; pause,
+medical-field redaction; edit an Instructor's rich profile as each manager
+type; as that Instructor add/remove a same-branch active student in an
+assigned batch and confirm capacity plus other-batch/other-branch denials;
+verify the role-aware Profile for each role; verify other branch and
+own-record scoping; pause,
 resume, renew and cancel test subscriptions, create/collect a one-month
 pass, and verify the Student view is read-only; run an offline
 attendance/payment/subscription cycle and billing-settings sync as an
@@ -494,15 +516,16 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.7.0:
+Recommended go-live order for 1.8.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` to install **SQL v8**.
-   SQL v8 includes all v5–v7 role, admission and subscription work and adds
-   Odoo-style Plan template fields plus each period's snapshotted offering
-   type. Existing Plans/periods backfill as subscriptions without changing
-   amounts or dates. Run it before using a One-month only Plan or pass.
-3. Deploy the 1.7.0 web build with the two public Actions secrets.
+2. Run the complete current `supabase/erp_setup.sql` to install **SQL v9**.
+   SQL v9 is cumulative: it includes the v5–v8 role, admission, subscription
+   and Plan-template work, adds bounded Instructor profile fields, and adds
+   server-side assigned-batch roster authorization for Instructors. Existing
+   Instructor rows keep name/contact/home branch/status and gain an empty
+   teaching profile. Run SQL v9 instead of stopping at v8.
+3. Deploy the 1.8.0 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.

@@ -14,7 +14,8 @@
 import {supabase} from '../auth.js';
 import {localStore} from './localStore.js';
 import {
-  emptySnapshot, membershipEnd, membershipOfferingType, normalizePlanTemplate,
+  emptySnapshot, membershipEnd, membershipOfferingType, normalizeInstructorProfile,
+  normalizePlanTemplate,
   normalizePlanType, normalizeSubscriptionLifecycle, toISODate,
   normalizeBillingSettings, validateBillingSettings,
 } from './logic.js';
@@ -75,7 +76,7 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v8) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v9) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -113,7 +114,7 @@ function studentAccessError(error) {
 
 function roleAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v8) in Supabase, then try again.');
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v9) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -166,7 +167,7 @@ function roleAccessError(error) {
 
 function admissionError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v8) in Supabase, then try again.');
+    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v9) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ADMISSION_LINK_INVALID/.test(text)) {
@@ -1100,9 +1101,14 @@ export function createErpClient(mode, options = {}) {
 
     saveInstructor: payload => queue((state, snapshot) => {
       if (!payload?.fullName?.trim()) throw new Error('Instructor name is required.');
+      const profile = normalizeInstructorProfile({
+        ...(existing(snapshot, 'instructors', payload) || {}),
+        ...(payload || {}),
+      });
       return enqueueUpsert(state, 'instructors', proposed(snapshot, 'instructors', payload, {
         branchId: payload.branchId || '', fullName: payload.fullName.trim(),
         phone: payload.phone || '', email: payload.email || '',
+        ...profile,
         status: payload.status || existing(snapshot, 'instructors', payload)?.status || 'active',
       }));
     }),

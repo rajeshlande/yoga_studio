@@ -400,7 +400,7 @@ test('co-owner can set up instructor profiles and grant instructor portal access
   await page.getByRole('tab', {name: 'Instructor profiles'}).click();
   await expect(page.getByRole('heading', {name: 'Instructor profiles'})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Add instructor'})).toBeVisible();
-  await page.getByRole('button', {name: 'Portal access'}).click();
+  await page.getByRole('button', {name: 'Portal access', exact: true}).click();
   await expect(page.getByRole('heading', {name: 'Instructor sign-ins'})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Add Co-owner', exact: true})).toHaveCount(0);
 
@@ -484,17 +484,48 @@ test('branch Admin access page hides organization roles and owner-only setup act
 test('signed-in instructor is locked to their linked instructor record', async ({page}) => {
   page.on('pageerror', error => console.error('Browser page error:', error.message));
   await mockAuth(page);
+  const BATCH = '88888888-8888-4888-8888-888888888888';
+  const CANDIDATE = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const ENROLLMENT = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
   const server = emptySnapshot();
   server.branches.push({id: BRANCH, name: 'Panvel', city: 'Panvel', address: '', phone: '', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
-  server.instructors.push({id: INSTRUCTOR_RECORD, branchId: BRANCH, fullName: 'Isha Rao', phone: '', email: 'isha-record@example.test', specialties: [], status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
-  server.batches.push({id: '88888888-8888-4888-8888-888888888888', branchId: BRANCH, name: 'Morning Hatha', instructorId: INSTRUCTOR_RECORD, days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20, status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  server.instructors.push({
+    id: INSTRUCTOR_RECORD, branchId: BRANCH, fullName: 'Isha Rao', phone: '9876500000',
+    email: 'isha-record@example.test', bio: 'Breath-led Hatha and restorative classes.',
+    specialties: ['Hatha', 'Restorative'], qualifications: 'RYT-500', experienceYears: 9,
+    joiningDate: '2023-06-01', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+  });
+  server.batches.push({id: BATCH, branchId: BRANCH, name: 'Morning Hatha', instructorId: INSTRUCTOR_RECORD, days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20, status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  server.students.push(
+    {id: STUDENT, branchId: BRANCH, firstName: 'Asha', lastName: 'Patil', fullName: 'Asha Patil', phone: '1111111111', email: 'asha@example.test', gender: '', dob: '', joiningDate: '2026-01-01', status: 'active', notes: '', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1},
+    // SQL v9 sends only roster-candidate fields for a not-yet-enrolled
+    // same-branch student; private profile fields stay blank in this fixture.
+    {id: CANDIDATE, branchId: BRANCH, firstName: 'Nikhil', lastName: 'Sharma', fullName: 'Nikhil Sharma', phone: '', email: '', gender: '', dob: '', joiningDate: '2026-02-01', status: 'active', notes: '', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1},
+  );
+  server.enrollments.push({id: ENROLLMENT, batchId: BATCH, studentId: STUDENT, joinedOn: '2026-01-01', status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
+  const syncRequests = [];
 
   await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
     const name = new URL(route.request().url()).pathname.split('/').pop();
+    const body = route.request().postDataJSON() || {};
     const reply = value => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(value)});
-    if (name === 'erp_get_context') return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['instructor'], primaryRole: 'instructor', adminBranchIds: [], instructorId: INSTRUCTOR_RECORD, studentId: null});
+    if (name === 'erp_get_context') return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['instructor'], primaryRole: 'instructor', adminBranchIds: [], branchIds: [BRANCH], instructorId: INSTRUCTOR_RECORD, studentId: null});
     if (name === 'erp_get_snapshot') return reply(structuredClone(server));
-    if (name === 'erp_sync_push') return reply({serverTime: new Date().toISOString(), results: []});
+    if (name === 'erp_sync_push') {
+      syncRequests.push(structuredClone(body));
+      const results = (body.p_payload?.operations || []).map(op => {
+        const list = server[op.entity];
+        const index = list.findIndex(record => record.id === op.entityId);
+        const record = {...op.payload, syncVersion: op.baseVersion ? op.baseVersion + 1 : 1};
+        if (index >= 0) list[index] = {...list[index], ...record};
+        else list.push(record);
+        return {
+          opId: op.opId, status: 'applied', entity: op.entity, entityId: op.entityId,
+          serverEntityId: op.entityId, serverVersion: record.syncVersion,
+        };
+      });
+      return reply({serverTime: new Date().toISOString(), results});
+    }
     return route.fulfill({status: 404, contentType: 'application/json', body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'})});
   });
 
@@ -508,11 +539,35 @@ test('signed-in instructor is locked to their linked instructor record', async (
   await expect(page.getByRole('heading', {name: 'Instructor profiles'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Add instructor'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Portal access'})).toHaveCount(0);
+
+  await page.getByRole('button', {name: /Roster/}).click();
+  const roster = page.getByRole('dialog', {name: 'Morning Hatha — roster'});
+  await expect(roster).toContainText('This is your assigned batch');
+  await roster.getByLabel('Add student to batch').selectOption({label: 'Nikhil Sharma'});
+  await roster.getByRole('button', {name: 'Enroll student'}).click();
+  await expect(roster.locator('.erp-att-row', {hasText: 'Nikhil Sharma'})).toBeVisible();
+  await roster.locator('.erp-att-row', {hasText: 'Asha Patil'}).getByRole('button', {name: 'Remove'}).click();
+  await expect(roster.locator('.erp-att-row', {hasText: 'Asha Patil'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Close Morning Hatha — roster'}).click();
+  const enrollmentOps = syncRequests.flatMap(request => request.p_payload?.operations || [])
+    .filter(op => op.entity === 'enrollments');
+  expect(enrollmentOps.map(op => [op.payload.studentId, op.payload.status])).toEqual([
+    [CANDIDATE, 'active'],
+    [STUDENT, 'ended'],
+  ]);
+
   await page.getByRole('button', {name: 'Attendance', exact: true}).click();
   const instructorPicker = page.getByLabel('Signed-in instructor');
   await expect(instructorPicker).toBeDisabled();
   await expect(instructorPicker).toHaveValue(INSTRUCTOR_RECORD);
-  await expect(page.getByRole('combobox', {name: 'Attendance batch'})).toHaveValue('88888888-8888-4888-8888-888888888888');
+  await expect(page.getByRole('combobox', {name: 'Attendance batch'})).toHaveValue(BATCH);
+
+  await page.getByRole('button', {name: 'Profile', exact: true}).click();
+  await expect(page.locator('.profile-detail-grid')).toContainText('Instructor');
+  await expect(page.locator('.profile-detail-grid')).toContainText('Isha Rao');
+  await expect(page.locator('.profile-linked-record')).toContainText('Breath-led Hatha');
+  await expect(page.locator('.profile-linked-record')).toContainText('RYT-500');
+  await expect(page.locator('.profile-linked-record')).toContainText('Morning Hatha');
 });
 
 test('signed-in student sees a view-only portal for their own records', async ({page}) => {
