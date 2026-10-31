@@ -130,7 +130,9 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await page.getByLabel('Branch name').fill('Panvel');
   await page.getByLabel('City').fill('Panvel');
   await page.getByRole('button', {name: 'Save branch'}).click();
-  await expect(page.getByRole('cell', {name: /Panvel/})).toBeVisible();
+  const branchCard = page.locator('.erp-branch-card', {hasText: 'Panvel'});
+  await expect(branchCard).toBeVisible();
+  await expect(branchCard).toContainText('Needs a batch');
 
   // Student
   await page.getByRole('button', {name: 'Students', exact: true}).click();
@@ -174,6 +176,13 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await page.getByRole('dialog').getByLabel('Batch branch').selectOption({label: 'Panvel'});
   await page.getByRole('dialog').getByLabel('Batch instructor').selectOption({label: 'Meera Joshi'});
   await page.getByRole('button', {name: 'Save batch'}).click();
+  const batchCard = page.locator('.erp-batch-card', {hasText: 'Morning Hatha'});
+  await expect(batchCard).toContainText('0/20 students');
+  await expect(batchCard).toContainText('20 seat(s) available');
+  await page.getByRole('button', {name: 'Schedule', exact: true}).click();
+  const mondaySchedule = page.locator('.erp-schedule-day', {hasText: 'Monday'});
+  await expect(mondaySchedule).toContainText('Morning Hatha');
+  await page.getByRole('button', {name: 'List', exact: true}).click();
   await page.getByRole('button', {name: /Roster/}).click();
   await page.getByLabel('Add student to batch').selectOption({label: 'Asha Patil'});
   await page.getByRole('button', {name: 'Enroll student'}).click();

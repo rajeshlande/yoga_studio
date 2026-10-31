@@ -2,19 +2,19 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {
   AlertCircle, Building2, CalendarCheck, CalendarClock, Check, CirclePause, CirclePlay, Clock,
-  Download, IndianRupee, KeyRound, Leaf, Pencil, Plus, Printer, RefreshCw, Repeat, Search,
-  Users, Wallet, WifiOff, X,
+  Copy, Download, IndianRupee, KeyRound, LayoutGrid, Leaf, List, MapPin, Pencil, Phone, Plus,
+  Printer, RefreshCw, Repeat, Search, Users, Wallet, WifiOff, X,
 } from 'lucide-react';
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
 import QRCode from 'qrcode';
 import {
-  ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, PLAN_TYPES, ROLES, attendanceSummary, batchTimeLabel,
-  emptySnapshot, formatDate, formatINR, initials, isBatchOnDate, isOneMonthMembership,
-  membershipEnd, membershipOfferingType, monthlyRecurringRevenuePaise, nextRenewalDate,
-  normalizeInstructorProfile, normalizePlanTemplate, normalizePlanType, paiseToRupees,
-  pauseDaysBetween,
-  planBillingPeriodLabel, payableBalance, renewalStartDate, rupeesToPaise, subscriptionLifecycle,
-  toCSV, toISODate, addDaysISO,
+  ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, PLAN_TYPES, ROLES, attendanceSummary,
+  batchEndMinutes, batchFill, batchOverlapDays, batchTimeLabel, emptySnapshot,
+  findInstructorScheduleConflicts, formatDate, formatINR, initials, isBatchOnDate,
+  isOneMonthMembership, membershipEnd, membershipOfferingType, monthlyRecurringRevenuePaise,
+  nextBatchDate, nextRenewalDate, normalizeInstructorProfile, normalizePlanTemplate,
+  normalizePlanType, paiseToRupees, pauseDaysBetween, planBillingPeriodLabel, payableBalance,
+  renewalStartDate, rupeesToPaise, subscriptionLifecycle, toCSV, toISODate, addDaysISO,
   INDIA_STATE_CODES, billingReadiness, buildUpiUri, calculateInvoiceTax,
   formatInvoiceINR, normalizeBillingSettings,
 } from '../lib/erp/logic.js';
@@ -266,14 +266,58 @@ function membershipKindLabel(data, membership) {
   return isOneMonthMembership(membership, plan) ? 'One-month pass' : 'Subscription';
 }
 function inBranch(ctx, branchId) { return !ctx.branchId || ctx.branchId === 'all' || ctx.branchId === branchId; }
-function nextBatchDate(batch, today = toISODate()) {
-  if (!batch) return '';
-  for (let offset = 0; offset <= 7; offset += 1) {
-    const date = addDaysISO(today, offset);
-    if (isBatchOnDate(batch, date)) return date;
-  }
-  return '';
+
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const FULL_DAY_LABELS = {
+  0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday',
+  4: 'Thursday', 5: 'Friday', 6: 'Saturday',
+};
+
+function nextUpcomingBatchDate(batch, today = toISODate()) {
+  if (!batch || batch.status !== 'active') return '';
+  const nextDate = nextBatchDate(batch, today);
+  if (!nextDate) return '';
+  if (nextDate !== today) return nextDate;
+  const endMinutes = batchEndMinutes(batch);
+  if (endMinutes === null) return nextDate;
+  const now = new Date();
+  const currentMinutes = (now.getHours() * 60) + now.getMinutes();
+  return endMinutes > currentMinutes
+    ? nextDate
+    : nextBatchDate(batch, addDaysISO(today, 1));
 }
+
+function relativeClassDateLabel(date, today = toISODate()) {
+  if (!date) return 'No upcoming class';
+  if (date === today) return 'Today';
+  if (date === addDaysISO(today, 1)) return 'Tomorrow';
+  const weekday = new Date(`${date}T12:00:00`).getDay();
+  return `${FULL_DAY_LABELS[weekday]} · ${formatDate(date)}`;
+}
+
+function batchDaySummary(batch) {
+  const days = new Set((batch?.days || []).map(Number));
+  return WEEK_ORDER.filter(day => days.has(day)).map(day => DAY_LABELS[day]).join(' · ') || 'No days set';
+}
+
+function batchWorkspaceMetrics(data, batch, today = toISODate(), studentId = '') {
+  const fill = batchFill(batch, data.enrollments);
+  const recentFrom = addDaysISO(today, -29);
+  const recentAttendance = (data.attendance || []).filter(record => (
+    record.batchId === batch?.id
+    && record.classDate >= recentFrom
+    && record.classDate <= today
+    && (!studentId || record.studentId === studentId)
+  ));
+  return {
+    fill,
+    nextDate: nextUpcomingBatchDate(batch, today),
+    weeklyClasses: new Set((batch?.days || []).map(Number)).size,
+    attendanceRate: attendanceSummary(recentAttendance).rate,
+    attendanceCount: recentAttendance.length,
+  };
+}
+
 function renewalChildByPrevious(data) {
   const byPrevious = new Map();
   for (const membership of data.memberships || []) {
@@ -865,21 +909,161 @@ export function ErpDashboardSection(props) {
 /* ---------------- branches ---------------- */
 
 function BranchesSection(props) {
-  const {erp, ctx} = props; const {data} = erp;
+  const {erp, ctx, go, setCtx, onViewBatches} = props; const {data} = erp;
   const [editing, setEditing] = useState(null);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('name');
+  const today = toISODate();
+  const recentFrom = addDaysISO(today, -29);
   const save = async e => { e.preventDefault(); if (await erp.act(c => c.saveBranch(editing), 'Branch saved.')) setEditing(null); };
+
+  const branchRows = data.branches.map(branch => {
+    const batches = data.batches.filter(batch => batch.branchId === branch.id);
+    const activeBatches = batches.filter(batch => batch.status === 'active');
+    const batchIds = new Set(batches.map(batch => batch.id));
+    const activeBatchIds = new Set(activeBatches.map(batch => batch.id));
+    const enrolled = data.enrollments.filter(enrollment => (
+      enrollment.status === 'active' && activeBatchIds.has(enrollment.batchId)
+    )).length;
+    const capacity = activeBatches.reduce((sum, batch) => sum + Math.max(0, Number(batch.capacity) || 0), 0);
+    const fillPercent = capacity > 0 ? Math.round((enrolled / capacity) * 100) : 0;
+    const nextClass = activeBatches
+      .map(batch => ({batch, date: nextUpcomingBatchDate(batch, today)}))
+      .filter(item => item.date)
+      .sort((a, b) => a.date.localeCompare(b.date)
+        || String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || ''))
+        || a.batch.name.localeCompare(b.batch.name))[0] || null;
+    const recentAttendance = data.attendance.filter(record => (
+      batchIds.has(record.batchId) && record.classDate >= recentFrom && record.classDate <= today
+    ));
+    return {
+      branch,
+      activeStudents: data.students.filter(student => student.branchId === branch.id && student.status === 'active').length,
+      batches,
+      activeBatches,
+      enrolled,
+      capacity,
+      seatsLeft: Math.max(0, capacity - enrolled),
+      fillPercent,
+      instructorCount: new Set(activeBatches.map(batch => batch.instructorId).filter(Boolean)).size,
+      weeklyClasses: activeBatches.reduce((sum, batch) => sum + new Set((batch.days || []).map(Number)).size, 0),
+      todayClasses: activeBatches.filter(batch => isBatchOnDate(batch, today)).length,
+      nextClass,
+      attendanceRate: attendanceSummary(recentAttendance).rate,
+      attendanceCount: recentAttendance.length,
+    };
+  });
+
+  const totals = branchRows.reduce((sum, row) => ({
+    activeBranches: sum.activeBranches + Number(row.branch.status !== 'archived'),
+    archivedBranches: sum.archivedBranches + Number(row.branch.status === 'archived'),
+    students: sum.students + row.activeStudents,
+    batches: sum.batches + row.activeBatches.length,
+    enrolled: sum.enrolled + row.enrolled,
+    capacity: sum.capacity + row.capacity,
+    weeklyClasses: sum.weeklyClasses + row.weeklyClasses,
+  }), {activeBranches: 0, archivedBranches: 0, students: 0, batches: 0, enrolled: 0, capacity: 0, weeklyClasses: 0});
+  const totalFill = totals.capacity > 0 ? Math.round((totals.enrolled / totals.capacity) * 100) : 0;
+
+  const filteredRows = branchRows
+    .filter(row => {
+      if (statusFilter === 'active' && row.branch.status === 'archived') return false;
+      if (statusFilter === 'archived' && row.branch.status !== 'archived') return false;
+      const needle = query.trim().toLocaleLowerCase('en-IN');
+      if (!needle) return true;
+      return [row.branch.name, row.branch.city, row.branch.address, row.branch.phone]
+        .join(' ').toLocaleLowerCase('en-IN').includes(needle);
+    })
+    .sort((a, b) => {
+      if (sortBy === 'students') return b.activeStudents - a.activeStudents || a.branch.name.localeCompare(b.branch.name);
+      if (sortBy === 'batches') return b.activeBatches.length - a.activeBatches.length || a.branch.name.localeCompare(b.branch.name);
+      if (sortBy === 'fill') return b.fillPercent - a.fillPercent || b.enrolled - a.enrolled || a.branch.name.localeCompare(b.branch.name);
+      return Number(b.branch.status !== 'archived') - Number(a.branch.status !== 'archived')
+        || a.branch.name.localeCompare(b.branch.name);
+    });
+
+  const filtersActive = query || statusFilter !== 'all' || sortBy !== 'name';
+  const clearFilters = () => { setQuery(''); setStatusFilter('all'); setSortBy('name'); };
+  const openStudents = branchId => {
+    setCtx?.(previous => ({...previous, branchId}));
+    go?.('students');
+  };
+
   return <>
-    <section className="erp-panel"><div className="erp-panel-head"><div><h2>All branches</h2><p>{data.branches.length} branch(es)</p></div>
+    {data.branches.length > 0 && <div className="erp-grid erp-workspace-summary" aria-label="Branch summary">
+      <div className="erp-kpi"><small>Active branches</small><strong>{totals.activeBranches}</strong><p>{totals.archivedBranches} archived</p></div>
+      <div className="erp-kpi"><small>Active students</small><strong>{totals.students}</strong><p>Across branches in your scope</p></div>
+      <div className="erp-kpi"><small>Active batches</small><strong>{totals.batches}</strong><p>{totals.weeklyClasses} recurring class(es) each week</p></div>
+      <div className="erp-kpi"><small>Overall seat fill</small><strong>{totalFill}%</strong><p>{totals.enrolled}/{totals.capacity} enrolled seats</p></div>
+    </div>}
+
+    <section className="erp-panel"><div className="erp-panel-head"><div><h2>Branch overview</h2><p>{filteredRows.length} of {data.branches.length} branch(es) shown</p></div>
       {canManageOrg(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', city: '', address: '', phone: ''})}><Plus size={16}/> Add branch</button>}</div>
+
+      {data.branches.length > 0 && <div className="erp-workspace-controls" aria-label="Branch filters">
+        <label className="erp-search"><Search size={16}/><input aria-label="Search branches" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search branch, city, address or phone…"/></label>
+        <label className="erp-field erp-workspace-field">Status<select aria-label="Branch status filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+          <option value="all">All statuses</option><option value="active">Active</option><option value="archived">Archived</option>
+        </select></label>
+        <label className="erp-field erp-workspace-field">Sort by<select aria-label="Sort branches" value={sortBy} onChange={event => setSortBy(event.target.value)}>
+          <option value="name">Name</option><option value="students">Most students</option><option value="batches">Most batches</option><option value="fill">Highest seat fill</option>
+        </select></label>
+        {filtersActive && <button type="button" className="secondary-button" onClick={clearFilters}>Clear filters</button>}
+      </div>}
+
       {data.branches.length === 0 ? <Empty icon={Building2} title="No branch yet" text="Add your first studio location to start adding students and batches."/> :
-      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Branch</th><th>Students</th><th>Batches</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-        {data.branches.map(b => <tr key={b.id}><td><strong>{b.name}</strong><br/><small style={{color: '#9b92a4'}}>{[b.city, b.phone].filter(Boolean).join(' · ') || b.address || '—'}</small></td>
-          <td>{data.students.filter(s => s.branchId === b.id && s.status === 'active').length}</td>
-          <td>{data.batches.filter(x => x.branchId === b.id && x.status === 'active').length}</td>
-          <td><span className={`erp-badge ${b.status === 'archived' ? 'grey' : 'green'}`}>{b.status === 'archived' ? 'Archived' : 'Active'}</span></td>
-          <td>{canManage(ctx) && <><button className="erp-link-btn" onClick={() => setEditing({...b})}><Pencil size={13}/> Edit</button>
-          <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveBranch(b.id), b.status === 'archived' ? 'Branch restored.' : 'Branch archived.')}>{b.status === 'archived' ? 'Restore' : 'Archive'}</button></>}</td></tr>)}
-      </tbody></table></div>}
+      filteredRows.length === 0 ? <Empty icon={Search} title="No branches match" text="Try a different search or status filter." action={<button className="secondary-button" onClick={clearFilters}>Clear filters</button>}/> :
+      <div className="erp-branch-grid">
+        {filteredRows.map(row => {
+          const {branch} = row;
+          const archived = branch.status === 'archived';
+          return <article className={`erp-branch-card ${archived ? 'archived' : ''}`} key={branch.id} aria-label={`${branch.name} branch`}>
+            <header>
+              <span className="erp-branch-avatar" aria-hidden="true">{initials(branch.name)}</span>
+              <div><h3>{branch.name}</h3><p>{branch.city || 'City not added'}</p></div>
+              <span className={`erp-badge ${archived ? 'grey' : 'green'}`}>{archived ? 'Archived' : 'Active'}</span>
+            </header>
+
+            <dl className="erp-card-stats">
+              <div><dt>Students</dt><dd>{row.activeStudents}</dd></div>
+              <div><dt>Batches</dt><dd>{row.activeBatches.length}</dd></div>
+              <div><dt>Enrolled</dt><dd>{row.enrolled}/{row.capacity}</dd></div>
+              <div><dt>Seat fill</dt><dd>{row.fillPercent}%</dd></div>
+            </dl>
+            <div className="erp-capacity-line">
+              <div className="erp-progress" role="progressbar" aria-label={`${branch.name} seat fill`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.min(100, row.fillPercent)}>
+                <span className={row.fillPercent >= 100 ? 'full' : row.fillPercent >= 80 ? 'almost' : ''} style={{width: `${Math.min(100, row.fillPercent)}%`}}/>
+              </div>
+              <small>{row.capacity > 0 ? `${row.seatsLeft} seat(s) available` : 'No active batch capacity yet'}</small>
+            </div>
+
+            <div className="erp-card-badges">
+              {row.todayClasses > 0 && <span className="erp-badge green">Classes today</span>}
+              {!archived && row.activeBatches.length === 0 && <span className="erp-badge amber">Needs a batch</span>}
+              {row.fillPercent >= 90 && row.enrolled > 0 && <span className="erp-badge red">Nearly full</span>}
+              {row.attendanceRate !== null && <span className="erp-badge lavender">{row.attendanceRate}% attendance · 30 days</span>}
+            </div>
+
+            <div className="erp-card-meta">
+              {(branch.address || branch.city) && <p><MapPin size={14}/><span>{[branch.address, branch.city].filter(Boolean).join(' · ')}</span></p>}
+              {branch.phone && <p><Phone size={14}/><span>{branch.phone}</span></p>}
+              <p><Users size={14}/><span>{row.instructorCount} instructor(s) teaching · {row.weeklyClasses} class(es)/week</span></p>
+              <p><CalendarClock size={14}/><span>{row.nextClass
+                ? <>Next class: <strong>{row.nextClass.batch.name}</strong> · {relativeClassDateLabel(row.nextClass.date, today)} · {batchTimeLabel(row.nextClass.batch)}</>
+                : 'No upcoming class in the next 7 days'}</span></p>
+              <p><CalendarCheck size={14}/><span>{row.todayClasses} class(es) today{row.attendanceCount ? ` · ${row.attendanceCount} attendance record(s) in 30 days` : ' · No recent attendance records'}</span></p>
+            </div>
+
+            <footer className="erp-card-actions">
+              <button type="button" className="secondary-button" onClick={() => onViewBatches?.(branch.id)}>View batches</button>
+              <button type="button" className="erp-link-btn" onClick={() => openStudents(branch.id)}><Users size={13}/> View students</button>
+              {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => setEditing({...branch})}><Pencil size={13}/> Edit</button>}
+              {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => erp.act(c => c.archiveBranch(branch.id), archived ? 'Branch restored.' : 'Branch archived.')}>{archived ? 'Restore' : 'Archive'}</button>}
+            </footer>
+          </article>;
+        })}
+      </div>}
     </section>
     {editing && <Dialog title={editing.id ? 'Edit branch' : 'Add branch'} sub="Students, batches, subscriptions and payments are organized under a branch." onClose={() => setEditing(null)}>
       <form className="erp-form" onSubmit={save}>
@@ -900,14 +1084,18 @@ export function BranchesPage(props) {
     ['batches', 'Batches'],
     ...(canSetupInstructorProfiles(ctx) ? [['instructors', 'Instructor profiles']] : []),
   ];
+  const showBatchesForBranch = branchId => {
+    props.setCtx(previous => ({...previous, branchId}));
+    setTab('batches');
+  };
   return <>
     <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Branches &amp; batches <span className="flower">✳</span></h1><p>Locations, recurring batches, rosters and instructor profiles in one branch workspace.</p></div>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Branches &amp; batches <span className="flower">✳</span></h1><p>Branch health, weekly schedules, batch capacity, rosters and instructor profiles in one operational workspace.</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <div className="erp-seg" role="tablist" aria-label="Branches sections" style={{marginBottom: 16}}>
       {branchTabs.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
     </div>
-    {tab === 'branches' && <BranchesSection {...props}/>}
+    {tab === 'branches' && <BranchesSection {...props} onViewBatches={showBatchesForBranch}/>}
     {tab === 'batches' && <BatchesSection {...props} onShowBranches={() => setTab('branches')}/>}
     {tab === 'instructors' && canSetupInstructorProfiles(ctx) && <InstructorProfilesSection {...props} onShowBatches={() => setTab('batches')}/>}
   </>;
@@ -1978,35 +2166,271 @@ function BatchesSection(props) {
   const {erp, ctx, go, onShowBranches} = props; const {data} = erp;
   const [editing, setEditing] = useState(null); const [roster, setRoster] = useState(null);
   const [addStudentId, setAddStudentId] = useState('');
-  const batches = data.batches.filter(b => inBranch(ctx, b.branchId)
+  const [rosterQuery, setRosterQuery] = useState('');
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active');
+  const [dayFilter, setDayFilter] = useState('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('next');
+  const [view, setView] = useState('list');
+  const today = toISODate();
+  const isStudent = ctx.role === 'student';
+
+  const baseBatches = data.batches.filter(b => inBranch(ctx, b.branchId)
     && (ctx.role !== 'instructor' || b.instructorId === ctx.instructorId)
     && (ctx.role !== 'student' || data.enrollments.some(e => e.batchId === b.id && e.studentId === ctx.studentId && e.status === 'active')));
+  const batchRowsAll = baseBatches.map(batch => ({
+    batch,
+    metrics: batchWorkspaceMetrics(data, batch, today, isStudent ? ctx.studentId : ''),
+    branch: branchName(data, batch.branchId),
+    instructor: instructorName(data, batch.instructorId),
+    studentEnrollment: isStudent
+      ? data.enrollments.find(enrollment => enrollment.batchId === batch.id
+        && enrollment.studentId === ctx.studentId && enrollment.status === 'active') || null
+      : null,
+  }));
+  const activeRows = batchRowsAll.filter(row => row.batch.status === 'active');
+  const archivedCount = batchRowsAll.length - activeRows.length;
+  const activeBatchIds = new Set(activeRows.map(row => row.batch.id));
+  const summary = {
+    todayClasses: activeRows.filter(row => isBatchOnDate(row.batch, today)).length,
+    weeklyClasses: activeRows.reduce((sum, row) => sum + row.metrics.weeklyClasses, 0),
+    enrolled: activeRows.reduce((sum, row) => sum + row.metrics.fill.enrolled, 0),
+    capacity: activeRows.reduce((sum, row) => sum + row.metrics.fill.capacity, 0),
+    uniqueStudents: new Set(data.enrollments
+      .filter(enrollment => enrollment.status === 'active' && activeBatchIds.has(enrollment.batchId))
+      .map(enrollment => enrollment.studentId)).size,
+    nextClass: activeRows
+      .filter(row => row.metrics.nextDate)
+      .sort((a, b) => a.metrics.nextDate.localeCompare(b.metrics.nextDate)
+        || String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || ''))
+        || a.batch.name.localeCompare(b.batch.name))[0] || null,
+  };
+  summary.fillPercent = summary.capacity > 0 ? Math.round((summary.enrolled / summary.capacity) * 100) : 0;
+  summary.seatsLeft = Math.max(0, summary.capacity - summary.enrolled);
+
+  const scheduleConflicts = isStudent ? [] : findInstructorScheduleConflicts(baseBatches);
+  const attentionItems = [];
+  if (!isStudent) {
+    for (const conflict of scheduleConflicts) {
+      attentionItems.push(`${instructorName(data, conflict.instructorId)} has overlapping batches: ${conflict.batches[0].name} and ${conflict.batches[1].name} (${conflict.days.map(day => DAY_LABELS[day]).join(', ')}).`);
+    }
+    for (const row of activeRows.filter(item => item.metrics.fill.status === 'full')) {
+      attentionItems.push(`${row.batch.name} is full (${row.metrics.fill.enrolled}/${row.metrics.fill.capacity}).`);
+    }
+    if (canManage(ctx)) {
+      for (const row of activeRows.filter(item => !item.batch.instructorId)) {
+        attentionItems.push(`${row.batch.name} does not have an instructor assigned.`);
+      }
+    }
+    for (const row of activeRows.filter(item => item.metrics.fill.status === 'empty')) {
+      attentionItems.push(`${row.batch.name} has no active students yet.`);
+    }
+  }
+
+  const batchRows = batchRowsAll
+    .filter(row => {
+      const {batch, metrics} = row;
+      if (statusFilter !== 'all' && batch.status !== statusFilter) return false;
+      if (dayFilter === 'today' && !isBatchOnDate(batch, today)) return false;
+      if (dayFilter !== 'all' && dayFilter !== 'today'
+          && !(batch.days || []).map(Number).includes(Number(dayFilter))) return false;
+      if (!isStudent) {
+        if (availabilityFilter === 'seats' && metrics.fill.seatsLeft <= 0) return false;
+        if (availabilityFilter === 'almost' && metrics.fill.status !== 'almost_full') return false;
+        if (availabilityFilter === 'full' && metrics.fill.status !== 'full') return false;
+        if (availabilityFilter === 'empty' && metrics.fill.status !== 'empty') return false;
+        if (availabilityFilter === 'unassigned' && batch.instructorId) return false;
+      }
+      const needle = query.trim().toLocaleLowerCase('en-IN');
+      if (!needle) return true;
+      return [batch.name, row.branch, row.instructor, batchDaySummary(batch), batchTimeLabel(batch)]
+        .join(' ').toLocaleLowerCase('en-IN').includes(needle);
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name') return a.batch.name.localeCompare(b.batch.name);
+      if (sortBy === 'start') return String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || ''))
+        || a.batch.name.localeCompare(b.batch.name);
+      if (!isStudent && sortBy === 'fill-desc') return b.metrics.fill.percent - a.metrics.fill.percent
+        || b.metrics.fill.enrolled - a.metrics.fill.enrolled || a.batch.name.localeCompare(b.batch.name);
+      if (!isStudent && sortBy === 'fill-asc') return a.metrics.fill.percent - b.metrics.fill.percent
+        || a.metrics.fill.enrolled - b.metrics.fill.enrolled || a.batch.name.localeCompare(b.batch.name);
+      return (a.metrics.nextDate || '9999-12-31').localeCompare(b.metrics.nextDate || '9999-12-31')
+        || String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || ''))
+        || a.batch.name.localeCompare(b.batch.name);
+    });
+
+  const filtersActive = query || statusFilter !== 'active' || dayFilter !== 'all'
+    || availabilityFilter !== 'all' || sortBy !== 'next';
+  const clearFilters = () => {
+    setQuery(''); setStatusFilter('active'); setDayFilter('all');
+    setAvailabilityFilter('all'); setSortBy('next');
+  };
+  const openRoster = batch => { setRoster(batch); setAddStudentId(''); setRosterQuery(''); };
+  const closeRoster = () => { setRoster(null); setAddStudentId(''); setRosterQuery(''); };
+  const duplicateBatch = batch => setEditing({
+    name: `${batch.name} copy`, branchId: batch.branchId, instructorId: batch.instructorId || '',
+    days: [...(batch.days || [])], startTime: batch.startTime || '07:00',
+    durationMins: batch.durationMins || 60, capacity: batch.capacity || 20,
+  });
+
   const toggleDay = day => setEditing(prev => ({...prev, days: prev.days.includes(day) ? prev.days.filter(d => d !== day) : [...prev.days, day]}));
   const saveBatch = async e => { e.preventDefault(); if (!editing.days.length) return; if (await erp.act(c => c.saveBatch(editing), 'Batch saved.')) setEditing(null); };
   const rosterList = roster ? data.enrollments
     .filter(e => e.batchId === roster.id && e.status === 'active')
     .sort((a, b) => studentName(data, a.studentId).localeCompare(studentName(data, b.studentId))) : [];
+  const visibleRosterList = rosterList.filter(enrollment => (
+    !rosterQuery.trim()
+    || studentName(data, enrollment.studentId).toLocaleLowerCase('en-IN')
+      .includes(rosterQuery.trim().toLocaleLowerCase('en-IN'))
+  ));
   const addable = roster ? data.students
     .filter(s => s.status === 'active' && s.branchId === roster.branchId && !rosterList.some(e => e.studentId === s.id))
     .sort((a, b) => a.fullName.localeCompare(b.fullName)) : [];
   const rosterEditable = canEditBatchRoster(ctx, roster);
   const seatsLeft = roster ? Math.max(0, Number(roster.capacity || 0) - rosterList.length) : 0;
+  const rosterFill = roster ? batchFill(roster, data.enrollments) : null;
+  const editingEnrolled = editing?.id
+    ? data.enrollments.filter(enrollment => enrollment.batchId === editing.id && enrollment.status === 'active').length
+    : 0;
+  const editingConflicts = editing?.instructorId
+    ? data.batches
+      .filter(other => other.id !== editing.id && other.status === 'active'
+        && other.instructorId === editing.instructorId)
+      .map(other => ({batch: other, days: batchOverlapDays(editing, other)}))
+      .filter(item => item.days.length)
+    : [];
   return <>
-    <section className="erp-panel"><div className="erp-panel-head"><div><h2>{ctx.role === 'instructor' ? 'My batches' : ctx.role === 'student' ? 'My batches' : 'All batches'}</h2><p>{batches.length} batch(es){ctx.role === 'instructor' ? ' · Open Roster to add or remove students in your assigned batches.' : ''}</p></div>
+    {baseBatches.length > 0 && <div className="erp-grid erp-workspace-summary" aria-label="Batch summary">
+      {isStudent ? <>
+        <div className="erp-kpi"><small>Assigned batches</small><strong>{activeRows.length}</strong><p>Only batches you are enrolled in</p></div>
+        <div className="erp-kpi"><small>Classes today</small><strong>{summary.todayClasses}</strong><p>{formatDate(today)}</p></div>
+        <div className="erp-kpi"><small>Classes each week</small><strong>{summary.weeklyClasses}</strong><p>Across your assigned batches</p></div>
+        <div className="erp-kpi"><small>Next class</small><strong className="erp-kpi-text">{summary.nextClass?.batch.name || 'None'}</strong><p>{summary.nextClass ? `${relativeClassDateLabel(summary.nextClass.metrics.nextDate, today)} · ${batchTimeLabel(summary.nextClass.batch)}` : 'No class in the next 7 days'}</p></div>
+      </> : <>
+        <div className="erp-kpi"><small>{ctx.role === 'instructor' ? 'My active batches' : 'Active batches'}</small><strong>{activeRows.length}</strong><p>{archivedCount} archived</p></div>
+        <div className="erp-kpi"><small>Classes today</small><strong>{summary.todayClasses}</strong><p>{summary.weeklyClasses} recurring class(es)/week</p></div>
+        <div className="erp-kpi"><small>{ctx.role === 'instructor' ? 'My students' : 'Enrolled students'}</small><strong>{summary.uniqueStudents}</strong><p>{summary.enrolled} active batch enrollment(s)</p></div>
+        <div className="erp-kpi"><small>Seat fill</small><strong>{summary.fillPercent}%</strong><p>{summary.enrolled}/{summary.capacity} seats · {summary.seatsLeft} available</p></div>
+      </>}
+    </div>}
+
+    {attentionItems.length > 0 && <div className="erp-banner erp-attention-banner" role="note">
+      <AlertCircle size={18}/>
+      <div><strong>Needs attention</strong>
+        <ul>{attentionItems.slice(0, 5).map(item => <li key={item}>{item}</li>)}</ul>
+        {attentionItems.length > 5 && <small>And {attentionItems.length - 5} more item(s). Use the batch filters below to review them.</small>}
+      </div>
+    </div>}
+
+    <section className="erp-panel"><div className="erp-panel-head"><div><h2>{ctx.role === 'instructor' ? 'My batches' : ctx.role === 'student' ? 'My batches' : 'Batch workspace'}</h2><p>{batchRows.length} of {baseBatches.length} batch(es) shown{ctx.role === 'instructor' ? ' · Open Roster to add or remove students in your assigned batches.' : ''}</p></div>
       {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), instructorId: '', days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20})}><Plus size={16}/> Add batch</button>}</div>
+
+      {baseBatches.length > 0 && <div className="erp-workspace-controls" aria-label="Batch filters">
+        <label className="erp-search"><Search size={16}/><input aria-label="Search batches" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search batch, branch or instructor…"/></label>
+        <label className="erp-field erp-workspace-field">Status<select aria-label="Batch status filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+          <option value="active">Active</option><option value="all">All statuses</option><option value="archived">Archived</option>
+        </select></label>
+        <label className="erp-field erp-workspace-field">Day<select aria-label="Batch day filter" value={dayFilter} onChange={event => setDayFilter(event.target.value)}>
+          <option value="all">Any day</option><option value="today">Today</option>
+          {WEEK_ORDER.map(day => <option key={day} value={String(day)}>{FULL_DAY_LABELS[day]}</option>)}
+        </select></label>
+        {!isStudent && <label className="erp-field erp-workspace-field">Availability<select aria-label="Batch availability filter" value={availabilityFilter} onChange={event => setAvailabilityFilter(event.target.value)}>
+          <option value="all">Any availability</option><option value="seats">Seats available</option><option value="almost">Almost full</option><option value="full">Full</option><option value="empty">Empty</option><option value="unassigned">Instructor unassigned</option>
+        </select></label>}
+        <label className="erp-field erp-workspace-field">Sort by<select aria-label="Sort batches" value={sortBy} onChange={event => setSortBy(event.target.value)}>
+          <option value="next">Next class</option><option value="name">Name</option><option value="start">Start time</option>
+          {!isStudent && <option value="fill-desc">Highest seat fill</option>}
+          {!isStudent && <option value="fill-asc">Lowest seat fill</option>}
+        </select></label>
+        <div className="erp-seg erp-view-toggle" aria-label="Batch view">
+          <button type="button" aria-pressed={view === 'list'} className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}><List size={14}/> List</button>
+          <button type="button" aria-pressed={view === 'schedule'} className={view === 'schedule' ? 'on' : ''} onClick={() => setView('schedule')}><LayoutGrid size={14}/> Schedule</button>
+        </div>
+        {filtersActive && <button type="button" className="secondary-button" onClick={clearFilters}>Clear filters</button>}
+      </div>}
+
       {data.branches.length === 0 && canManage(ctx) ? <Empty icon={Building2} title="Add a branch first" text="Batches run at a branch." action={<button className="primary-button" onClick={() => (onShowBranches ? onShowBranches() : go('branches'))}>Go to Branches</button>}/> :
-      batches.length === 0 ? <Empty icon={Clock} title={ctx.role === 'student' ? 'No assigned batches yet' : 'No batches here'} text={ctx.role === 'instructor' && !ctx.instructorId ? 'Choose “Acting instructor” above to see assigned batches.' : ctx.role === 'student' && !ctx.studentId ? 'Choose “Acting student” above to see assigned batches.' : ctx.role === 'student' ? 'When the studio enrolls you in a batch, it will appear here.' : 'Create a batch with days and a start time, then enroll students.'}/> :
-      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Batch</th><th>Instructor</th><th>Schedule</th><th>{ctx.role === 'student' ? 'My status' : 'Students'}</th><th>Status</th>{ctx.role !== 'student' && <th>Actions</th>}</tr></thead><tbody>
-        {batches.map(b => { const count = data.enrollments.filter(e => e.batchId === b.id && e.status === 'active').length; return <tr key={b.id}>
-          <td><strong>{b.name}</strong><br/><small style={{color: '#9b92a4'}}>{branchName(data, b.branchId)}</small></td>
-          <td>{instructorName(data, b.instructorId)}</td>
-          <td>{b.days.map(d => DAY_LABELS[d]).join(' ')}<br/><small style={{color: '#9b92a4'}}>{batchTimeLabel(b)}</small></td>
-          <td>{ctx.role === 'student' ? <span className="erp-badge green">Enrolled</span> : <span className={`erp-badge ${count >= b.capacity ? 'red' : 'green'}`}>{count}/{b.capacity}</span>}</td>
-          <td><span className={`erp-badge ${b.status === 'archived' ? 'grey' : 'green'}`}>{b.status}</span></td>
-          {ctx.role !== 'student' && <td><button className="erp-link-btn" onClick={() => { setRoster(b); setAddStudentId(''); }}><Users size={13}/> Roster</button>
-          {canManage(ctx) && <><button className="erp-link-btn" onClick={() => setEditing({...b})}><Pencil size={13}/> Edit</button>
-          <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveBatch(b.id), b.status === 'archived' ? 'Batch restored.' : 'Batch archived.')}>{b.status === 'archived' ? 'Restore' : 'Archive'}</button></>}</td>}</tr>; })}
-      </tbody></table></div>}
+      baseBatches.length === 0 ? <Empty icon={Clock} title={ctx.role === 'student' ? 'No assigned batches yet' : 'No batches here'} text={ctx.role === 'instructor' && !ctx.instructorId ? 'Choose “Acting instructor” above to see assigned batches.' : ctx.role === 'student' && !ctx.studentId ? 'Choose “Acting student” above to see assigned batches.' : ctx.role === 'student' ? 'When the studio enrolls you in a batch, it will appear here.' : 'Create a batch with days and a start time, then enroll students.'}/> :
+      batchRows.length === 0 ? <Empty icon={Search} title="No batches match" text="Try a different day, status or availability filter." action={<button className="secondary-button" onClick={clearFilters}>Clear filters</button>}/> :
+      view === 'schedule' ? <div className="erp-schedule-wrap">
+        <p className="erp-schedule-note">Recurring weekly timetable{isStudent ? ' for your assigned batches only' : ''}. Times use each batch’s saved start time and duration.</p>
+        <div className="erp-schedule-grid">
+          {WEEK_ORDER.map(day => {
+            const dayRows = batchRows
+              .filter(row => (row.batch.days || []).map(Number).includes(day))
+              .sort((a, b) => String(a.batch.startTime || '').localeCompare(String(b.batch.startTime || ''))
+                || a.batch.name.localeCompare(b.batch.name));
+            const isToday = new Date(`${today}T12:00:00`).getDay() === day;
+            return <section className={`erp-schedule-day ${isToday ? 'today' : ''}`} key={day} aria-label={`${FULL_DAY_LABELS[day]} schedule`}>
+              <header><div><h3>{FULL_DAY_LABELS[day]}</h3><small>{dayRows.length} class(es)</small></div>{isToday && <span className="erp-badge lavender">Today</span>}</header>
+              {dayRows.length === 0 ? <p className="erp-schedule-empty">No classes</p> : dayRows.map(row => <article className={`erp-schedule-class ${row.batch.status === 'archived' ? 'archived' : ''}`} key={`${day}-${row.batch.id}`}>
+                <strong>{row.batch.name}</strong>
+                <span>{batchTimeLabel(row.batch)}</span>
+                <small>{row.branch} · {row.instructor}</small>
+                {!isStudent && <small>{row.metrics.fill.enrolled}/{row.metrics.fill.capacity} students · {row.metrics.fill.seatsLeft} seat(s) left</small>}
+                {row.batch.status === 'archived' && <span className="erp-badge grey">Archived</span>}
+                {!isStudent && <button type="button" className="erp-link-btn" onClick={() => openRoster(row.batch)}><Users size={13}/> Roster</button>}
+              </article>)}
+            </section>;
+          })}
+        </div>
+      </div> :
+      <div className="erp-batch-grid">
+        {batchRows.map(row => {
+          const {batch, metrics} = row;
+          const archived = batch.status === 'archived';
+          const isToday = batch.status === 'active' && isBatchOnDate(batch, today);
+          return <article className={`erp-batch-card ${archived ? 'archived' : ''}`} key={batch.id} aria-label={`${batch.name} batch`}>
+            <header>
+              <div><h3>{batch.name}</h3><p><MapPin size={13}/> {row.branch}</p></div>
+              <span className={`erp-badge ${archived ? 'grey' : 'green'}`}>{archived ? 'Archived' : 'Active'}</span>
+            </header>
+
+            <div className="erp-person erp-batch-teacher">
+              <span className="avatar">{initials(batch.instructorId ? row.instructor : '?')}</span>
+              <span><strong>{row.instructor}</strong><small>{batch.instructorId ? 'Instructor' : 'Instructor not assigned'}</small></span>
+            </div>
+
+            <div className="erp-batch-time"><Clock size={15}/><span>{batchTimeLabel(batch)} · {Number(batch.durationMins) || 60} min</span></div>
+            <div className="erp-batch-days" aria-label={`Class days for ${batch.name}`}>
+              {WEEK_ORDER.map(day => <span key={day} className={(batch.days || []).map(Number).includes(day) ? 'on' : ''}>{DAY_LABELS[day]}</span>)}
+            </div>
+
+            <div className="erp-card-badges">
+              {isToday && <span className="erp-badge lavender">Class today</span>}
+              {!isStudent && metrics.fill.status === 'full' && <span className="erp-badge red">Full</span>}
+              {!isStudent && metrics.fill.status === 'almost_full' && <span className="erp-badge amber">Almost full</span>}
+              {!isStudent && metrics.fill.status === 'empty' && batch.status === 'active' && <span className="erp-badge grey">No students yet</span>}
+              {!isStudent && !batch.instructorId && <span className="erp-badge amber">Needs instructor</span>}
+              {isStudent && <span className="erp-badge green">Enrolled</span>}
+            </div>
+
+            <div className="erp-card-meta">
+              <p><CalendarClock size={14}/><span>Next class: <strong>{relativeClassDateLabel(metrics.nextDate, today)}</strong>{metrics.nextDate ? ` · ${batchTimeLabel(batch)}` : ''}</span></p>
+              <p><CalendarCheck size={14}/><span>{metrics.weeklyClasses} class(es)/week · {metrics.attendanceRate === null
+                ? (isStudent ? 'No attendance recorded in the last 30 days' : 'No attendance in the last 30 days')
+                : `${isStudent ? 'My attendance' : 'Attendance'} (30 days): ${metrics.attendanceRate}%`}</span></p>
+              {isStudent && row.studentEnrollment?.joinedOn && <p><Check size={14}/><span>Joined {formatDate(row.studentEnrollment.joinedOn)}</span></p>}
+            </div>
+
+            {!isStudent && <div className="erp-capacity-block">
+              <div className="erp-capacity-head"><strong>{metrics.fill.enrolled}/{metrics.fill.capacity} students</strong><span>{metrics.fill.percent}% full</span></div>
+              <div className="erp-progress" role="progressbar" aria-label={`${batch.name} seat fill`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.min(100, metrics.fill.percent)}>
+                <span className={metrics.fill.status === 'full' ? 'full' : metrics.fill.status === 'almost_full' ? 'almost' : ''} style={{width: `${Math.min(100, metrics.fill.percent)}%`}}/>
+              </div>
+              <small>{metrics.fill.seatsLeft} seat(s) available</small>
+            </div>}
+
+            {!isStudent && <footer className="erp-card-actions">
+              <button type="button" className="secondary-button" onClick={() => openRoster(batch)}><Users size={14}/> Roster</button>
+              {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => duplicateBatch(batch)}><Copy size={13}/> Duplicate</button>}
+              {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => setEditing({...batch})}><Pencil size={13}/> Edit</button>}
+              {canManage(ctx) && <button type="button" className="erp-link-btn" onClick={() => erp.act(c => c.archiveBatch(batch.id), archived ? 'Batch restored.' : 'Batch archived.')}>{archived ? 'Restore' : 'Archive'}</button>}
+            </footer>}
+          </article>;
+        })}
+      </div>}
     </section>
     {editing && <Dialog title={editing.id ? 'Edit batch' : 'Add batch'} sub="Classes are 60 minutes by default — adjust only if your studio differs." onClose={() => setEditing(null)}>
       <form className="erp-form" onSubmit={saveBatch}>
@@ -2016,15 +2440,30 @@ function BatchesSection(props) {
         <label className="erp-field">Start time<input type="time" required value={editing.startTime} onChange={e => setEditing({...editing, startTime: e.target.value})}/></label>
         <label className="erp-field">Duration (minutes)<input type="number" min={15} step={5} value={editing.durationMins} onChange={e => setEditing({...editing, durationMins: e.target.value})}/></label>
         <label className="erp-field">Capacity<input type="number" min={1} value={editing.capacity} onChange={e => setEditing({...editing, capacity: e.target.value})}/></label>
-        <div className="erp-field full"><span>Class days</span><div className="erp-days">{DAY_LABELS.map((label, day) => <button type="button" key={label} className={`erp-day ${editing.days.includes(day) ? 'on' : ''}`} aria-pressed={editing.days.includes(day)} onClick={() => toggleDay(day)}>{label}</button>)}</div></div>
-        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button">Save batch</button></div>
+        <div className="erp-field full"><span>Class days</span><div className="erp-days">{DAY_LABELS.map((label, day) => <button type="button" key={label} className={`erp-day ${editing.days.includes(day) ? 'on' : ''}`} aria-pressed={editing.days.includes(day)} onClick={() => toggleDay(day)}>{label}</button>)}</div>
+          {!editing.days.length && <small className="erp-field-warning">Choose at least one class day before saving.</small>}</div>
+        {editingEnrolled > Math.max(0, Number(editing.capacity) || 0) && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+          <AlertCircle size={18}/><span>This capacity is below the {editingEnrolled} student(s) already enrolled. Saving will not remove anyone, but no further student can be added until seats become available.</span>
+        </div>}
+        {editingConflicts.length > 0 && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
+          <AlertCircle size={18}/><span><strong>Schedule warning:</strong> {instructorName(data, editing.instructorId)} already teaches {editingConflicts.map(item => `${item.batch.name} (${item.days.map(day => DAY_LABELS[day]).join(', ')})`).join('; ')} at an overlapping time. Saving is still allowed if this is intentional.</span>
+        </div>}
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" disabled={!editing.days.length}>Save batch</button></div>
       </form></Dialog>}
-    {roster && ctx.role !== 'student' && <Dialog title={`${roster.name} — roster`} sub={`${branchName(data, roster.branchId)} · ${instructorName(data, roster.instructorId)} · ${rosterList.length}/${roster.capacity} enrolled · ${seatsLeft} seat(s) left`} onClose={() => setRoster(null)}>
+    {roster && ctx.role !== 'student' && <Dialog title={`${roster.name} — roster`} sub={`${branchName(data, roster.branchId)} · ${instructorName(data, roster.instructorId)} · ${batchDaySummary(roster)} · ${batchTimeLabel(roster)} · ${rosterList.length}/${roster.capacity} enrolled · ${seatsLeft} seat(s) left`} onClose={closeRoster}>
       {ctx.role === 'instructor' && <p className="erp-roster-scope">{rosterEditable
         ? 'This is your assigned batch. You may add or remove existing active students from this branch; student records and batch settings remain manager-only.'
         : 'This batch is read-only because it is not an active batch assigned to you.'}</p>}
+      {rosterFill && <div className="erp-capacity-block erp-roster-capacity">
+        <div className="erp-capacity-head"><strong>{rosterFill.enrolled}/{rosterFill.capacity} students</strong><span>{rosterFill.percent}% full</span></div>
+        <div className="erp-progress" role="progressbar" aria-label={`${roster.name} roster fill`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.min(100, rosterFill.percent)}>
+          <span className={rosterFill.status === 'full' ? 'full' : rosterFill.status === 'almost_full' ? 'almost' : ''} style={{width: `${Math.min(100, rosterFill.percent)}%`}}/>
+        </div>
+      </div>}
+      {rosterList.length > 0 && <label className="erp-search erp-roster-search"><Search size={16}/><input aria-label="Search roster" value={rosterQuery} onChange={event => setRosterQuery(event.target.value)} placeholder="Search enrolled students…"/></label>}
       {rosterList.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No students enrolled yet.</p> :
-      rosterList.map(e => <div className="erp-att-row" key={e.id}><span className="erp-person"><span className="avatar">{initials(studentName(data, e.studentId))}</span><span><strong>{studentName(data, e.studentId)}</strong><small>Joined {formatDate(e.joinedOn)}</small></span></span>
+      visibleRosterList.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No enrolled student matches “{rosterQuery}”.</p> :
+      visibleRosterList.map(e => <div className="erp-att-row" key={e.id}><span className="erp-person"><span className="avatar">{initials(studentName(data, e.studentId))}</span><span><strong>{studentName(data, e.studentId)}</strong><small>Joined {formatDate(e.joinedOn)}</small></span></span>
         {rosterEditable && <button className="erp-link-btn erp-danger" onClick={() => erp.act(c => c.endEnrollment(e.id), 'Removed from batch.')}>Remove</button>}</div>)}
       {rosterEditable && <form className="erp-form" style={{marginTop: 16}} onSubmit={async ev => { ev.preventDefault(); if (!addStudentId) return; if (rosterList.length >= roster.capacity) return props.notify('This batch is full.'); if (await erp.act(c => c.enrollStudent({batchId: roster.id, studentId: addStudentId}), 'Student enrolled.')) setAddStudentId(''); }}>
         <label className="erp-field">Add student to batch<select value={addStudentId} onChange={e => setAddStudentId(e.target.value)} disabled={seatsLeft === 0 || addable.length === 0}><option value="">{seatsLeft === 0 ? 'This batch is full' : addable.length === 0 ? 'No other active students in this branch' : 'Choose student…'}</option>{addable.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select><small>Only existing active students from {branchName(data, roster.branchId)} can be added.</small></label>
@@ -2037,7 +2476,7 @@ export function BatchesPage(props) {
   const {erp, ctx} = props; const {data} = erp;
   return <>
     <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{ctx.role === 'student' ? 'My batches' : 'Batches'} <span className="flower">✳</span></h1><p>{ctx.role === 'student' ? 'Only the batches assigned to you.' : 'Recurring class groups, instructors and rosters.'}</p></div>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{ctx.role === 'student' ? 'My batches' : 'Batches'} <span className="flower">✳</span></h1><p>{ctx.role === 'student' ? 'Your assigned batches, weekly schedule and next classes—only your own enrollments.' : ctx.role === 'instructor' ? 'Your assigned batches, weekly schedule, capacity and rosters.' : 'Recurring class groups, instructors and rosters.'}</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <BatchesSection {...props}/>
   </>;

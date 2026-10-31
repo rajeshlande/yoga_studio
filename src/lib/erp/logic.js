@@ -228,6 +228,100 @@ export function isBatchOnDate(batch, iso) {
   return batch.days.includes(date.getDay());
 }
 
+/** Next recurring class date on or after `fromISO`, searching one full week. */
+export function nextBatchDate(batch, fromISO = toISODate()) {
+  if (!batch) return '';
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const date = addDaysISO(fromISO, offset);
+    if (isBatchOnDate(batch, date)) return date;
+  }
+  return '';
+}
+
+function batchStartMinuteOfDay(batch) {
+  const [hour, minute] = String(batch?.startTime || '').split(':').map(Number);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)
+      || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return (hour * 60) + minute;
+}
+
+export function batchEndMinutes(batch) {
+  const start = batchStartMinuteOfDay(batch);
+  if (start === null) return null;
+  const duration = Math.min(1440, Math.max(1, Math.trunc(Number(batch?.durationMins) || 60)));
+  return start + duration;
+}
+
+/** Capacity view for one batch; `enrollments` may be the whole snapshot list. */
+export function batchFill(batch, enrollments = []) {
+  const capacity = Math.max(0, Math.trunc(Number(batch?.capacity) || 0));
+  const enrolled = (enrollments || []).filter(enrollment => (
+    enrollment?.batchId === batch?.id && enrollment?.status === 'active'
+  )).length;
+  const seatsLeft = Math.max(0, capacity - enrolled);
+  const percent = capacity > 0 ? Math.round((enrolled / capacity) * 100) : 0;
+  const status = capacity > 0 && seatsLeft === 0
+    ? 'full'
+    : enrolled === 0
+      ? 'empty'
+      : percent >= 80
+        ? 'almost_full'
+        : 'available';
+  return {enrolled, capacity, seatsLeft, percent, status};
+}
+
+function batchWeeklyIntervals(batch) {
+  const startMinute = batchStartMinuteOfDay(batch);
+  if (startMinute === null || !Array.isArray(batch?.days)) return [];
+  const duration = Math.min(1440, Math.max(1, Math.trunc(Number(batch.durationMins) || 60)));
+  return [...new Set(batch.days.map(Number))]
+    .filter(day => Number.isInteger(day) && day >= 0 && day <= 6)
+    .map(day => ({
+      day,
+      start: (day * 1440) + startMinute,
+      end: (day * 1440) + startMinute + duration,
+    }));
+}
+
+/** Weekday numbers (JS: Sunday=0) on which two recurring batches overlap. */
+export function batchOverlapDays(first, second) {
+  const overlaps = new Set();
+  const firstIntervals = batchWeeklyIntervals(first);
+  const secondIntervals = batchWeeklyIntervals(second);
+  for (const firstInterval of firstIntervals) {
+    for (const secondInterval of secondIntervals) {
+      for (const weekShift of [-10080, 0, 10080]) {
+        const shiftedStart = secondInterval.start + weekShift;
+        const shiftedEnd = secondInterval.end + weekShift;
+        if (Math.max(firstInterval.start, shiftedStart) < Math.min(firstInterval.end, shiftedEnd)) {
+          overlaps.add(firstInterval.day);
+        }
+      }
+    }
+  }
+  return [...overlaps].sort((a, b) => a - b);
+}
+
+/** Active batches assigned to the same instructor at overlapping times. */
+export function findInstructorScheduleConflicts(batches = []) {
+  const active = (batches || []).filter(batch => (
+    batch?.status === 'active' && batch?.instructorId
+  ));
+  const conflicts = [];
+  for (let firstIndex = 0; firstIndex < active.length; firstIndex += 1) {
+    for (let secondIndex = firstIndex + 1; secondIndex < active.length; secondIndex += 1) {
+      const first = active[firstIndex];
+      const second = active[secondIndex];
+      if (first.instructorId !== second.instructorId) continue;
+      const days = batchOverlapDays(first, second);
+      if (days.length) {
+        conflicts.push({instructorId: first.instructorId, batches: [first, second], days});
+      }
+    }
+  }
+  return conflicts;
+}
+
 /** Money crosses every boundary as integer paise. UI inputs are rupees. */
 export function rupeesToPaise(value) {
   const n = Number(value);

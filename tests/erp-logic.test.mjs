@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attendanceSummary, formatINR, membershipBalance, membershipEnd,
-  monthlyRecurringRevenuePaise, nextRenewalDate, normalizeInstructorProfile,
+  attendanceSummary, batchFill, batchOverlapDays, findInstructorScheduleConflicts,
+  formatINR, membershipBalance, membershipEnd,
+  monthlyRecurringRevenuePaise, nextBatchDate, nextRenewalDate, normalizeInstructorProfile,
   normalizePlanTemplate,
   normalizeSubscriptionLifecycle, pauseDaysBetween, planBillingPeriodLabel,
   renewalStartDate, rupeesToPaise, subscriptionLifecycle, isBatchOnDate,
@@ -114,6 +115,36 @@ test('batch schedule matches the weekday of a date', () => {
   // 2026-10-29 is a Thursday.
   assert.equal(isBatchOnDate({days: [4]}, '2026-10-29'), true);
   assert.equal(isBatchOnDate({days: [1, 3, 5]}, '2026-10-29'), false);
+});
+
+test('batch workspace derives next class, capacity state and instructor overlaps', () => {
+  const batch = {id: 'batch-1', days: [5], startTime: '07:00', durationMins: 60, capacity: 20, status: 'active', instructorId: 'instructor-1'};
+  assert.equal(nextBatchDate(batch, '2026-10-29'), '2026-10-30');
+  assert.equal(nextBatchDate({...batch, days: [4]}, '2026-10-29'), '2026-10-29');
+
+  const enrollments = Array.from({length: 16}, (_, index) => ({
+    id: `enrollment-${index}`, batchId: 'batch-1', studentId: `student-${index}`, status: 'active',
+  }));
+  enrollments.push({id: 'ended', batchId: 'batch-1', studentId: 'student-ended', status: 'ended'});
+  assert.deepEqual(batchFill(batch, enrollments), {
+    enrolled: 16, capacity: 20, seatsLeft: 4, percent: 80, status: 'almost_full',
+  });
+  assert.equal(batchFill({...batch, capacity: 16}, enrollments).status, 'full');
+
+  const overlapping = {id: 'batch-2', days: [5], startTime: '07:30', durationMins: 60, status: 'active', instructorId: 'instructor-1'};
+  const adjacent = {id: 'batch-3', days: [5], startTime: '08:00', durationMins: 60, status: 'active', instructorId: 'instructor-1'};
+  const otherInstructor = {...overlapping, id: 'batch-4', instructorId: 'instructor-2'};
+  const archived = {...overlapping, id: 'batch-5', status: 'archived'};
+  assert.deepEqual(batchOverlapDays(batch, overlapping), [5]);
+  assert.deepEqual(batchOverlapDays(batch, adjacent), []);
+  const conflicts = findInstructorScheduleConflicts([batch, overlapping, adjacent, otherInstructor, archived]);
+  assert.equal(conflicts.length, 2);
+  assert.deepEqual(conflicts.map(conflict => conflict.batches.map(item => item.id)), [
+    ['batch-1', 'batch-2'],
+    ['batch-2', 'batch-3'],
+  ]);
+  assert.equal(conflicts[0].instructorId, 'instructor-1');
+  assert.deepEqual(conflicts[0].days, [5]);
 });
 
 test('instructor profiles normalize specialties, experience and joining date', () => {

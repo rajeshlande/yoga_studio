@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
 INR payments, payment setup and one-page A4 invoice PDFs.
 
-> **Current source release:** 1.8.1 · **Database setup:** SQL v10 in
+> **Current source release:** 1.9.0 · **Database setup:** SQL v10 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -59,6 +59,14 @@ into the application.
 - Student records with branch, split first/last name, contact and admission
   profile details, joining date, batches, attendance history/percentage,
   search and CSV export.
+- A complete **Branches & batches** operational workspace: searchable branch
+  health cards with students, active batches, seat fill, weekly classes,
+  recent attendance and next class; plus batch **List** and weekly
+  **Schedule** views with search, status/day/availability filters, sorting,
+  capacity progress, next-class details, duplicate-batch setup and warnings
+  for full, empty, unassigned or instructor-overlapping batches. Students
+  see the same schedule/list pattern only for their own assigned batches and
+  without studio roster or class-count details.
 - Rich Instructor profiles and recurring batches with weekdays, start time,
   duration, capacity and roster management. A manager-maintained profile can
   include a teaching bio, specialties/styles, qualifications/certifications,
@@ -523,16 +531,15 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.8.1:
+Recommended go-live order for 1.9.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` to install **SQL v10**.
-   SQL v10 is cumulative: it includes the v5–v9 role, admission, subscription,
-   Plan-template, Instructor-profile and roster work, then tightens the
-   snapshots/RPC surface to least privilege. Existing Instructor rows keep
-   name/contact/home branch/status and gain an empty teaching profile if they
-   do not already have one. Run SQL v10 instead of stopping at v9.
-3. Deploy the 1.8.1 web build with the two public Actions secrets.
+2. Ensure the complete current `supabase/erp_setup.sql` has installed
+   **SQL v10**. Version 1.9.0 adds no database fields, so no new SQL run is
+   needed if SQL v10 is already live. If upgrading from SQL v9 or earlier,
+   run SQL v10 instead of stopping at v9; it is cumulative and preserves
+   existing business rows.
+3. Deploy the 1.9.0 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.

@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.9.0 — 2026-10-31
+
+### Added — Branches & batches operational workspace
+
+- **Branch overview:** the manager **Branches** tab now opens with active
+  branch, active-student, active-batch and overall seat-fill KPIs, followed
+  by searchable, status-filterable and sortable branch health cards. Each
+  card shows students, active batches, enrolled seats/capacity and fill,
+  address/phone, instructors teaching, weekly and today's classes, 30-day
+  attendance, the next class, and shortcuts to that branch's batches or
+  students. Existing add/edit/archive/restore behavior is preserved.
+- **Batch List and Schedule views:** Managers, Instructors and Students can
+  switch between rich batch cards and a recurring Monday-first weekly
+  timetable. Batch work can be searched by batch/branch/instructor and
+  filtered by status and day; non-Student roles also get availability
+  filters and seat-fill sorting. Cards show day chips, time/duration, next
+  class, weekly frequency and recent attendance. Managers/Instructors see
+  enrolled/capacity, seats left and fill progress; Students see only their
+  assigned batches and do not see studio roster or capacity details.
+- **Operational warnings and faster setup:** a Needs attention summary flags
+  instructor schedule overlaps, full batches, unassigned instructors and
+  empty active batches. Managers can duplicate an existing batch's settings
+  into a new batch form. The form now requires at least one class day and
+  warns when capacity is below current enrollment or the selected instructor
+  already teaches an overlapping active batch; an overlap remains a warning
+  rather than silently blocking an intentional exception. The roster dialog
+  adds a capacity progress bar and enrolled-student search.
+
+### Database
+
+- **No database change.** Version 1.9.0 uses the existing branch, batch,
+  enrollment and attendance fields and continues to require **SQL v10** from
+  1.8.1. If SQL v10 is already live, do not rerun SQL for this release.
+
+### Validation
+
+- New pure-logic coverage verifies next recurring class dates, 80%/full
+  capacity states and same-instructor overlap detection, including adjacent
+  non-overlapping classes and archived/other-instructor exclusions. Browser
+  coverage exercises the new branch/batch cards and Monday Schedule view in
+  local mode, plus the Student List/Schedule view without roster or capacity
+  details.
+
 ## 1.8.1 — 2026-10-31
 
 ### Security — Fixed-role authorization hardening (SQL v10)

@@ -696,7 +696,14 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByText(/Less rush|Collected this month|Active students|Set up your studio/)).toHaveCount(0);
 
   await page.getByRole('button', {name: 'Batches', exact: true}).click();
-  await expect(page.getByRole('cell', {name: /Morning Yoga/})).toBeVisible();
+  const studentBatchCard = page.locator('.erp-batch-card', {hasText: 'Morning Yoga'});
+  await expect(studentBatchCard).toBeVisible();
+  await expect(studentBatchCard).toContainText('Enrolled');
+  await expect(studentBatchCard).not.toContainText(/students|seat\(s\) available/i);
+  await page.getByRole('button', {name: 'Schedule', exact: true}).click();
+  await expect(page.locator('.erp-schedule-day', {hasText: 'Monday'})).toContainText('Morning Yoga');
+  await expect(page.getByText(/seat\(s\) left/i)).toHaveCount(0);
+  await page.getByRole('button', {name: 'List', exact: true}).click();
   await expect(page.getByText('Evening Yoga')).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Roster/})).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Add batch/})).toHaveCount(0);

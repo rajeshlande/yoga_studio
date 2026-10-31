@@ -432,3 +432,94 @@
  .erp-instructor-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
  .erp-instructor-status-filter{flex:1 1 190px;width:auto}
 }
+
+/* Branches & batches operational workspace */
+.erp-workspace-summary{margin-bottom:0}
+.erp-kpi-text{font-size:20px!important;line-height:1.25;overflow-wrap:anywhere}
+.erp-workspace-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:14px 0 18px}
+.erp-workspace-controls .erp-search{flex:1 1 260px}
+.erp-workspace-field{flex:0 1 180px;min-width:min(180px,100%)}
+.erp-view-toggle{margin-left:auto}
+.erp-view-toggle button{gap:6px}
+.erp-attention-banner{margin-bottom:0}
+.erp-attention-banner>div{flex:1;min-width:0}
+.erp-attention-banner ul{margin:5px 0 0;padding-left:18px}
+.erp-attention-banner li{margin:2px 0}
+.erp-attention-banner small{display:block;margin-top:4px}
+.erp-branch-grid,.erp-batch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr));gap:14px}
+.erp-branch-card,.erp-batch-card{display:flex;flex-direction:column;border:1px solid #f0e9f5;background:#fdfcfe;border-radius:16px;padding:18px;min-width:0}
+.erp-branch-card.archived,.erp-batch-card.archived{opacity:.72}
+.erp-branch-card>header,.erp-batch-card>header{display:flex;align-items:flex-start;gap:12px}
+.erp-branch-card>header>div,.erp-batch-card>header>div{flex:1;min-width:0}
+.erp-branch-card h3,.erp-batch-card h3{font-size:17px;color:#3d3547;line-height:1.3;overflow-wrap:anywhere}
+.erp-branch-card>header p,.erp-batch-card>header p{display:flex;gap:5px;align-items:center;font-size:12px;color:#9b92a4;margin-top:4px;line-height:1.5;overflow-wrap:anywhere}
+.erp-branch-avatar{display:flex;align-items:center;justify-content:center;width:50px;height:50px;border-radius:50%;background:#8664ba;color:#fff;font-family:'Manrope',sans-serif;font-size:17px;font-weight:800;flex-shrink:0;box-shadow:0 8px 20px #8664ba25}
+.erp-card-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:16px 0 0}
+.erp-card-stats>div{border:1px solid #f0e9f5;background:#fff;border-radius:11px;padding:10px;min-width:0}
+.erp-card-stats dt{font-size:9px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#a295ae}
+.erp-card-stats dd{margin:4px 0 0;font-size:13px;font-weight:800;color:#3d3547;line-height:1.35;overflow-wrap:anywhere}
+.erp-capacity-line{margin-top:12px}
+.erp-capacity-line small,.erp-capacity-block small{display:block;font-size:11px;color:#9b92a4;margin-top:6px}
+.erp-capacity-block{margin-top:auto;padding-top:15px}
+.erp-capacity-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline;font-size:12px;color:#8d7d99;margin-bottom:7px}
+.erp-capacity-head strong{font-size:13px;color:#3d3547}
+.erp-progress{height:9px;border-radius:999px;background:#eee7f7;overflow:hidden}
+.erp-progress span{display:block;height:100%;border-radius:inherit;background:#8664ba;transition:width .25s ease}
+.erp-progress span.almost{background:#c48a3a}
+.erp-progress span.full{background:#a34c4c}
+.erp-card-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:13px}
+.erp-card-meta{display:grid;gap:8px;margin-top:14px}
+.erp-card-meta p{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:#7d6b8f;line-height:1.6;margin:0;overflow-wrap:anywhere}
+.erp-card-meta svg{flex-shrink:0;margin-top:2px;color:#8664ba}
+.erp-card-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:16px;padding-top:14px;border-top:1px solid #f0e9f5}
+.erp-branch-card .erp-card-actions{margin-top:auto}
+.erp-batch-teacher{margin-top:16px;min-width:0}
+.erp-batch-time{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#514559;margin-top:14px}
+.erp-batch-time svg{color:#8664ba;flex-shrink:0}
+.erp-batch-days{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.erp-batch-days span{display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:6px 8px;border:1px solid #ece5f2;border-radius:999px;background:#fff;color:#b3a5c0;font-size:10px;font-weight:800;letter-spacing:.02em}
+.erp-batch-days span.on{background:#8664ba;border-color:#8664ba;color:#fff}
+.erp-schedule-note{font-size:12px;color:#9b92a4;line-height:1.65;margin:0 0 12px}
+.erp-schedule-grid{display:grid;grid-template-columns:repeat(7,minmax(145px,1fr));gap:10px;overflow-x:auto;padding-bottom:5px;-webkit-overflow-scrolling:touch}
+.erp-schedule-day{border:1px solid #f0e9f5;background:#fdfcfe;border-radius:14px;padding:12px;min-width:145px}
+.erp-schedule-day.today{border-color:#c9b4e6;background:#f7f2fc;box-shadow:0 0 0 3px #8664ba12}
+.erp-schedule-day>header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px}
+.erp-schedule-day h3{font-size:14px;color:#3d3547;line-height:1.3}
+.erp-schedule-day>header small{display:block;font-size:11px;color:#9b92a4;margin-top:3px}
+.erp-schedule-empty{font-size:12px;color:#aa9db5}
+.erp-schedule-class{display:grid;gap:4px;border:1px solid #f0e9f5;background:#fff;border-radius:12px;padding:11px;margin-top:8px;min-width:0}
+.erp-schedule-class.archived{opacity:.68}
+.erp-schedule-class strong{font-size:13px;color:#3d3547;line-height:1.4;overflow-wrap:anywhere}
+.erp-schedule-class>span{font-size:12px;font-weight:700;color:#7551aa}
+.erp-schedule-class small{font-size:11px;color:#9b92a4;line-height:1.55;overflow-wrap:anywhere}
+.erp-schedule-class .erp-badge{justify-self:start}
+.erp-schedule-class .erp-link-btn{justify-self:start;padding-left:0}
+.erp-roster-capacity{margin:0 0 14px;padding-top:0}
+.erp-roster-search{margin:0 0 8px}
+.erp-field-warning{color:#a34c4c!important;font-size:11px!important}
+:root[data-theme="dark"] .erp-branch-card,:root[data-theme="dark"] .erp-batch-card,:root[data-theme="dark"] .erp-schedule-day{background:#251f34;border-color:#3a304d}
+:root[data-theme="dark"] .erp-card-stats>div,:root[data-theme="dark"] .erp-schedule-class{background:#211b2f;border-color:#3a304d}
+:root[data-theme="dark"] .erp-branch-card h3,:root[data-theme="dark"] .erp-batch-card h3,:root[data-theme="dark"] .erp-card-stats dd,:root[data-theme="dark"] .erp-capacity-head strong,:root[data-theme="dark"] .erp-schedule-day h3,:root[data-theme="dark"] .erp-schedule-class strong{color:#f0e8f7}
+:root[data-theme="dark"] .erp-branch-card>header p,:root[data-theme="dark"] .erp-batch-card>header p,:root[data-theme="dark"] .erp-capacity-line small,:root[data-theme="dark"] .erp-capacity-block small,:root[data-theme="dark"] .erp-schedule-note,:root[data-theme="dark"] .erp-schedule-day>header small,:root[data-theme="dark"] .erp-schedule-empty,:root[data-theme="dark"] .erp-schedule-class small{color:#aa99bd}
+:root[data-theme="dark"] .erp-card-meta p,:root[data-theme="dark"] .erp-batch-time,:root[data-theme="dark"] .erp-capacity-head{color:#c3b2d4}
+:root[data-theme="dark"] .erp-progress{background:#342a49}
+:root[data-theme="dark"] .erp-card-actions{border-top-color:#3a304d}
+:root[data-theme="dark"] .erp-batch-days span{background:#211b2f;border-color:#342a49;color:#77698a}
+:root[data-theme="dark"] .erp-batch-days span.on{background:#9875c7;border-color:#9875c7;color:#171320}
+:root[data-theme="dark"] .erp-schedule-day.today{background:#2d2344;border-color:#6b548d}
+:root[data-theme="dark"] .erp-schedule-class>span{color:#cdb1eb}
+:root[data-theme="dark"] .erp-field-warning{color:#eda9b6!important}
+@media(max-width:760px){
+ .erp-workspace-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .erp-workspace-summary .erp-kpi{padding:14px}
+ .erp-workspace-summary .erp-kpi strong{font-size:23px}
+ .erp-card-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .erp-workspace-field{flex:1 1 150px}
+ .erp-view-toggle{margin-left:0}
+ .erp-schedule-grid{grid-template-columns:1fr;overflow-x:visible}
+ .erp-schedule-day{min-width:0}
+}
+@media(max-width:430px){
+ .erp-workspace-summary{grid-template-columns:1fr 1fr}
+ .erp-branch-card,.erp-batch-card{padding:15px}
+}
