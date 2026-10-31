@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   attendanceSummary, formatINR, membershipBalance, membershipEnd,
-  rupeesToPaise, isBatchOnDate,
+  monthlyRecurringRevenuePaise, nextRenewalDate, pauseDaysBetween,
+  renewalStartDate, rupeesToPaise, subscriptionLifecycle, isBatchOnDate,
 } from '../src/lib/erp/logic.js';
 
 test('joining-date membership ends one day before the monthly anniversary', () => {
@@ -33,6 +34,37 @@ test('membership balance reports paid, partial, unpaid and expiry', () => {
   const paid = membershipBalance(membership, [{membershipId: 'm1', amountPaise: 150000}], '2026-01-15');
   assert.deepEqual([paid.due, paid.paymentStatus], [0, 'paid']);
   assert.equal(membershipBalance(membership, [], '2026-02-10').expired, true);
+});
+
+test('subscription lifecycle derives scheduled, paused, expired and cancelled states', () => {
+  const base = {status: 'active', startDate: '2026-10-01', endDate: '2026-10-31', autoRenew: true};
+  assert.equal(subscriptionLifecycle(base, '2026-10-15').id, 'active');
+  assert.equal(subscriptionLifecycle({...base, startDate: '2026-11-01', endDate: '2026-11-30'}, '2026-10-15').id, 'scheduled');
+  assert.equal(subscriptionLifecycle({...base, status: 'paused'}, '2026-11-15').id, 'paused');
+  assert.equal(subscriptionLifecycle(base, '2026-11-01').id, 'expired');
+  assert.equal(subscriptionLifecycle({...base, status: 'cancelled'}, '2026-10-15').id, 'cancelled');
+  assert.equal(nextRenewalDate(base, '2026-10-15'), '2026-11-01');
+  assert.equal(nextRenewalDate({...base, autoRenew: false}, '2026-10-15'), '');
+  assert.equal(nextRenewalDate(base, '2026-10-15', true), '');
+  assert.equal(renewalStartDate(base, '2026-10-15'), '2026-11-01');
+  assert.equal(renewalStartDate(base, '2026-11-05'), '2026-11-05');
+});
+
+test('paused days extend a subscription end date when it resumes', () => {
+  assert.equal(pauseDaysBetween('2026-10-10', '2026-10-20'), 10);
+  assert.equal(pauseDaysBetween('2026-10-20', '2026-10-10'), 0);
+  assert.equal(membershipEnd('2026-10-01', 1, 'joining', 10), '2026-11-10');
+});
+
+test('monthly recurring revenue counts only current active subscriptions', () => {
+  const rows = [
+    {status: 'active', startDate: '2026-10-01', endDate: '2026-12-31', amountPaise: 300000, durationMonths: 3},
+    {status: 'active', startDate: '2026-10-01', endDate: '2026-10-31', amountPaise: 150000, durationMonths: 1},
+    {status: 'paused', startDate: '2026-10-01', endDate: '2026-10-31', amountPaise: 900000, durationMonths: 1},
+    {status: 'active', startDate: '2026-11-01', endDate: '2026-11-30', amountPaise: 900000, durationMonths: 1},
+    {status: 'cancelled', startDate: '2026-10-01', endDate: '2026-10-31', amountPaise: 900000, durationMonths: 1},
+  ];
+  assert.equal(monthlyRecurringRevenuePaise(rows, '2026-10-15'), 250000);
 });
 
 test('attendance summary counts statuses and rate (late counts as attended)', () => {

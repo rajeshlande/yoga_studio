@@ -556,6 +556,9 @@ test('signed-in student sees a view-only portal for their own records', async ({
       id: MEMBERSHIP, studentId: STUDENT, planId: PLAN, branchId: BRANCH,
       startDate: '2026-10-01', endDate: '2026-12-31', billingCycle: 'joining',
       durationMonths: 1, amountPaise: 150000, status: 'active',
+      autoRenew: true, previousMembershipId: '', renewalNumber: 0,
+      pausedFrom: '', pausedUntil: '', pauseReason: '', totalPausedDays: 0,
+      cancelledAt: null, cancelReason: '',
       createdAt: '2026-10-01T00:00:00Z', syncVersion: 1,
     }],
     payments: [{
@@ -609,11 +612,13 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByRole('button', {name: 'Branches', exact: true})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Access', exact: true})).toHaveCount(0);
   await expect(page.getByRole('heading', {name: 'My assigned batches'})).toBeVisible();
-  await expect(page.getByRole('heading', {name: 'My membership & fees'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'My subscription & fees'})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Recent attendance'})).toBeVisible();
   await expect(page.getByText('Morning Yoga').first()).toBeVisible();
   await expect(page.getByText('Evening Yoga')).toHaveCount(0);
   await expect(page.getByText('My dues')).toBeVisible();
+  await expect(page.getByText('1 Jan 2027', {exact: true})).toBeVisible();
+  await expect(page.getByText(/Renewal is confirmed by the studio; there is no automatic charge/)).toBeVisible();
   await expect(page.getByText(/Less rush|Collected this month|Active students|Set up your studio/)).toHaveCount(0);
 
   await page.getByRole('button', {name: 'Batches', exact: true}).click();
@@ -631,8 +636,16 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByRole('cell', {name: 'Morning Yoga'})).toBeVisible();
 
   await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Subscriptions & dues'})).toBeVisible();
+  await expect(page.getByText('Next renewal 1 Jan 2027')).toBeVisible();
   await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: /Record payment/})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'New subscription'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Renew', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Cancel subscription', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'History'})).toBeVisible();
   await expect(page.getByRole('button', {name: /Invoice PDF/})).toBeVisible();
   await page.getByRole('tab', {name: 'Payments'}).click();
   await expect(page.getByText('YS-2026-0001')).toBeVisible();
@@ -976,6 +989,129 @@ test('manager confirms an admission, creating the student and granting portal ac
   await expect(studentDialog.getByLabel('Last Name')).toHaveValue('Patil');
   await expect(studentDialog.getByLabel('Address')).toHaveValue('Panvel, Maharashtra');
   await expect(studentDialog.getByLabel('Medical / Physical issue')).toHaveValue('Mild knee discomfort');
+});
+
+test('manager pauses, resumes, renews and cancels a subscription at the current plan price', async ({page}) => {
+  page.on('pageerror', error => console.error('Browser page error:', error.message));
+  await mockAuth(page);
+  const PLAN = '88888888-8888-4888-8888-888888888888';
+  const MEMBERSHIP = '99999999-9999-4999-8999-999999999998';
+  const server = emptySnapshot();
+  server.branches.push({
+    id: BRANCH, name: 'Main Branch', city: 'Panvel', address: '', phone: '',
+    status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+  });
+  server.students.push({
+    id: STUDENT, branchId: BRANCH, firstName: 'Asha', lastName: 'Patil',
+    fullName: 'Asha Patil', phone: '9876543210', email: 'asha@example.test',
+    gender: '', dob: '', joiningDate: '2026-10-01', status: 'active', notes: '',
+    createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+  });
+  server.plans.push({
+    id: PLAN, name: 'Monthly Yoga', amountPaise: 200000, durationMonths: 2,
+    status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1,
+  });
+  server.memberships.push({
+    id: MEMBERSHIP, studentId: STUDENT, planId: PLAN, branchId: BRANCH,
+    startDate: '2026-10-01', endDate: '2026-10-31', billingCycle: 'joining',
+    durationMonths: 1, amountPaise: 150000, status: 'active',
+    autoRenew: true, previousMembershipId: '', renewalNumber: 0,
+    pausedFrom: '', pausedUntil: '', pauseReason: '', totalPausedDays: 0,
+    cancelledAt: null, cancelReason: '',
+    createdAt: '2026-10-01T00:00:00Z', syncVersion: 1,
+  });
+  const membershipOps = [];
+  const applyOperation = op => {
+    const list = server[op.entity];
+    const index = list.findIndex(record => record.id === op.entityId);
+    const record = {...op.payload, syncVersion: op.baseVersion ? op.baseVersion + 1 : 1};
+    if (index >= 0) list[index] = {...list[index], ...record};
+    else list.push(record);
+    return {
+      opId: op.opId, status: 'applied', entity: op.entity, entityId: op.entityId,
+      serverEntityId: op.entityId, serverVersion: record.syncVersion,
+    };
+  };
+
+  await page.route('https://auth.yoga-studio.test/rest/v1/rpc/**', async route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    const body = route.request().postDataJSON() || {};
+    const reply = value => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(value)});
+    if (name === 'erp_get_context') {
+      return reply({organizationId: ORG, organizationName: 'Yoga Studio', roles: ['owner'], instructorId: null, studentId: null});
+    }
+    if (name === 'erp_get_snapshot') return reply(structuredClone(server));
+    if (name === 'erp_sync_push') {
+      const operations = body.p_payload?.operations || [];
+      membershipOps.push(...structuredClone(operations.filter(op => op.entity === 'memberships')));
+      return reply({serverTime: new Date().toISOString(), results: operations.map(applyOperation)});
+    }
+    return route.fulfill({status: 404, contentType: 'application/json', body: JSON.stringify({code: 'PGRST202', message: 'Function not mocked'})});
+  });
+
+  await page.goto('/');
+  await signIn(page);
+  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Subscriptions & dues'})).toBeVisible();
+  await expect(page.getByText('Monthly recurring revenue')).toBeVisible();
+  let subscriptionRow = page.getByRole('row', {name: /Asha Patil/});
+  await expect(subscriptionRow.getByText('Next renewal 1 Nov 2026')).toBeVisible();
+
+  await subscriptionRow.getByRole('button', {name: 'Pause'}).click();
+  let dialog = page.getByRole('dialog', {name: 'Pause subscription'});
+  await dialog.getByLabel('Pause from').fill('2026-10-10');
+  await dialog.getByLabel('Expected resume date').fill('2026-10-20');
+  await dialog.getByLabel('Pause reason').fill('Travel');
+  await dialog.getByRole('button', {name: 'Pause subscription', exact: true}).click();
+  await expect(page.getByText('Supabase · Synced')).toBeVisible();
+  subscriptionRow = page.getByRole('row', {name: /Asha Patil/});
+  await expect(subscriptionRow.getByText('paused', {exact: true})).toBeVisible();
+
+  await subscriptionRow.getByRole('button', {name: 'Resume'}).click();
+  dialog = page.getByRole('dialog', {name: 'Resume subscription'});
+  await dialog.getByLabel('Resume date').fill('2026-10-20');
+  await dialog.getByRole('button', {name: 'Resume subscription', exact: true}).click();
+  await expect(page.getByText('Supabase · Synced')).toBeVisible();
+  subscriptionRow = page.getByRole('row', {name: /1 Oct 2026.*10 Nov 2026/});
+  await expect(subscriptionRow).toBeVisible();
+
+  await subscriptionRow.getByRole('button', {name: 'Renew'}).click();
+  dialog = page.getByRole('dialog', {name: 'Renew subscription'});
+  await expect(dialog.getByLabel('Renewal plan')).toHaveValue(PLAN);
+  await expect(dialog.getByLabel('Renewal start date')).toHaveValue('2026-11-11');
+  await expect(dialog.getByLabel('Renewal amount (₹)')).toHaveValue('2000');
+  await dialog.getByRole('button', {name: 'Create renewal'}).click();
+  await expect(page.getByText('Supabase · Synced')).toBeVisible();
+  const renewalRow = page.getByRole('row', {name: /11 Nov 2026.*10 Jan 2027/});
+  await expect(renewalRow.getByText('Renewal #1')).toBeVisible();
+  await expect(renewalRow.getByText('₹2,000').first()).toBeVisible();
+  await expect(subscriptionRow.getByRole('button', {name: 'Pause'})).toHaveCount(0);
+
+  subscriptionRow = page.getByRole('row', {name: /1 Oct 2026.*10 Nov 2026/});
+  await subscriptionRow.getByRole('button', {name: 'History'}).click();
+  dialog = page.getByRole('dialog', {name: 'Subscription history'});
+  await expect(dialog.getByText('Original subscription')).toBeVisible();
+  await expect(dialog.getByText('Renewal #1')).toBeVisible();
+  await dialog.getByRole('button', {name: 'Close Subscription history'}).click();
+
+  await renewalRow.getByRole('button', {name: 'Cancel subscription', exact: true}).click();
+  dialog = page.getByRole('dialog', {name: 'Cancel subscription'});
+  await dialog.getByLabel('Cancellation reason').fill('Student requested cancellation');
+  await dialog.getByRole('button', {name: 'Cancel subscription', exact: true}).click();
+  await expect(page.getByText('Supabase · Synced')).toBeVisible();
+  await expect(page.getByRole('row', {name: /11 Nov 2026.*cancelled/})).toBeVisible();
+  await expect(subscriptionRow.getByRole('button', {name: 'Renew'})).toBeVisible();
+
+  const payloads = membershipOps.map(op => op.payload);
+  expect(payloads.some(payload => payload.id === MEMBERSHIP && payload.status === 'paused'
+    && payload.pausedFrom === '2026-10-10' && payload.pauseReason === 'Travel')).toBeTruthy();
+  expect(payloads.some(payload => payload.id === MEMBERSHIP && payload.status === 'active'
+    && payload.totalPausedDays === 10 && payload.endDate === '2026-11-10')).toBeTruthy();
+  expect(payloads.some(payload => payload.previousMembershipId === MEMBERSHIP
+    && payload.amountPaise === 200000 && payload.durationMonths === 2
+    && payload.startDate === '2026-11-11' && payload.endDate === '2027-01-10')).toBeTruthy();
+  expect(payloads.some(payload => payload.status === 'cancelled'
+    && payload.cancelReason === 'Student requested cancellation')).toBeTruthy();
 });
 
 test('payment setup saved offline stays local, warns before close, then auto-syncs', async ({page}) => {

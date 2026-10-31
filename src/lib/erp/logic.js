@@ -59,22 +59,85 @@ export function formatDate(iso) {
  * - 'calendar': last day of the month that is N-1 months after the start month
  *   (e.g. any January start + 1 month -> 31 Jan).
  */
-export function membershipEnd(startISO, durationMonths, billingCycle = 'joining') {
+export function membershipEnd(startISO, durationMonths, billingCycle = 'joining', totalPausedDays = 0) {
   const start = parseISODate(startISO);
   const months = Math.max(1, Number(durationMonths) || 1);
   if (!start) return startISO;
+  let endISO;
   if (billingCycle === 'calendar') {
     const end = new Date(start.getFullYear(), start.getMonth() + months, 0);
-    return toISODate(end);
+    endISO = toISODate(end);
+  } else {
+    // Clamp the anniversary to the target month's last day (31 Jan + 1 month
+    // is 28 Feb, not 3 Mar), then step back one day. Mirrors the SQL in
+    // supabase/erp_setup.sql, where Postgres month addition clamps the same way.
+    const target = new Date(start.getFullYear(), start.getMonth() + months, 1);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    const anniversary = new Date(target.getFullYear(), target.getMonth(), Math.min(start.getDate(), lastDay));
+    anniversary.setDate(anniversary.getDate() - 1);
+    endISO = toISODate(anniversary);
   }
-  // Clamp the anniversary to the target month's last day (31 Jan + 1 month
-  // is 28 Feb, not 3 Mar), then step back one day. Mirrors the SQL in
-  // supabase/erp_setup.sql, where Postgres month addition clamps the same way.
-  const target = new Date(start.getFullYear(), start.getMonth() + months, 1);
-  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
-  const anniversary = new Date(target.getFullYear(), target.getMonth(), Math.min(start.getDate(), lastDay));
-  anniversary.setDate(anniversary.getDate() - 1);
-  return toISODate(anniversary);
+  const pausedDays = Math.max(0, Math.trunc(Number(totalPausedDays) || 0));
+  return pausedDays ? addDaysISO(endISO, pausedDays) : endISO;
+}
+
+/**
+ * A membership row is one subscription period. SQL stores only the durable
+ * lifecycle (active/paused/cancelled); scheduled and expired are derived
+ * from the inclusive start/end dates so they stay correct without a cron.
+ */
+export function subscriptionLifecycle(membership, today = toISODate()) {
+  if (membership?.status === 'cancelled') return {id: 'cancelled', label: 'Cancelled', tone: 'grey'};
+  if (membership?.status === 'paused') return {id: 'paused', label: 'Paused', tone: 'amber'};
+  if (membership?.startDate && membership.startDate > today) return {id: 'scheduled', label: 'Scheduled', tone: 'lavender'};
+  if (membership?.endDate && membership.endDate < today) return {id: 'expired', label: 'Expired', tone: 'red'};
+  return {id: 'active', label: 'Active', tone: 'green'};
+}
+
+export function nextRenewalDate(membership, today = toISODate(), hasRenewal = false) {
+  if (!membership?.endDate || hasRenewal || membership.autoRenew === false) return '';
+  if (membership.status === 'paused' || membership.status === 'cancelled') return '';
+  return addDaysISO(membership.endDate, 1);
+}
+
+export function renewalStartDate(membership, today = toISODate()) {
+  if (!membership?.endDate) return today;
+  const dayAfterEnd = addDaysISO(membership.endDate, 1);
+  return dayAfterEnd > today ? dayAfterEnd : today;
+}
+
+export function pauseDaysBetween(pausedFrom, resumeDate) {
+  const from = parseISODate(pausedFrom);
+  const resume = parseISODate(resumeDate);
+  if (!from || !resume) return 0;
+  return Math.max(0, Math.round((resume - from) / 86400000));
+}
+
+export function normalizeSubscriptionLifecycle(record = {}, cancelledAt = null) {
+  const status = ['active', 'paused', 'cancelled'].includes(record.status) ? record.status : 'active';
+  const paused = status === 'paused';
+  const cancelled = status === 'cancelled';
+  const totalPausedDays = Math.min(3660, Math.max(0, Math.trunc(Number(record.totalPausedDays) || 0)));
+  return {
+    status,
+    autoRenew: record.autoRenew !== false,
+    previousMembershipId: record.previousMembershipId || '',
+    renewalNumber: Math.min(10000, Math.max(0, Math.trunc(Number(record.renewalNumber) || 0))),
+    pausedFrom: paused ? (record.pausedFrom || '') : '',
+    pausedUntil: paused ? (record.pausedUntil || '') : '',
+    pauseReason: paused ? String(record.pauseReason || '').trim().slice(0, 500) : '',
+    totalPausedDays,
+    cancelledAt: cancelled ? (record.cancelledAt || cancelledAt || null) : null,
+    cancelReason: cancelled ? String(record.cancelReason || '').trim().slice(0, 500) : '',
+  };
+}
+
+export function monthlyRecurringRevenuePaise(memberships, today = toISODate()) {
+  return Math.round((memberships || []).reduce((sum, membership) => {
+    if (subscriptionLifecycle(membership, today).id !== 'active') return sum;
+    const months = Math.max(1, Number(membership.durationMonths) || 1);
+    return sum + (Number(membership.amountPaise) || 0) / months;
+  }, 0));
 }
 
 export function isBatchOnDate(batch, iso) {

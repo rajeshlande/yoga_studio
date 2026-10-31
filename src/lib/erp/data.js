@@ -14,7 +14,7 @@
 import {supabase} from '../auth.js';
 import {localStore} from './localStore.js';
 import {
-  emptySnapshot, membershipEnd, toISODate,
+  emptySnapshot, membershipEnd, normalizeSubscriptionLifecycle, toISODate,
   normalizeBillingSettings, validateBillingSettings,
 } from './logic.js';
 import {
@@ -44,6 +44,11 @@ import {
 
 const nowISO = () => new Date().toISOString();
 const browserOnline = () => typeof navigator === 'undefined' || navigator.onLine;
+const validationError = message => {
+  const error = new Error(message);
+  error.code = 'VALIDATION_FAILED';
+  return error;
+};
 
 async function rpc(name, args = {}) {
   if (!supabase) throw new Error('Supabase is not configured.');
@@ -69,7 +74,7 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v6) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v7) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -107,7 +112,7 @@ function studentAccessError(error) {
 
 function roleAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v6) in Supabase, then try again.');
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v7) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -160,7 +165,7 @@ function roleAccessError(error) {
 
 function admissionError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v6) in Supabase, then try again.');
+    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v7) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ADMISSION_LINK_INVALID/.test(text)) {
@@ -1164,28 +1169,80 @@ export function createErpClient(mode, options = {}) {
     saveMembership: payload => queue((state, snapshot) => {
       const plan = existing(snapshot, 'plans', payload?.planId);
       const student = existing(snapshot, 'students', payload?.studentId);
+      const old = payload?.id ? existing(snapshot, 'memberships', payload) : null;
       const durationMonths = Number(payload?.durationMonths) || plan?.durationMonths || 1;
+      const lifecycleInput = {...(old || {}), ...(payload || {}), status: payload?.status || old?.status || 'active'};
+      if (!['active', 'paused', 'cancelled'].includes(lifecycleInput.status)) {
+        throw validationError('Choose an active, paused or cancelled subscription status.');
+      }
+      if (old?.status === 'cancelled' && lifecycleInput.status !== 'cancelled') {
+        throw validationError('A cancelled subscription cannot be reopened. Create a new subscription instead.');
+      }
+      if (lifecycleInput.status === 'paused') {
+        if (!lifecycleInput.pausedFrom) throw validationError('Choose the date this subscription pauses from.');
+        if (lifecycleInput.pausedFrom < payload.startDate) {
+          throw validationError('The pause start cannot be before the subscription start date.');
+        }
+        if (lifecycleInput.pausedUntil && lifecycleInput.pausedUntil < lifecycleInput.pausedFrom) {
+          throw validationError('The expected resume date cannot be before the pause start date.');
+        }
+      }
+      const lifecycle = normalizeSubscriptionLifecycle(lifecycleInput, nowISO());
+      if (lifecycle.status === 'paused' && payload.id && (snapshot.memberships || []).some(item => (
+        item.previousMembershipId === payload.id && item.status !== 'cancelled' && item.id !== payload.id
+      ))) {
+        throw validationError('Cancel the scheduled renewal before pausing this subscription, so its end date does not move into the next period.');
+      }
+      if (lifecycle.previousMembershipId) {
+        const source = existing(snapshot, 'memberships', lifecycle.previousMembershipId);
+        if (!source || source.studentId !== payload.studentId) {
+          throw validationError('A renewal must follow an existing subscription for the same student.');
+        }
+        const isNewLink = !old || old.previousMembershipId !== lifecycle.previousMembershipId;
+        if (isNewLink && source.status === 'paused') {
+          throw validationError('Resume the previous subscription before renewing it, so the renewal start date is final.');
+        }
+        if (isNewLink && source.status === 'cancelled') {
+          throw validationError('A cancelled subscription cannot be renewed. Create a new subscription instead.');
+        }
+        const duplicate = lifecycle.status !== 'cancelled' && (snapshot.memberships || []).some(item => (
+          item.previousMembershipId === lifecycle.previousMembershipId
+          && item.status !== 'cancelled' && item.id !== payload.id
+        ));
+        if (duplicate) throw validationError('This subscription has already been renewed.');
+      }
       return enqueueUpsert(state, 'memberships', proposed(snapshot, 'memberships', payload, {
         studentId: payload.studentId, planId: payload.planId,
         branchId: payload.branchId || student?.branchId || '',
         startDate: payload.startDate,
-        endDate: membershipEnd(payload.startDate, durationMonths, payload.billingCycle || 'joining'),
+        endDate: membershipEnd(
+          payload.startDate, durationMonths, payload.billingCycle || 'joining', lifecycle.totalPausedDays,
+        ),
         billingCycle: payload.billingCycle || 'joining', durationMonths,
         amountPaise: Number(payload.amountPaise) || plan?.amountPaise || 0,
-        status: payload.status || existing(snapshot, 'memberships', payload)?.status || 'active',
+        ...lifecycle,
       }));
     }),
 
-    cancelMembership: id => queue((state, snapshot) => {
+    cancelMembership: (input, suppliedReason = '') => queue((state, snapshot) => {
+      const id = typeof input === 'string' ? input : input?.id;
+      const reason = typeof input === 'string' ? suppliedReason : (input?.reason || suppliedReason || '');
       const old = existing(snapshot, 'memberships', id);
       if (!old) throw new Error('That membership is no longer available.');
-      return enqueueUpsert(state, 'memberships', {...old, status: 'cancelled'});
+      if (old.status === 'cancelled') return state;
+      const lifecycle = normalizeSubscriptionLifecycle({
+        ...old, status: 'cancelled', cancelReason: reason, cancelledAt: nowISO(),
+      }, nowISO());
+      return enqueueUpsert(state, 'memberships', {...old, ...lifecycle});
     }),
 
     recordPayment: payload => queue((state, snapshot) => {
       const membership = existing(snapshot, 'memberships', payload?.membershipId);
       const amountPaise = Number(payload?.amountPaise) || 0;
       if (!membership || amountPaise <= 0) throw new Error('Choose a membership and enter an amount received.');
+      if (membership.status === 'cancelled') {
+        throw validationError('Payments cannot be recorded against a cancelled subscription.');
+      }
       return enqueuePaymentCreate(state, {
         id: payload.id || newUuid(), studentId: membership.studentId,
         membershipId: membership.id, branchId: membership.branchId || '',

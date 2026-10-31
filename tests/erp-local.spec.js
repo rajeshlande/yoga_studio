@@ -179,9 +179,9 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await page.getByLabel('Plan name').fill('Monthly');
   await page.getByLabel('Price (₹)').fill('1500');
   await page.getByRole('button', {name: 'Save plan'}).click();
-  await page.getByRole('tab', {name: 'Memberships & dues'}).click();
-  await page.getByRole('button', {name: 'New membership'}).click();
-  await page.getByRole('button', {name: 'Create membership'}).click();
+  await page.getByRole('tab', {name: 'Subscriptions & dues'}).click();
+  await page.getByRole('button', {name: 'New subscription'}).click();
+  await page.getByRole('button', {name: 'Create subscription'}).click();
   await expect(page.getByRole('cell', {name: /Asha Patil/})).toBeVisible();
 
   // A due invoice can be generated before setup, but it clearly warns that
@@ -220,7 +220,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // The same unpaid invoice now carries GST breakup, bank details and an
   // offline-generated dynamic UPI QR. The print regression helper proves the
   // complete invoice fits one A4 page outside the scrolling dialog.
-  await page.getByRole('tab', {name: 'Memberships & dues'}).click();
+  await page.getByRole('tab', {name: 'Subscriptions & dues'}).click();
   await page.getByRole('button', {name: /Invoice PDF/}).click();
   invoiceDialog = page.getByRole('dialog', {name: 'Payment invoice'});
   await expect(invoiceDialog.getByText('Example Yoga LLP').first()).toBeVisible();
@@ -246,6 +246,30 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await expect(invoiceDialog.getByText('UPI-TEST-REF-001')).toBeVisible();
   await expectPrintableInvoice(page, {paid: true});
   await invoiceDialog.getByRole('button', {name: 'Close', exact: true}).click();
+
+  // Device-only mode uses the same lifecycle rules: pause/resume the paid
+  // period, then create a linked renewal from the current Plan.
+  await page.getByRole('tab', {name: 'Subscriptions & dues'}).click();
+  let localSubscriptionRow = page.getByRole('row', {name: /Asha Patil/});
+  await localSubscriptionRow.getByRole('button', {name: 'Pause'}).click();
+  let localDialog = page.getByRole('dialog', {name: 'Pause subscription'});
+  await localDialog.getByLabel('Pause reason').fill('Device-only pause');
+  await localDialog.getByRole('button', {name: 'Pause subscription', exact: true}).click();
+  await expect(localSubscriptionRow.getByText('paused', {exact: true})).toBeVisible();
+  await localSubscriptionRow.getByRole('button', {name: 'Resume'}).click();
+  localDialog = page.getByRole('dialog', {name: 'Resume subscription'});
+  await localDialog.getByRole('button', {name: 'Resume subscription', exact: true}).click();
+  await expect(localSubscriptionRow.getByText('active', {exact: true})).toBeVisible();
+  await localSubscriptionRow.getByRole('button', {name: 'Renew'}).click();
+  localDialog = page.getByRole('dialog', {name: 'Renew subscription'});
+  await expect(localDialog.getByLabel('Renewal amount (₹)')).toHaveValue('1500');
+  await localDialog.getByRole('button', {name: 'Create renewal'}).click();
+  await expect(page.getByRole('row', {name: /Renewal #1/})).toBeVisible();
+  const localMemberships = await page.evaluate(() => JSON.parse(localStorage.getItem('yoga-studio-erp-v1')).memberships);
+  expect(localMemberships).toHaveLength(2);
+  expect(localMemberships.find(item => item.renewalNumber === 1)?.previousMembershipId)
+    .toBe(localMemberships.find(item => item.renewalNumber === 0)?.id);
+  expect(localMemberships.find(item => item.renewalNumber === 1)?.autoRenew).toBeTruthy();
 
   // Data survives a reload (offline persistence) and fits a phone screen.
   await page.reload();

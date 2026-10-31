@@ -1,9 +1,10 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 6.
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 7.
 -- Matches app version 1.6.0 (safer autosync, GST/UPI invoicing,
 -- Owner/Co-owner payment configuration/readiness checks, Student portal
--- access, Odoo-style fixed Role Access management for all five roles, and
--- account-first public Student admissions with manager confirmation).
+-- access, Odoo-style fixed Role Access management for all five roles,
+-- account-first public Student admissions with manager confirmation, and
+-- native Odoo-style subscription lifecycle and one-click renewals).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -180,8 +181,30 @@ create table if not exists public.erp_memberships (
   billing_cycle text not null default 'joining' check (billing_cycle in ('joining','calendar')),
   duration_months integer not null default 1,
   amount_paise bigint not null check (amount_paise >= 0),
-  status text not null default 'active' check (status in ('active','cancelled')),
-  created_at timestamptz not null default now()
+  status text not null default 'active'
+    constraint erp_memberships_status_check check (status in ('active','paused','cancelled')),
+  auto_renew boolean not null default true,
+  previous_membership_id uuid references public.erp_memberships(id) on delete restrict,
+  renewal_number integer not null default 0
+    constraint erp_memberships_renewal_number_check check (renewal_number between 0 and 10000),
+  paused_from date,
+  paused_until date,
+  pause_reason text not null default '',
+  total_paused_days integer not null default 0
+    constraint erp_memberships_total_paused_days_check check (total_paused_days between 0 and 3660),
+  cancelled_at timestamptz,
+  cancel_reason text not null default '',
+  created_at timestamptz not null default now(),
+  constraint erp_memberships_previous_not_self_check
+    check (previous_membership_id is null or previous_membership_id <> id),
+  constraint erp_memberships_pause_dates_check
+    check (paused_until is null or (paused_from is not null and paused_until >= paused_from)),
+  constraint erp_memberships_pause_state_check
+    check ((status = 'paused' and paused_from is not null)
+        or (status <> 'paused' and paused_from is null and paused_until is null and pause_reason = '')),
+  constraint erp_memberships_cancel_state_check
+    check ((status = 'cancelled' and cancelled_at is not null)
+        or (status <> 'cancelled' and cancelled_at is null and cancel_reason = ''))
 );
 
 create table if not exists public.erp_payments (
@@ -397,6 +420,77 @@ alter table public.erp_payments add column if not exists status text not null de
 alter table public.erp_payments add column if not exists void_reason text not null default '';
 alter table public.erp_payments add column if not exists voided_at timestamptz;
 alter table public.erp_payments add column if not exists voided_by uuid references auth.users(id);
+
+-- ----------------------------------------------------------------------------
+-- Native subscription lifecycle (SQL v7). A membership row remains one
+-- subscription period; Plans stay the reusable price/duration templates.
+-- Only durable active/paused/cancelled state is stored. Scheduled and
+-- expired presentation is derived from the inclusive period dates, so no
+-- unattended cron is needed. A renewal is a linked next period, and the
+-- partial unique index below allows only one live renewal per period; a
+-- cancelled future renewal remains as history and can be replaced.
+-- ----------------------------------------------------------------------------
+alter table public.erp_memberships add column if not exists auto_renew boolean not null default true;
+alter table public.erp_memberships add column if not exists previous_membership_id uuid
+  references public.erp_memberships(id) on delete restrict;
+alter table public.erp_memberships add column if not exists renewal_number integer not null default 0;
+alter table public.erp_memberships add column if not exists paused_from date;
+alter table public.erp_memberships add column if not exists paused_until date;
+alter table public.erp_memberships add column if not exists pause_reason text not null default '';
+alter table public.erp_memberships add column if not exists total_paused_days integer not null default 0;
+alter table public.erp_memberships add column if not exists cancelled_at timestamptz;
+alter table public.erp_memberships add column if not exists cancel_reason text not null default '';
+
+update public.erp_memberships
+   set cancelled_at = coalesce(updated_at, created_at, now())
+ where status = 'cancelled' and cancelled_at is null;
+update public.erp_memberships
+   set paused_from = null, paused_until = null, pause_reason = ''
+ where status <> 'paused'
+   and (paused_from is not null or paused_until is not null or pause_reason <> '');
+update public.erp_memberships
+   set cancelled_at = null, cancel_reason = ''
+ where status <> 'cancelled' and (cancelled_at is not null or cancel_reason <> '');
+update public.erp_memberships
+   set renewal_number = least(10000, greatest(0, renewal_number)),
+       total_paused_days = least(3660, greatest(0, total_paused_days))
+ where renewal_number < 0 or renewal_number > 10000
+    or total_paused_days < 0 or total_paused_days > 3660;
+update public.erp_memberships
+   set paused_until = paused_from
+ where paused_from is not null and paused_until is not null and paused_until < paused_from;
+update public.erp_memberships
+   set previous_membership_id = null
+ where previous_membership_id = id;
+
+alter table public.erp_memberships drop constraint if exists erp_memberships_status_check;
+alter table public.erp_memberships add constraint erp_memberships_status_check
+  check (status in ('active','paused','cancelled'));
+alter table public.erp_memberships drop constraint if exists erp_memberships_renewal_number_check;
+alter table public.erp_memberships add constraint erp_memberships_renewal_number_check
+  check (renewal_number between 0 and 10000);
+alter table public.erp_memberships drop constraint if exists erp_memberships_total_paused_days_check;
+alter table public.erp_memberships add constraint erp_memberships_total_paused_days_check
+  check (total_paused_days between 0 and 3660);
+alter table public.erp_memberships drop constraint if exists erp_memberships_previous_not_self_check;
+alter table public.erp_memberships add constraint erp_memberships_previous_not_self_check
+  check (previous_membership_id is null or previous_membership_id <> id);
+alter table public.erp_memberships drop constraint if exists erp_memberships_pause_dates_check;
+alter table public.erp_memberships add constraint erp_memberships_pause_dates_check
+  check (paused_until is null or (paused_from is not null and paused_until >= paused_from));
+alter table public.erp_memberships drop constraint if exists erp_memberships_pause_state_check;
+alter table public.erp_memberships add constraint erp_memberships_pause_state_check
+  check ((status = 'paused' and paused_from is not null)
+      or (status <> 'paused' and paused_from is null and paused_until is null and pause_reason = ''));
+alter table public.erp_memberships drop constraint if exists erp_memberships_cancel_state_check;
+alter table public.erp_memberships add constraint erp_memberships_cancel_state_check
+  check ((status = 'cancelled' and cancelled_at is not null)
+      or (status <> 'cancelled' and cancelled_at is null and cancel_reason = ''));
+create unique index if not exists erp_memberships_one_live_renewal_idx
+  on public.erp_memberships(previous_membership_id)
+  where previous_membership_id is not null and status <> 'cancelled';
+create index if not exists erp_memberships_org_status_end_idx
+  on public.erp_memberships(org_id, status, end_date);
 
 create or replace function public.erp__touch_sync()
 returns trigger language plpgsql as $$
@@ -884,7 +978,13 @@ begin
         'id', m.id, 'studentId', m.student_id, 'planId', m.plan_id, 'branchId', m.branch_id,
         'startDate', m.start_date::text, 'endDate', m.end_date::text,
         'billingCycle', m.billing_cycle, 'durationMonths', m.duration_months,
-        'amountPaise', m.amount_paise, 'status', m.status, 'createdAt', m.created_at, 'updatedAt', m.updated_at, 'syncVersion', m.sync_version)
+        'amountPaise', m.amount_paise, 'status', m.status,
+        'autoRenew', m.auto_renew, 'previousMembershipId', coalesce(m.previous_membership_id::text, ''),
+        'renewalNumber', m.renewal_number, 'pausedFrom', coalesce(m.paused_from::text, ''),
+        'pausedUntil', coalesce(m.paused_until::text, ''), 'pauseReason', m.pause_reason,
+        'totalPausedDays', m.total_paused_days, 'cancelledAt', m.cancelled_at,
+        'cancelReason', m.cancel_reason,
+        'createdAt', m.created_at, 'updatedAt', m.updated_at, 'syncVersion', m.sync_version)
         order by m.end_date), '[]')
       from public.erp_memberships m
      where m.org_id = v_org and m.branch_id = any(v_branches)
@@ -2512,11 +2612,18 @@ create or replace function public.erp_save_membership(p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_org uuid; v_id uuid; v_student uuid; v_plan uuid; v_branch uuid;
-  v_student_branch uuid; v_current_branch uuid;
+  v_student_branch uuid;
   v_start date; v_months integer; v_cycle text; v_end date; v_amount bigint;
+  v_current public.erp_memberships%rowtype;
+  v_source public.erp_memberships%rowtype;
+  v_status text; v_auto_renew boolean; v_previous uuid; v_renewal_number integer;
+  v_paused_from date; v_paused_until date; v_pause_reason text;
+  v_total_paused_days integer; v_cancelled_at timestamptz; v_cancel_reason text;
+  v_existing_child uuid; v_is_new boolean;
 begin
   v_org := public.erp__require_manager();
   v_id := nullif(p_payload->>'id', '')::uuid;
+  v_is_new := v_id is null;
   v_student := nullif(p_payload->>'studentId', '')::uuid;
   v_plan := nullif(p_payload->>'planId', '')::uuid;
   v_start := nullif(p_payload->>'startDate', '')::date;
@@ -2530,46 +2637,156 @@ begin
   if v_months is null or v_start is null then raise exception 'VALIDATION_FAILED: planId/startDate'; end if;
   v_months := coalesce(nullif(p_payload->>'durationMonths', '')::integer, v_months);
   v_amount := coalesce(nullif(p_payload->>'amountPaise', '')::bigint, v_amount);
+  if v_months < 1 or v_months > 24 or v_amount < 0 or v_cycle not in ('joining','calendar') then
+    raise exception 'VALIDATION_FAILED: subscription terms';
+  end if;
   v_branch := coalesce(nullif(p_payload->>'branchId', '')::uuid, v_branch);
   perform public.erp__require_branch_manager(v_org, v_branch);
   if v_id is not null then
-    select branch_id into v_current_branch from public.erp_memberships
-     where id = v_id and org_id = v_org;
-    if v_current_branch is null then raise exception 'FORBIDDEN'; end if;
-    perform public.erp__require_branch_manager(v_org, v_current_branch);
+    select * into v_current from public.erp_memberships
+     where id = v_id and org_id = v_org for update;
+    if not found then raise exception 'FORBIDDEN'; end if;
+    perform public.erp__require_branch_manager(v_org, v_current.branch_id);
   end if;
+
+  v_status := coalesce(nullif(p_payload->>'status', ''), v_current.status, 'active');
+  if v_status not in ('active','paused','cancelled') then
+    raise exception 'VALIDATION_FAILED: subscription status';
+  end if;
+  if v_current.status = 'cancelled' and v_status <> 'cancelled' then
+    raise exception 'VALIDATION_FAILED: SUBSCRIPTION_CANCELLED';
+  end if;
+  v_auto_renew := case
+    when p_payload ? 'autoRenew' then coalesce(nullif(p_payload->>'autoRenew', '')::boolean, true)
+    else coalesce(v_current.auto_renew, true)
+  end;
+  v_previous := nullif(p_payload->>'previousMembershipId', '')::uuid;
+  if not (p_payload ? 'previousMembershipId') then v_previous := v_current.previous_membership_id; end if;
+  v_renewal_number := coalesce(
+    nullif(p_payload->>'renewalNumber', '')::integer, v_current.renewal_number, 0);
+  v_paused_from := nullif(p_payload->>'pausedFrom', '')::date;
+  v_paused_until := nullif(p_payload->>'pausedUntil', '')::date;
+  v_pause_reason := left(trim(coalesce(p_payload->>'pauseReason', '')), 500);
+  v_total_paused_days := coalesce(
+    nullif(p_payload->>'totalPausedDays', '')::integer, v_current.total_paused_days, 0);
+  v_cancelled_at := nullif(p_payload->>'cancelledAt', '')::timestamptz;
+  v_cancel_reason := left(trim(coalesce(p_payload->>'cancelReason', '')), 500);
+  if v_renewal_number < 0 or v_renewal_number > 10000
+     or v_total_paused_days < 0 or v_total_paused_days > 3660 then
+    raise exception 'VALIDATION_FAILED: subscription lifecycle';
+  end if;
+
+  if v_status = 'paused' then
+    if v_paused_from is null then raise exception 'VALIDATION_FAILED: pausedFrom'; end if;
+    if v_paused_until is not null and v_paused_until < v_paused_from then
+      raise exception 'VALIDATION_FAILED: pausedUntil';
+    end if;
+  else
+    v_paused_from := null; v_paused_until := null; v_pause_reason := '';
+  end if;
+  if v_status = 'cancelled' then
+    v_cancelled_at := coalesce(v_cancelled_at, v_current.cancelled_at, now());
+  else
+    v_cancelled_at := null; v_cancel_reason := '';
+  end if;
+
+  if v_previous is not null then
+    if v_id is not null and v_previous = v_id then
+      raise exception 'VALIDATION_FAILED: previousMembershipId';
+    end if;
+    select * into v_source from public.erp_memberships
+     where id = v_previous and org_id = v_org for update;
+    if not found or v_source.student_id <> v_student then
+      raise exception 'FORBIDDEN';
+    end if;
+    perform public.erp__require_branch_manager(v_org, v_source.branch_id);
+    if v_source.status = 'cancelled'
+       and (v_is_new or v_current.previous_membership_id is distinct from v_previous) then
+      raise exception 'VALIDATION_FAILED: SUBSCRIPTION_CANCELLED';
+    end if;
+    if v_source.status = 'paused'
+       and (v_is_new or v_current.previous_membership_id is distinct from v_previous) then
+      raise exception 'VALIDATION_FAILED: SUBSCRIPTION_PAUSED';
+    end if;
+    if nullif(p_payload->>'renewalNumber', '') is null then
+      v_renewal_number := v_source.renewal_number + 1;
+    end if;
+    if v_status <> 'cancelled' then
+      select id into v_existing_child from public.erp_memberships
+       where previous_membership_id = v_previous and status <> 'cancelled'
+         and (v_id is null or id <> v_id)
+       limit 1;
+      if v_existing_child is not null then
+        raise exception 'VALIDATION_FAILED: ALREADY_RENEWED';
+      end if;
+    end if;
+  end if;
+
   if v_cycle = 'calendar' then
     v_end := (date_trunc('month', v_start)::date + (v_months || ' months')::interval - interval '1 day')::date;
   else
     v_end := (v_start + (v_months || ' months')::interval - interval '1 day')::date;
   end if;
-  if v_id is null then
-    insert into public.erp_memberships(org_id, student_id, plan_id, branch_id, start_date, end_date,
-                                       billing_cycle, duration_months, amount_paise)
-    values (v_org, v_student, v_plan, v_branch, v_start, v_end, v_cycle, v_months, v_amount)
+  v_end := (v_end + (v_total_paused_days || ' days')::interval)::date;
+  if v_status = 'paused' and (v_paused_from < v_start or v_paused_from > v_end) then
+    raise exception 'VALIDATION_FAILED: pausedFrom';
+  end if;
+  if v_status = 'paused' and v_id is not null and exists (
+    select 1 from public.erp_memberships
+     where previous_membership_id = v_id and status <> 'cancelled') then
+    raise exception 'VALIDATION_FAILED: RENEWAL_EXISTS';
+  end if;
+
+  if v_is_new then
+    insert into public.erp_memberships(
+      org_id, student_id, plan_id, branch_id, start_date, end_date,
+      billing_cycle, duration_months, amount_paise, status, auto_renew,
+      previous_membership_id, renewal_number, paused_from, paused_until,
+      pause_reason, total_paused_days, cancelled_at, cancel_reason)
+    values (v_org, v_student, v_plan, v_branch, v_start, v_end, v_cycle, v_months,
+      v_amount, v_status, v_auto_renew, v_previous, v_renewal_number, v_paused_from,
+      v_paused_until, v_pause_reason, v_total_paused_days, v_cancelled_at, v_cancel_reason)
     returning id into v_id;
   else
     update public.erp_memberships set student_id = v_student, plan_id = v_plan, branch_id = v_branch,
       start_date = v_start, end_date = v_end, billing_cycle = v_cycle,
-      duration_months = v_months, amount_paise = v_amount
+      duration_months = v_months, amount_paise = v_amount, status = v_status,
+      auto_renew = v_auto_renew, previous_membership_id = v_previous,
+      renewal_number = v_renewal_number, paused_from = v_paused_from,
+      paused_until = v_paused_until, pause_reason = v_pause_reason,
+      total_paused_days = v_total_paused_days, cancelled_at = v_cancelled_at,
+      cancel_reason = v_cancel_reason
      where id = v_id and org_id = v_org;
     if not found then raise exception 'FORBIDDEN'; end if;
   end if;
-  perform public.erp__log(v_org, 'save', 'membership', v_id);
+  perform public.erp__log(v_org,
+    case
+      when v_is_new and v_previous is not null then 'renew'
+      when v_status = 'paused' and v_current.status is distinct from 'paused' then 'pause'
+      when v_status = 'active' and v_current.status = 'paused' then 'resume'
+      when v_status = 'cancelled' and v_current.status is distinct from 'cancelled' then 'cancel'
+      else 'save'
+    end,
+    'membership', v_id);
   return jsonb_build_object('id', v_id);
 end $$;
 
 create or replace function public.erp_cancel_membership(p_id uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_org uuid; v_branch uuid;
+declare v_org uuid; v_current public.erp_memberships%rowtype;
 begin
   v_org := public.erp__require_manager();
-  select branch_id into v_branch from public.erp_memberships where id = p_id and org_id = v_org;
-  if v_branch is null then raise exception 'FORBIDDEN'; end if;
-  perform public.erp__require_branch_manager(v_org, v_branch);
-  update public.erp_memberships set status = 'cancelled' where id = p_id and org_id = v_org;
+  select * into v_current from public.erp_memberships
+   where id = p_id and org_id = v_org for update;
   if not found then raise exception 'FORBIDDEN'; end if;
-  perform public.erp__log(v_org, 'cancel', 'membership', p_id);
+  perform public.erp__require_branch_manager(v_org, v_current.branch_id);
+  if v_current.status <> 'cancelled' then
+    update public.erp_memberships set status = 'cancelled', paused_from = null,
+      paused_until = null, pause_reason = '', cancelled_at = now()
+     where id = p_id and org_id = v_org;
+    if not found then raise exception 'FORBIDDEN'; end if;
+    perform public.erp__log(v_org, 'cancel', 'membership', p_id);
+  end if;
   return jsonb_build_object('id', p_id);
 end $$;
 
@@ -2587,7 +2804,7 @@ begin
     raise exception 'VALIDATION_FAILED: membershipId/amountPaise';
   end if;
   select student_id, branch_id into v_student, v_branch
-    from public.erp_memberships where id = v_membership and org_id = v_org and status = 'active';
+    from public.erp_memberships where id = v_membership and org_id = v_org and status in ('active','paused');
   if v_student is null then raise exception 'FORBIDDEN'; end if;
   perform public.erp__require_branch_manager(v_org, v_branch);
   insert into public.erp_counters(org_id, receipt) values (v_org, 1)
@@ -3092,15 +3309,44 @@ declare
   v_amount bigint;
   v_end date;
   v_current public.erp_memberships%rowtype;
+  v_source public.erp_memberships%rowtype;
+  v_child public.erp_memberships%rowtype;
   v_version integer;
   v_student_branch uuid;
+  v_auto_renew boolean := coalesce(nullif(v_payload->>'autoRenew', '')::boolean, true);
+  v_previous uuid := nullif(v_payload->>'previousMembershipId', '')::uuid;
+  v_renewal_number integer := coalesce(nullif(v_payload->>'renewalNumber', '')::integer, 0);
+  v_paused_from date := nullif(v_payload->>'pausedFrom', '')::date;
+  v_paused_until date := nullif(v_payload->>'pausedUntil', '')::date;
+  v_pause_reason text := left(trim(coalesce(v_payload->>'pauseReason', '')), 500);
+  v_total_paused_days integer := coalesce(nullif(v_payload->>'totalPausedDays', '')::integer, 0);
+  v_cancelled_at timestamptz := nullif(v_payload->>'cancelledAt', '')::timestamptz;
+  v_cancel_reason text := left(trim(coalesce(v_payload->>'cancelReason', '')), 500);
 begin
   if v_id is null or v_student is null or v_plan is null or v_start is null then
     raise exception 'VALIDATION_FAILED: membership id/studentId/planId/startDate';
   end if;
-  if v_cycle not in ('joining','calendar') or v_status not in ('active','cancelled') then
+  if v_cycle not in ('joining','calendar') or v_status not in ('active','paused','cancelled') then
     raise exception 'VALIDATION_FAILED: membership billingCycle/status';
   end if;
+  if v_renewal_number < 0 or v_renewal_number > 10000
+     or v_total_paused_days < 0 or v_total_paused_days > 3660 then
+    raise exception 'VALIDATION_FAILED: membership lifecycle';
+  end if;
+  if v_status = 'paused' then
+    if v_paused_from is null then raise exception 'VALIDATION_FAILED: pausedFrom'; end if;
+    if v_paused_until is not null and v_paused_until < v_paused_from then
+      raise exception 'VALIDATION_FAILED: pausedUntil';
+    end if;
+  else
+    v_paused_from := null; v_paused_until := null; v_pause_reason := '';
+  end if;
+  if v_status = 'cancelled' then
+    v_cancelled_at := coalesce(v_cancelled_at, now());
+  else
+    v_cancelled_at := null; v_cancel_reason := '';
+  end if;
+
   select branch_id into v_student_branch from public.erp_students
    where id = v_student and org_id = p_org;
   if v_student_branch is null then raise exception 'FORBIDDEN'; end if;
@@ -3112,10 +3358,17 @@ begin
   if v_months is null then raise exception 'FORBIDDEN'; end if;
   v_months := coalesce(nullif(v_payload->>'durationMonths', '')::integer, v_months);
   v_amount := coalesce(nullif(v_payload->>'amountPaise', '')::bigint, v_amount);
+  if v_months < 1 or v_months > 24 or v_amount < 0 then
+    raise exception 'VALIDATION_FAILED: membership terms';
+  end if;
   if v_cycle = 'calendar' then
     v_end := (date_trunc('month', v_start)::date + (v_months || ' months')::interval - interval '1 day')::date;
   else
     v_end := (v_start + (v_months || ' months')::interval - interval '1 day')::date;
+  end if;
+  v_end := (v_end + (v_total_paused_days || ' days')::interval)::date;
+  if v_status = 'paused' and (v_paused_from < v_start or v_paused_from > v_end) then
+    raise exception 'VALIDATION_FAILED: pausedFrom';
   end if;
 
   select * into v_current from public.erp_memberships where id = v_id for update;
@@ -3127,18 +3380,72 @@ begin
     if v_base <> v_current.sync_version then
       return public.erp__sync_result(p_op, 'conflict', v_id, v_current.sync_version, 'VERSION_CONFLICT', 'This membership changed in Supabase after it was copied to this device.');
     end if;
+    if v_current.status = 'cancelled' and v_status <> 'cancelled' then
+      return public.erp__sync_result(p_op, 'conflict', v_id, v_current.sync_version, 'SUBSCRIPTION_CANCELLED', 'This subscription was cancelled in Supabase and cannot be reopened.');
+    end if;
+  elsif v_base > 0 then
+    return public.erp__sync_result(p_op, 'conflict', null, null, 'RECORD_MISSING', 'This membership no longer exists in Supabase.');
+  end if;
+
+  if v_status = 'paused' then
+    select * into v_child from public.erp_memberships
+     where previous_membership_id = v_id and status <> 'cancelled'
+     limit 1;
+    if v_child.id is not null then
+      return public.erp__sync_result(p_op, 'conflict', v_child.id, v_child.sync_version, 'ALREADY_RENEWED', 'This subscription already has a live renewal in Supabase. Cancel that future period before pausing the current one.');
+    end if;
+  end if;
+
+  if v_previous is not null then
+    if v_previous = v_id then raise exception 'VALIDATION_FAILED: previousMembershipId'; end if;
+    select * into v_source from public.erp_memberships where id = v_previous for update;
+    if v_source.id is null or v_source.org_id <> p_org then raise exception 'FORBIDDEN'; end if;
+    perform public.erp__require_branch_manager(p_org, v_source.branch_id);
+    if v_source.student_id <> v_student then
+      raise exception 'VALIDATION_FAILED: renewal student';
+    end if;
+    if v_source.status = 'cancelled'
+       and (v_current.id is null or v_current.previous_membership_id is distinct from v_previous) then
+      return public.erp__sync_result(p_op, 'conflict', v_source.id, v_source.sync_version, 'SUBSCRIPTION_CANCELLED', 'The previous subscription was cancelled in Supabase, so this renewal cannot follow it.');
+    end if;
+    if v_source.status = 'paused'
+       and (v_current.id is null or v_current.previous_membership_id is distinct from v_previous) then
+      return public.erp__sync_result(p_op, 'conflict', v_source.id, v_source.sync_version, 'SUBSCRIPTION_PAUSED', 'Resume the previous subscription in Supabase before creating its renewal, so the renewed start date is final.');
+    end if;
+    if nullif(v_payload->>'renewalNumber', '') is null then
+      v_renewal_number := v_source.renewal_number + 1;
+    end if;
+    if v_status <> 'cancelled' then
+      select * into v_child from public.erp_memberships
+       where previous_membership_id = v_previous and status <> 'cancelled' and id <> v_id
+       limit 1;
+      if v_child.id is not null then
+        return public.erp__sync_result(p_op, 'conflict', v_child.id, v_child.sync_version, 'ALREADY_RENEWED', 'This subscription was already renewed in Supabase. Review the existing renewal before discarding this device copy.');
+      end if;
+    end if;
+  end if;
+
+  if v_current.id is not null then
     update public.erp_memberships set
       student_id = v_student, plan_id = v_plan, branch_id = v_branch,
       start_date = v_start, end_date = v_end, billing_cycle = v_cycle,
-      duration_months = v_months, amount_paise = v_amount, status = v_status
+      duration_months = v_months, amount_paise = v_amount, status = v_status,
+      auto_renew = v_auto_renew, previous_membership_id = v_previous,
+      renewal_number = v_renewal_number, paused_from = v_paused_from,
+      paused_until = v_paused_until, pause_reason = v_pause_reason,
+      total_paused_days = v_total_paused_days, cancelled_at = v_cancelled_at,
+      cancel_reason = v_cancel_reason
      where id = v_id returning sync_version into v_version;
   else
-    if v_base > 0 then
-      return public.erp__sync_result(p_op, 'conflict', null, null, 'RECORD_MISSING', 'This membership no longer exists in Supabase.');
-    end if;
-    insert into public.erp_memberships(id, org_id, student_id, plan_id, branch_id, start_date, end_date,
-                                       billing_cycle, duration_months, amount_paise, status)
-    values (v_id, p_org, v_student, v_plan, v_branch, v_start, v_end, v_cycle, v_months, v_amount, v_status)
+    insert into public.erp_memberships(
+      id, org_id, student_id, plan_id, branch_id, start_date, end_date,
+      billing_cycle, duration_months, amount_paise, status, auto_renew,
+      previous_membership_id, renewal_number, paused_from, paused_until,
+      pause_reason, total_paused_days, cancelled_at, cancel_reason)
+    values (v_id, p_org, v_student, v_plan, v_branch, v_start, v_end, v_cycle,
+      v_months, v_amount, v_status, v_auto_renew, v_previous, v_renewal_number,
+      v_paused_from, v_paused_until, v_pause_reason, v_total_paused_days,
+      v_cancelled_at, v_cancel_reason)
     returning sync_version into v_version;
   end if;
   return public.erp__sync_result(p_op, 'applied', v_id, v_version);
@@ -3207,6 +3514,10 @@ begin
   end if;
   if v_base > 0 then
     return public.erp__sync_result(p_op, 'conflict', null, null, 'RECORD_MISSING', 'This payment no longer exists in Supabase.');
+  end if;
+  if v_membership.status = 'cancelled' then
+    return public.erp__sync_result(p_op, 'rejected', v_membership.id, v_membership.sync_version,
+      'SUBSCRIPTION_CANCELLED', 'This subscription was cancelled in Supabase, so the payment was not recorded.');
   end if;
 
   insert into public.erp_counters(org_id, receipt) values (p_org, 1)

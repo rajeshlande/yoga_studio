@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
-## 1.6.0 — 2026-10-30
+## 1.6.0 — 2026-10-31
 
 ### Added — Fixed Role Access for Owner, Co-owner, Admin, Instructor and Student
 
@@ -45,7 +45,7 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   an ERP role.
 - **Personal Student dashboard and settings boundary:** the Student
   dashboard now shows only that student's assigned batches, next class,
-  classes today, attendance, membership progress, dues and recent payments.
+  classes today, attendance, subscription progress, dues and recent payments.
   Student screens no longer display **Online · synced**, **Supabase ·
   Synced** or **Sync now**; the Batches screen does not expose an unassigned
   batch, studio roster or class size. **Settings → Studio ERP data** is
@@ -76,6 +76,37 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   dashboard. Medical / Physical issue is visible only to Owner, Co-owner,
   the student's branch Admin and the student; Instructor snapshots redact it.
 
+### Added — Native Odoo-style subscriptions
+
+- **Plans as templates, periods as contracts:** existing fee Plans now act
+  as reusable subscription templates. Every membership row is presented as
+  one subscription period with its own agreed amount, dues, invoice,
+  payments and receipts. Yoga Studio implements this natively; no separate
+  Odoo service is connected or embedded.
+- **Lifecycle management:** managers can create subscriptions and view
+  active, scheduled, paused, expired and cancelled states. Pause records a
+  start date, optional expected resume date and reason; Resume adds the
+  elapsed pause days to the period end. Cancellation is terminal for that
+  period and records its timestamp/reason while preserving payment history.
+- **One-click renewal:** **Renew** creates a linked next period beginning
+  the day after the current end date (or today if already expired), using
+  the selected Plan's current price and duration. The prior period's amount
+  is not rewritten. A **History** view shows the full linked chain, and the
+  Fees summary reports active/paused subscriptions, renewals due and a
+  simple current-active-subscription MRR.
+- **Lineage safeguards:** only one live renewal may follow a period. A
+  cancelled future renewal stays in History and can be replaced. A period
+  cannot be paused while a live renewal follows it, and a paused period must
+  resume before renewal so the renewed start date is final. Payments remain
+  collectible for paused/scheduled/expired periods but are blocked after
+  cancellation.
+- **View-only Student portal retained:** students see their own lifecycle,
+  next renewal date, dues and linked History with wording that renewal is
+  confirmed by the studio and no automatic charge is made. They receive no
+  Pause, Resume, Cancel, Renew or payment-write controls. This release has
+  no unattended recurring-invoice scheduler, saved-method autopay or retry/
+  dunning workflow.
+
 ### Security and behavior
 
 - SQL v5 treats `co_owner` as a distinct organization role and enforces the
@@ -105,6 +136,14 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   `erp_review_admission` RPCs. Submissions require the confirmed Auth email
   and an account with no active ERP role; admission review and the Student
   portal grant are serialized/audited and remain online-only.
+- SQL v7 extends the existing membership/direct/sync RPC surface rather than
+  exposing a new generic subscription API. Direct saves, cancellation and
+  payments and `erp_sync_push` all recheck lifecycle values, current and
+  destination branches, source-subscription student/branch, renewal lineage
+  and paused/cancelled state. A partial unique index permits only one live
+  renewal; duplicate offline renewals return `ALREADY_RENEWED`, attempts to
+  reopen or pay a cancelled period are rejected, and lifecycle mutations are
+  audited as pause, resume, renew or cancel.
 - Browser coverage adds Owner Co-owner/Admin/Instructor management,
   Co-owner and branch-Admin Instructor Portal grants, hiding of Instructor
   profile setup/portal controls from Instructor and Student accounts,
@@ -112,27 +151,37 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
   joining-account screen, the explicit prospective-Owner creation path,
   the personal Student dashboard/assigned-batch portal without sync
   controls, Owner/Admin-only visibility of **Studio ERP data**, applicant
-  admission submission and manager admission confirmation. PGlite
-  validation exercises the role-access RPC surface as `authenticated`, and
-  a dedicated SQL v6 admission harness passes 24 lifecycle, branch-scope,
-  duplicate, privilege and medical-redaction checks; live Supabase
-  Auth/RLS UAT with five real accounts remains required after deployment.
+  admission submission and manager admission confirmation, plus a manager
+  subscription pause/resume, current-price renewal, History and cancellation
+  journey and an offline-device lifecycle journey. PGlite validation
+  exercises the role-access RPC surface as `authenticated`; the SQL v6
+  admission harness passes 24 checks, and the SQL v7 subscription harness
+  passes 41 direct/sync lifecycle, renewal-lineage, branch-scope, payment
+  and privilege checks. A separate SQL v6 → v7 upgrade simulation verifies
+  preservation of active/cancelled memberships and cancellation backfill.
+  Live Supabase Auth/RLS UAT with five real accounts remains required after
+  deployment.
 
-### Database migration — SQL v6 (includes SQL v5)
+### Database migration — SQL v7 (includes SQL v6 and SQL v5)
 
 - Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
-  Editor. The complete file now installs SQL v6: SQL v5 adds `erp_list_role_access()`,
+  Editor. The complete file now installs SQL v7: SQL v5 adds `erp_list_role_access()`,
   `erp_grant_co_owner_access(text)`, `erp_revoke_co_owner_access(uuid)`,
   `erp_grant_admin_access(text, uuid[])`,
   `erp_revoke_admin_access(uuid)`,
   `erp_grant_instructor_access(uuid, text, uuid[])` and
   `erp_revoke_instructor_access(uuid)`, strengthens branch checks across
   existing RPC/sync functions, adds lookup indexes and revokes internal
-  helpers, while SQL v6 adds the organization admission code, locked
-  admissions table/RPCs and structured Student profile columns and revokes
-  admission helpers. The single setup file remains idempotent and does not
-  delete business rows. Deploy/run the complete SQL v6 file before using
-  **Access**, **Admission requests** or the narrowed branch-Admin permissions.
+  helpers; SQL v6 adds the organization admission code, locked admissions
+  table/RPCs and structured Student profile columns; and SQL v7 adds
+  subscription lifecycle columns/backfills/constraints, snapshot fields,
+  the one-live-renewal index, and matching direct/sync lifecycle/payment
+  handling. Existing periods keep their amount and dates and receive
+  renewal tracking by default; legacy cancelled periods receive a
+  cancellation timestamp. The single setup file remains idempotent and does
+  not delete business rows. Deploy/run the complete SQL v7 file before using
+  **Access**, **Admission requests**, the narrowed branch-Admin permissions
+  or subscription Pause/Resume/Renew/Cancel actions.
 
 ## 1.5.0 — 2026-10-30
 

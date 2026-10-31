@@ -117,6 +117,31 @@ test('dependent offline creates are not ready until their parent is acknowledged
   assert.deepEqual(readyOperations(state).map(op => op.entity), ['students']);
 });
 
+test('an offline renewal waits for its source subscription to sync first', () => {
+  let state = newState();
+  const original = {
+    id: MEMBERSHIP, studentId: STUDENT, planId: '99999999-9999-4999-8999-999999999999',
+    branchId: BRANCH, startDate: '2026-10-01', endDate: '2026-10-31',
+    billingCycle: 'joining', durationMonths: 1, amountPaise: 150000, status: 'active',
+    autoRenew: true, previousMembershipId: '', renewalNumber: 0,
+  };
+  const renewal = {
+    ...original, id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    startDate: '2026-11-01', endDate: '2026-11-30', amountPaise: 200000,
+    previousMembershipId: MEMBERSHIP, renewalNumber: 1,
+  };
+  state = enqueueUpsert(state, 'memberships', original);
+  state = enqueueUpsert(state, 'memberships', renewal);
+
+  assert.deepEqual(readyOperations(state).map(op => op.entityId), [MEMBERSHIP]);
+
+  state = removeOperations(state, [state.outbox.find(op => op.entityId === MEMBERSHIP).opId]);
+  state = reconcileServerSnapshot(state, {
+    ...emptySnapshot(), memberships: [{...original, syncVersion: 1}],
+  });
+  assert.deepEqual(readyOperations(state).map(op => op.entityId), [renewal.id]);
+});
+
 test('acknowledged work is merged into the base snapshot before the refresh pull', () => {
   let state = newState();
   state = enqueueUpsert(state, 'branches', {

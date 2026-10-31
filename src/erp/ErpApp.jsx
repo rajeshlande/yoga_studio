@@ -1,15 +1,18 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {
-  AlertCircle, Building2, CalendarCheck, Check, Clock, Download, IndianRupee, KeyRound, Leaf,
-  Pencil, Plus, Printer, RefreshCw, Search, Users, Wallet, WifiOff, X,
+  AlertCircle, Building2, CalendarCheck, CalendarClock, Check, CirclePause, CirclePlay, Clock,
+  Download, IndianRupee, KeyRound, Leaf, Pencil, Plus, Printer, RefreshCw, Repeat, Search,
+  Users, Wallet, WifiOff, X,
 } from 'lucide-react';
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
 import QRCode from 'qrcode';
 import {
   ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, ROLES, attendanceSummary, batchTimeLabel,
   emptySnapshot, formatDate, formatINR, initials, isBatchOnDate, payableBalance,
-  membershipEnd, paiseToRupees, rupeesToPaise, toCSV, toISODate, addDaysISO,
+  membershipEnd, monthlyRecurringRevenuePaise, nextRenewalDate, paiseToRupees,
+  pauseDaysBetween, renewalStartDate, rupeesToPaise, subscriptionLifecycle,
+  toCSV, toISODate, addDaysISO,
   INDIA_STATE_CODES, billingReadiness, buildUpiUri, calculateInvoiceTax,
   formatInvoiceINR, normalizeBillingSettings,
 } from '../lib/erp/logic.js';
@@ -250,6 +253,60 @@ function studentName(data, id) { return data.students.find(s => s.id === id)?.fu
 function instructorName(data, id) { return data.instructors.find(i => i.id === id)?.fullName || 'Not assigned'; }
 function planName(data, id) { return data.plans.find(p => p.id === id)?.name || '—'; }
 function inBranch(ctx, branchId) { return !ctx.branchId || ctx.branchId === 'all' || ctx.branchId === branchId; }
+function renewalChildByPrevious(data) {
+  const byPrevious = new Map();
+  for (const membership of data.memberships || []) {
+    if (!membership.previousMembershipId || membership.status === 'cancelled') continue;
+    if (!byPrevious.has(membership.previousMembershipId)) {
+      byPrevious.set(membership.previousMembershipId, membership);
+    }
+  }
+  return byPrevious;
+}
+function subscriptionChain(data, membership) {
+  if (!membership) return [];
+  const byId = new Map((data.memberships || []).map(item => [item.id, item]));
+  const childrenByPrevious = new Map();
+  for (const item of data.memberships || []) {
+    if (!item.previousMembershipId) continue;
+    const siblings = childrenByPrevious.get(item.previousMembershipId) || [];
+    siblings.push(item);
+    childrenByPrevious.set(item.previousMembershipId, siblings);
+  }
+  for (const siblings of childrenByPrevious.values()) {
+    siblings.sort((a, b) => (
+      ((a.status === 'cancelled' ? 0 : 1) - (b.status === 'cancelled' ? 0 : 1))
+      || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+      || String(a.startDate || '').localeCompare(String(b.startDate || ''))
+    ));
+  }
+  let root = membership;
+  const seenRoots = new Set([root.id]);
+  while (root.previousMembershipId && byId.has(root.previousMembershipId)
+      && !seenRoots.has(root.previousMembershipId)) {
+    root = byId.get(root.previousMembershipId);
+    seenRoots.add(root.id);
+  }
+  const chain = [];
+  const seen = new Set();
+  const visit = current => {
+    if (!current || seen.has(current.id)) return;
+    chain.push(current);
+    seen.add(current.id);
+    for (const child of childrenByPrevious.get(current.id) || []) visit(child);
+  };
+  visit(root);
+  return chain;
+}
+function subscriptionPeriodLabel(membership) {
+  return Number(membership?.renewalNumber) > 0
+    ? `Renewal #${Number(membership.renewalNumber)}`
+    : 'Original subscription';
+}
+function SubscriptionBadge({membership, today}) {
+  const lifecycle = subscriptionLifecycle(membership, today);
+  return <span className={`erp-badge ${lifecycle.tone}`}>{lifecycle.id}</span>;
+}
 
 function Dialog({title, sub, onClose, children, className = ''}) {
   return <div className="modal-backdrop" onClick={onClose}>
@@ -315,11 +372,11 @@ export function ErpBlockingState({erp, mode, setMode, accountIntent = '', onAcco
 const SYNC_ENTITY_LABELS = {
   branches: 'Branch', students: 'Student', instructors: 'Instructor', batches: 'Batch',
   enrollments: 'Enrollment', attendance: 'Attendance', plans: 'Plan',
-  memberships: 'Membership', payments: 'Payment', billingSettings: 'Payment & invoice settings',
+  memberships: 'Subscription', payments: 'Payment', billingSettings: 'Payment & invoice settings',
 };
 const SYNC_FIELD_LABELS = {
   name: 'Name', fullName: 'Full name', branchId: 'Branch', studentId: 'Student',
-  instructorId: 'Instructor', batchId: 'Batch', planId: 'Plan', membershipId: 'Membership',
+  instructorId: 'Instructor', batchId: 'Batch', planId: 'Plan', membershipId: 'Subscription',
   city: 'City', address: 'Address', phone: 'Phone', email: 'Email', gender: 'Gender',
   dob: 'Date of birth', joiningDate: 'Joining date', joinedOn: 'Joined on', status: 'Status',
   notes: 'Notes', days: 'Days', startTime: 'Start time', durationMins: 'Duration (mins)',
@@ -336,6 +393,10 @@ const SYNC_FIELD_LABELS = {
   firstName: 'First Name', lastName: 'Last Name', admissionSubject: 'Subject',
   referredBy: 'Reference by', yogaExperience: 'Experience in yoga',
   medicalPhysicalIssue: 'Medical / Physical issue', reasonToJoin: 'Reasons to join yoga',
+  autoRenew: 'Renewal enabled', previousMembershipId: 'Previous subscription',
+  renewalNumber: 'Renewal number', pausedFrom: 'Paused from', pausedUntil: 'Expected resume date',
+  pauseReason: 'Pause reason', totalPausedDays: 'Total paused days',
+  cancelledAt: 'Cancelled at', cancelReason: 'Cancellation reason',
 };
 
 const YOGA_EXPERIENCE_OPTIONS = [
@@ -355,11 +416,12 @@ function syncValue(field, value, data) {
   if (field === 'instructorId') return instructorName(data, value);
   if (field === 'batchId') return data.batches.find(batch => batch.id === value)?.name || '—';
   if (field === 'planId') return planName(data, value);
-  if (field === 'membershipId') {
+  if (field === 'membershipId' || field === 'previousMembershipId') {
     const membership = data.memberships.find(item => item.id === value);
     return membership ? `${studentName(data, membership.studentId)} · ${formatDate(membership.startDate)}` : '—';
   }
-  if (/Date$|dob|joinedOn|paidOn/.test(field) && typeof value === 'string') return formatDate(value);
+  if (field === 'cancelledAt' && typeof value === 'string') return formatDate(value.slice(0, 10));
+  if (/Date$|dob|joinedOn|paidOn|pausedFrom|pausedUntil/.test(field) && typeof value === 'string') return formatDate(value);
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
@@ -376,7 +438,7 @@ function conflictTitle(data, conflict) {
     return `Payment: ${studentName(data, record.studentId)} · ${formatINR(record.amountPaise)}`;
   }
   if (conflict.op.entity === 'enrollments') return `Enrollment: ${studentName(data, record.studentId)}`;
-  if (conflict.op.entity === 'memberships') return `Membership: ${studentName(data, record.studentId)}`;
+  if (conflict.op.entity === 'memberships') return `Subscription: ${studentName(data, record.studentId)}`;
   return fallback;
 }
 
@@ -539,9 +601,22 @@ function StudentDashboardSection(props) {
     .filter(m => m.studentId === ctx.studentId && inBranch(ctx, m.branchId))
     .map(m => ({m, bal: payableBalance(m, data.payments, billing, today)}))
     .sort((a, b) => String(b.m.endDate || '').localeCompare(String(a.m.endDate || '')));
-  const activeMemberships = membershipEntries.filter(({m}) => m.status === 'active');
-  const currentMembership = activeMemberships.find(({bal}) => !bal.expired) || activeMemberships[0] || membershipEntries[0];
-  const dueTotal = activeMemberships.reduce((sum, {bal}) => sum + bal.due, 0);
+  const childByPrevious = renewalChildByPrevious(data);
+  const openMembershipEntries = membershipEntries.filter(({m}) => m.status !== 'cancelled');
+  const currentPeriodEntries = openMembershipEntries.filter(({m}) => (
+    subscriptionLifecycle(m, today).id === 'active' || subscriptionLifecycle(m, today).id === 'paused'
+  ));
+  const scheduledEntries = openMembershipEntries
+    .filter(({m}) => subscriptionLifecycle(m, today).id === 'scheduled')
+    .sort((a, b) => String(a.m.startDate || '').localeCompare(String(b.m.startDate || '')));
+  const currentMembership = currentPeriodEntries[0] || scheduledEntries[0]
+    || openMembershipEntries[0] || membershipEntries[0];
+  const dueTotal = openMembershipEntries.reduce((sum, {bal}) => sum + bal.due, 0);
+  const currentLifecycle = currentMembership ? subscriptionLifecycle(currentMembership.m, today) : null;
+  const renewedMembership = currentMembership ? childByPrevious.get(currentMembership.m.id) : null;
+  const currentRenewalDate = currentMembership
+    ? nextRenewalDate(currentMembership.m, today, Boolean(renewedMembership))
+    : '';
   const myPayments = data.payments
     .filter(p => p.studentId === ctx.studentId && inBranch(ctx, p.branchId))
     .sort((a, b) => String(b.paidOn || '').localeCompare(String(a.paidOn || '')));
@@ -608,17 +683,31 @@ function StudentDashboardSection(props) {
 
       <div className="erp-student-columns">
         <section className="erp-panel">
-          <div className="erp-panel-head"><div><h2>My membership & fees</h2><p>Your current plan, balance and recent payments.</p></div>
+          <div className="erp-panel-head"><div><h2>My subscription & fees</h2><p>Your current plan, lifecycle, renewal date, balance and recent payments.</p></div>
             <button className="secondary-button" onClick={() => go('fees')}><Wallet size={15}/> View fees</button></div>
-          {!currentMembership ? <Empty icon={Wallet} title="No membership yet" text="Your membership and fee balance will appear here when the studio assigns a plan."/> : <>
+          {!currentMembership ? <Empty icon={Wallet} title="No subscription yet" text="Your subscription and fee balance will appear here when the studio assigns a plan."/> : <>
             <div className="erp-student-detail-grid">
               <div><small>Plan</small><strong>{planName(data, currentMembership.m.planId)}</strong></div>
+              <div><small>Status</small><strong>{currentLifecycle?.label || 'Active'}</strong></div>
               <div><small>Period</small><strong>{formatDate(currentMembership.m.startDate)} → {formatDate(currentMembership.m.endDate)}</strong></div>
+              <div><small>Next renewal</small><strong>{renewedMembership ? formatDate(renewedMembership.startDate) : currentRenewalDate ? formatDate(currentRenewalDate) : '—'}</strong></div>
               <div><small>Paid</small><strong>{formatINR(currentMembership.bal.paid)}</strong></div>
               <div><small>Due</small><strong>{formatINR(currentMembership.bal.due)}</strong></div>
             </div>
-            <div className="erp-student-progress" role="progressbar" aria-label="Membership amount paid" aria-valuemin={0} aria-valuemax={100} aria-valuenow={paidPercent}><span style={{width: `${paidPercent}%`}}/></div>
-            <p className="erp-student-note">{currentMembership.bal.expired ? 'This membership has expired. Please contact the studio to renew.' : currentMembership.bal.daysLeft !== null ? `${currentMembership.bal.daysLeft} day(s) left · ${paidPercent}% paid` : `${paidPercent}% paid`}</p>
+            <div className="erp-student-progress" role="progressbar" aria-label="Subscription amount paid" aria-valuemin={0} aria-valuemax={100} aria-valuenow={paidPercent}><span style={{width: `${paidPercent}%`}}/></div>
+            <p className="erp-student-note">{currentLifecycle?.id === 'paused'
+              ? `Paused since ${formatDate(currentMembership.m.pausedFrom)}${currentMembership.m.pausedUntil ? ` · expected to resume ${formatDate(currentMembership.m.pausedUntil)}` : ''}. Please contact the studio for changes.`
+              : currentLifecycle?.id === 'cancelled'
+                ? 'This subscription was cancelled. Please contact the studio if you want to start a new subscription.'
+                : currentLifecycle?.id === 'scheduled'
+                  ? `This subscription starts ${formatDate(currentMembership.m.startDate)} · ${paidPercent}% paid`
+                  : currentLifecycle?.id === 'expired'
+                    ? 'This subscription has expired. Please contact the studio to renew.'
+                    : renewedMembership
+                      ? `Your next subscription period is scheduled to start ${formatDate(renewedMembership.startDate)}.`
+                      : currentRenewalDate
+                        ? `${currentMembership.bal.daysLeft ?? 0} day(s) left · ${paidPercent}% paid · Next renewal ${formatDate(currentRenewalDate)}. Renewal is confirmed by the studio; there is no automatic charge.`
+                        : `${currentMembership.bal.daysLeft !== null ? `${currentMembership.bal.daysLeft} day(s) left · ` : ''}${paidPercent}% paid. Contact the studio before the end date to renew.`}</p>
             {myPayments.length > 0 && <div className="erp-student-list" aria-label="Recent payments">
               {myPayments.slice(0, 3).map(payment => <div key={payment.id}><span><strong>{payment.receiptNo || 'Payment'}</strong><small>{formatDate(payment.paidOn)}</small></span><b>{formatINR(payment.amountPaise)}</b></div>)}
             </div>}
@@ -662,11 +751,13 @@ export function ErpDashboardSection(props) {
   const monthPayments = data.payments.filter(p => p.status !== 'void' && p.paidOn?.startsWith(month) && inBranch(ctx, p.branchId));
   const billing = billingSettingsOf(data);
   const collected = monthPayments.reduce((s, p) => s + (p.amountPaise || 0), 0);
-  const dues = data.memberships.filter(m => m.status === 'active')
+  const dues = data.memberships.filter(m => m.status !== 'cancelled')
     .map(m => ({m, bal: payableBalance(m, data.payments, billing, today)}))
     .filter(x => x.bal.due > 0 && inBranch(ctx, x.m.branchId) && (ctx.role !== 'student' || x.m.studentId === ctx.studentId));
   const dueTotal = dues.reduce((s, x) => s + x.bal.due, 0);
-  const expiring = data.memberships.filter(m => m.status === 'active')
+  const dashboardChildByPrevious = renewalChildByPrevious(data);
+  const expiring = data.memberships.filter(m => m.status === 'active' && m.autoRenew !== false
+      && !dashboardChildByPrevious.has(m.id) && inBranch(ctx, m.branchId))
     .map(m => ({m, bal: payableBalance(m, data.payments, billing, today)}))
     .filter(x => x.bal.daysLeft !== null && x.bal.daysLeft >= 0 && x.bal.daysLeft <= 7);
   const myAttendance = data.attendance.filter(a => a.studentId === ctx.studentId);
@@ -677,7 +768,7 @@ export function ErpDashboardSection(props) {
     {done: data.instructors.length > 0, title: 'Add an instructor', text: 'Instructors are assigned to batches and mark attendance.', page: 'batches'},
     {done: data.students.length > 0, title: 'Add students', text: 'Create student records with branch and contact details.', page: 'students'},
     {done: data.batches.length > 0, title: 'Create a batch & enroll', text: 'Set days and time, then enroll students into the batch.', page: 'batches'},
-    {done: data.plans.length > 0 && data.memberships.length > 0, title: 'Add a plan & membership', text: 'Monthly plans drive fees, dues and receipts.', page: 'fees'},
+    {done: data.plans.length > 0 && data.memberships.length > 0, title: 'Add a plan & subscription', text: 'Monthly plan templates drive subscriptions, dues and receipts.', page: 'fees'},
   ];
   const showSetup = canManageOrg(ctx) && checks.some(c => !c.done);
 
@@ -694,7 +785,7 @@ export function ErpDashboardSection(props) {
         <div className="erp-kpi"><small>{ctx.role === 'instructor' ? 'My active batches' : 'Active students'}</small><strong>{ctx.role === 'instructor' ? myBatches.length : students.length}</strong><p>{ctx.branchId === 'all' || !ctx.branchId ? 'Across all branches' : branchName(data, ctx.branchId)}</p></div>
         <div className="erp-kpi"><small>Classes today</small><strong>{todayBatches.length}</strong><p>{formatDate(today)}</p></div>
         {canManage(ctx) && <div className="erp-kpi"><small>Collected this month</small><strong>{formatINR(collected)}</strong><p>{monthPayments.length} payment(s)</p></div>}
-        {canManage(ctx) && <div className="erp-kpi"><small>Pending dues</small><strong>{formatINR(dueTotal)}</strong><p>{dues.length} membership(s) with a balance</p></div>}
+        {canManage(ctx) && <div className="erp-kpi"><small>Pending dues</small><strong>{formatINR(dueTotal)}</strong><p>{dues.length} subscription(s) with a balance</p></div>}
       </>}
     </div>
 
@@ -710,7 +801,7 @@ export function ErpDashboardSection(props) {
         <tbody>{todayBatches.map(b => <tr key={b.id}><td><strong>{b.name}</strong></td><td>{branchName(data, b.branchId)}</td><td>{instructorName(data, b.instructorId)}</td><td>{batchTimeLabel(b)}</td><td>{data.enrollments.filter(e => e.batchId === b.id && e.status === 'active').length}/{b.capacity}</td></tr>)}</tbody></table></div>}
     </section>
 
-    {canManage(ctx) && expiring.length > 0 && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Expiring in 7 days</h2><p>Renew these memberships before they lapse.</p></div><button className="secondary-button" onClick={() => go('fees')}><Wallet size={15}/> Open fees</button></div>
+    {canManage(ctx) && expiring.length > 0 && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Expiring in 7 days</h2><p>Renew these subscriptions before they lapse.</p></div><button className="secondary-button" onClick={() => go('fees')}><Wallet size={15}/> Open fees</button></div>
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan</th><th>Ends</th><th>Days left</th><th>Due</th></tr></thead>
         <tbody>{expiring.map(({m, bal}) => <tr key={m.id}><td>{studentName(data, m.studentId)}</td><td>{planName(data, m.planId)}</td><td>{formatDate(m.endDate)}</td><td><span className="erp-badge amber">{bal.daysLeft} day(s)</span></td><td>{formatINR(bal.due)}</td></tr>)}</tbody></table></div></section>}
   </>;
@@ -2011,10 +2102,10 @@ function InvoiceDialog({data, invoice, onClose}) {
           {buyerGstin && <p><strong>GSTIN:</strong> {buyerGstin}</p>}
         </div>
         <div>
-          <h4>{settings.gstEnabled ? 'Place of supply' : 'Membership'}</h4>
+          <h4>{settings.gstEnabled ? 'Place of supply' : 'Subscription'}</h4>
           {settings.gstEnabled
             ? <><p>{placeName} ({placeCode})</p><p>{tax.interState ? 'Inter-state supply · IGST' : 'Intra-state supply · CGST + SGST'}</p></>
-            : <p>Studio membership fees</p>}
+            : <p>Studio subscription fees</p>}
           {membership && <p>{formatDate(membership.startDate)} → {formatDate(membership.endDate)}</p>}
         </div>
       </section>
@@ -2077,7 +2168,7 @@ function InvoiceDialog({data, invoice, onClose}) {
 
         <div className="erp-invoice-summary" aria-label="Invoice summary">
           {!payment && balance.paid > 0 && <>
-            <div><span>Membership total</span><strong>{formatInvoiceINR(balance.total)}</strong></div>
+            <div><span>Subscription total</span><strong>{formatInvoiceINR(balance.total)}</strong></div>
             <div><span>Already paid</span><strong>{formatInvoiceINR(balance.paid)}</strong></div>
           </>}
           <div><span>{settings.gstEnabled ? 'Taxable value' : 'Subtotal'}</span><strong>{formatInvoiceINR(tax.taxablePaise)}</strong></div>
@@ -2135,8 +2226,36 @@ export function FeesPage(props) {
   const [tab, setTab] = useState('memberships');
   const [planForm, setPlanForm] = useState(null); const [membershipForm, setMembershipForm] = useState(null);
   const [paymentForm, setPaymentForm] = useState(null); const [invoice, setInvoice] = useState(null);
+  const [subscriptionFilter, setSubscriptionFilter] = useState('all');
+  const [pauseForm, setPauseForm] = useState(null); const [resumeForm, setResumeForm] = useState(null);
+  const [cancelForm, setCancelForm] = useState(null); const [renewForm, setRenewForm] = useState(null);
+  const [historyMembershipId, setHistoryMembershipId] = useState('');
   const isStudent = ctx.role === 'student';
   const memberships = data.memberships.filter(m => inBranch(ctx, m.branchId) && (!isStudent || m.studentId === ctx.studentId));
+  const childByPrevious = renewalChildByPrevious(data);
+  const lifecycleOrder = {active: 0, paused: 1, scheduled: 2, expired: 3, cancelled: 4};
+  const isRenewalDue = membership => membership.status === 'active' && membership.autoRenew !== false
+    && !childByPrevious.has(membership.id) && membership.startDate <= today
+    && membership.endDate <= addDaysISO(today, 7);
+  const sortedMemberships = [...memberships].sort((a, b) => (
+    (lifecycleOrder[subscriptionLifecycle(a, today).id] - lifecycleOrder[subscriptionLifecycle(b, today).id])
+    || String(a.endDate || '').localeCompare(String(b.endDate || ''))
+    || String(a.startDate || '').localeCompare(String(b.startDate || ''))
+  ));
+  const visibleMemberships = sortedMemberships.filter(membership => {
+    const lifecycle = subscriptionLifecycle(membership, today).id;
+    if (subscriptionFilter === 'all') return true;
+    if (subscriptionFilter === 'renewals') return isRenewalDue(membership);
+    return lifecycle === subscriptionFilter;
+  });
+  const collectableMemberships = sortedMemberships.filter(membership => membership.status !== 'cancelled');
+  const subscriptionSummary = {
+    active: memberships.filter(membership => subscriptionLifecycle(membership, today).id === 'active').length,
+    paused: memberships.filter(membership => subscriptionLifecycle(membership, today).id === 'paused').length,
+    scheduled: memberships.filter(membership => subscriptionLifecycle(membership, today).id === 'scheduled').length,
+    renewalsDue: memberships.filter(isRenewalDue).length,
+    mrr: monthlyRecurringRevenuePaise(memberships, today),
+  };
   const payments = data.payments.filter(p => inBranch(ctx, p.branchId) && (!isStudent || p.studentId === ctx.studentId))
     .sort((a, b) => (b.paidOn || '').localeCompare(a.paidOn || ''));
   const billing = billingSettingsOf(data);
@@ -2151,29 +2270,89 @@ export function FeesPage(props) {
   const paymentGstWarning = billing.gstEnabled && !billing.priceIncludesGst
     ? 'GST is added on top in Payment setup. Fees dues are shown as gross payable totals (taxable fee + GST); record the actual gross amount received.'
     : '';
-  const openMembership = () => setMembershipForm({studentId: data.students[0]?.id || '', planId: data.plans[0]?.id || '', startDate: today, billingCycle: 'joining', amountRupees: data.plans[0] ? paiseToRupees(data.plans[0].amountPaise) : ''});
-  const openPayment = m => { const bal = m ? payableBalance(m, data.payments, billing, today) : null; setPaymentForm({membershipId: m?.id || memberships[0]?.id || '', amountRupees: bal ? paiseToRupees(bal.due) : '', method: 'upi', paidOn: today, note: ''}); };
+  const openMembership = () => {
+    const student = data.students.find(s => s.status === 'active' && inBranch(ctx, s.branchId));
+    const plan = data.plans.find(p => p.status !== 'archived');
+    setMembershipForm({
+      studentId: student?.id || '', planId: plan?.id || '', startDate: today,
+      billingCycle: 'joining', autoRenew: true,
+      amountRupees: plan ? paiseToRupees(plan.amountPaise) : '',
+    });
+  };
+  const openPayment = m => {
+    const selected = m && m.status !== 'cancelled' ? m : collectableMemberships[0];
+    const bal = selected ? payableBalance(selected, data.payments, billing, today) : null;
+    setPaymentForm({
+      membershipId: selected?.id || '', amountRupees: bal ? paiseToRupees(bal.due) : '',
+      method: 'upi', paidOn: today, note: '',
+    });
+  };
+  const openPause = membership => setPauseForm({
+    membership,
+    pausedFrom: today < membership.startDate ? membership.startDate : today > membership.endDate ? membership.endDate : today,
+    pausedUntil: '', reason: '',
+  });
+  const openResume = membership => setResumeForm({
+    membership,
+    resumeDate: membership.pausedUntil && membership.pausedUntil >= membership.pausedFrom
+      ? membership.pausedUntil
+      : today >= membership.pausedFrom ? today : membership.pausedFrom,
+  });
+  const openRenew = membership => {
+    const currentPlan = data.plans.find(plan => plan.id === membership.planId && plan.status !== 'archived')
+      || data.plans.find(plan => plan.status !== 'archived');
+    setRenewForm({
+      membership, planId: currentPlan?.id || '',
+      startDate: renewalStartDate(membership, today), billingCycle: membership.billingCycle || 'joining',
+      autoRenew: membership.autoRenew !== false,
+    });
+  };
+  const historyMembership = data.memberships.find(membership => membership.id === historyMembershipId) || null;
+  const historyChain = historyMembership ? subscriptionChain(data, historyMembership) : [];
   return <>
     <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{isStudent ? 'My fees & payments' : 'Fees & payments'} <span className="flower">✳</span></h1><p>{isStudent ? 'Your membership, dues, payments and invoice PDFs in ₹.' : 'Plans, memberships, dues, themed invoice PDFs and payment setup in ₹.'}</p></div>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{isStudent ? 'My fees & payments' : 'Fees & payments'} <span className="flower">✳</span></h1><p>{isStudent ? 'Your subscription, renewal dates, dues, payments and invoice PDFs in ₹.' : 'Plans, subscriptions, renewals, dues, themed invoice PDFs and payment setup in ₹. Renewals are manager-confirmed; no automatic charge is made.'}</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <div className="erp-seg" role="tablist" aria-label="Fees sections" style={{marginBottom: 16}}>
-      {[['memberships', 'Memberships & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : []), ...(canManageOrg(ctx) ? [['setup', 'Payment setup']] : [])].map(([id, label]) =>
+      {[['memberships', 'Subscriptions & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : []), ...(canManageOrg(ctx) ? [['setup', 'Payment setup']] : [])].map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
     </div>
 
-    {tab === 'memberships' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Memberships & dues</h2><p>{memberships.length} membership(s)</p></div>
-      {canManage(ctx) && <div className="erp-actions"><button className="secondary-button" onClick={() => openPayment(null)}><IndianRupee size={15}/> Record payment</button><button className="primary-button" onClick={openMembership}><Plus size={16}/> New membership</button></div>}</div>
-      {memberships.length === 0 ? <Empty icon={Wallet} title="No memberships yet" text={data.plans.length === 0 ? 'Create a monthly plan first (Plans tab), then assign it to a student.' : 'Assign a plan to a student to start tracking fees and dues.'}/> :
-      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan & period</th><th>Amount</th><th>Paid</th><th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-        {memberships.map(m => { const bal = payableBalance(m, data.payments, billing, today); return <tr key={m.id}>
-          <td><strong>{studentName(data, m.studentId)}</strong><br/><small style={{color: '#9b92a4'}}>{branchName(data, m.branchId)}</small></td>
-          <td>{planName(data, m.planId)}<br/><small style={{color: '#9b92a4'}}>{formatDate(m.startDate)} → {formatDate(m.endDate)}{m.billingCycle === 'calendar' ? ' · calendar month' : ''}</small></td>
+    {tab === 'memberships' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Subscriptions & dues</h2><p>{visibleMemberships.length} of {memberships.length} subscription(s)</p></div>
+      {canManage(ctx) && <div className="erp-actions"><button className="secondary-button" onClick={() => openPayment(null)}><IndianRupee size={15}/> Record payment</button><button className="primary-button" onClick={openMembership}><Plus size={16}/> New subscription</button></div>}</div>
+      {canManage(ctx) && memberships.length > 0 && <div className="erp-grid erp-subscription-summary" aria-label="Subscription summary">
+        <div className="erp-kpi"><small>Active subscriptions</small><strong>{subscriptionSummary.active}</strong><p>{subscriptionSummary.scheduled} scheduled</p></div>
+        <div className="erp-kpi"><small>Paused subscriptions</small><strong>{subscriptionSummary.paused}</strong><p>Resume extends the end date</p></div>
+        <div className="erp-kpi"><small>Renewals due</small><strong>{subscriptionSummary.renewalsDue}</strong><p>Expired or ending in 7 days</p></div>
+        <div className="erp-kpi"><small>Monthly recurring revenue</small><strong>{formatINR(subscriptionSummary.mrr)}</strong><p>{billing.gstEnabled && !billing.priceIncludesGst ? 'Current active periods, before GST' : 'Current active periods'}</p></div>
+      </div>}
+      {memberships.length > 0 && <div className="erp-seg erp-subscription-filters" aria-label="Subscription status filter">
+        {[['all', 'All'], ['active', 'Active'], ['paused', 'Paused'], ['renewals', 'Renewals due'], ['expired', 'Expired'], ['cancelled', 'Cancelled']].map(([id, label]) =>
+          <button key={id} type="button" aria-pressed={subscriptionFilter === id} className={subscriptionFilter === id ? 'on' : ''} onClick={() => setSubscriptionFilter(id)}>{label}</button>)}
+      </div>}
+      {memberships.length === 0 ? <Empty icon={Wallet} title="No subscriptions yet" text={data.plans.length === 0 ? 'Create a monthly plan first (Plans tab), then assign it to a student.' : 'Assign a plan to a student to start tracking subscriptions, fees and dues.'}/> : visibleMemberships.length === 0 ? <Empty icon={CalendarClock} title="No subscriptions in this view" text="Choose another subscription status above."/> :
+      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan & period</th><th>Amount</th><th>Paid</th><th>Due</th><th>Subscription</th><th>Actions</th></tr></thead><tbody>
+        {visibleMemberships.map(m => {
+          const bal = payableBalance(m, data.payments, billing, today);
+          const lifecycle = subscriptionLifecycle(m, today);
+          const renewal = childByPrevious.get(m.id);
+          const renewalDate = nextRenewalDate(m, today, Boolean(renewal));
+          return <tr key={m.id}>
+          <td><strong>{studentName(data, m.studentId)}</strong><br/><small style={{color: '#9b92a4'}}>{branchName(data, m.branchId)} · {subscriptionPeriodLabel(m)}</small></td>
+          <td>{planName(data, m.planId)}<br/><small style={{color: '#9b92a4'}}>{formatDate(m.startDate)} → {formatDate(m.endDate)}{m.billingCycle === 'calendar' ? ' · calendar month' : ''}{Number(m.totalPausedDays) > 0 ? ` · ${Number(m.totalPausedDays)} paused day(s)` : ''}
+            {renewal ? <><br/>Renewed · next period starts {formatDate(renewal.startDate)}</> : renewalDate ? <><br/>Next renewal {formatDate(renewalDate)}</> : m.status === 'active' && m.autoRenew === false ? <><br/>Renewal tracking off</> : null}
+            {lifecycle.id === 'paused' && <><br/>Paused from {formatDate(m.pausedFrom)}{m.pausedUntil ? ` · expected resume ${formatDate(m.pausedUntil)}` : ''}{m.pauseReason ? ` · ${m.pauseReason}` : ''}</>}
+            {lifecycle.id === 'cancelled' && <><br/>Cancelled{m.cancelledAt ? ` ${formatDate(String(m.cancelledAt).slice(0, 10))}` : ''}{m.cancelReason ? ` · ${m.cancelReason}` : ''}</>}
+          </small></td>
           <td>{formatINR(bal.total)}</td><td>{formatINR(bal.paid)}</td><td><strong>{formatINR(bal.due)}</strong></td>
-          <td>{m.status === 'cancelled' ? <span className="erp-badge grey">cancelled</span> : bal.expired ? <span className="erp-badge red">expired</span> : <span className={`erp-badge ${bal.paymentStatus === 'paid' ? 'green' : bal.paymentStatus === 'partial' ? 'amber' : 'red'}`}>{bal.paymentStatus}</span>}{!bal.expired && m.status === 'active' && bal.daysLeft !== null && bal.daysLeft <= 7 ? <><br/><small style={{color: '#9a6b31'}}>{bal.daysLeft} day(s) left</small></> : null}</td>
-          <td>{bal.due > 0 && m.status === 'active' && <button className="erp-link-btn" onClick={() => setInvoice({type: 'due', membership: m})}><Printer size={13}/> Invoice PDF</button>}
-          {canManage(ctx) && m.status === 'active' && <><button className="erp-link-btn" onClick={() => openPayment(m)}><IndianRupee size={13}/> Collect</button>
-          <button className="erp-link-btn erp-danger" onClick={() => erp.act(c => c.cancelMembership(m.id), 'Membership cancelled.')}>Cancel</button></>}</td></tr>; })}
+          <td><SubscriptionBadge membership={m} today={today}/><br/><span className={`erp-badge ${bal.paymentStatus === 'paid' ? 'green' : bal.paymentStatus === 'partial' ? 'amber' : 'red'}`}>{bal.paymentStatus}</span>{lifecycle.id === 'active' && bal.daysLeft !== null && bal.daysLeft <= 7 ? <><br/><small style={{color: '#9a6b31'}}>{bal.daysLeft} day(s) left</small></> : null}</td>
+          <td>{bal.due > 0 && m.status !== 'cancelled' && <button className="erp-link-btn" onClick={() => setInvoice({type: 'due', membership: m})}><Printer size={13}/> Invoice PDF</button>}
+          <button className="erp-link-btn" onClick={() => setHistoryMembershipId(m.id)}><Clock size={13}/> History</button>
+          {canManage(ctx) && m.status !== 'cancelled' && <><button className="erp-link-btn" onClick={() => openPayment(m)}><IndianRupee size={13}/> Collect</button>
+          {lifecycle.id === 'active' && !renewal && <button className="erp-link-btn" onClick={() => openPause(m)}><CirclePause size={13}/> Pause</button>}
+          {m.status === 'paused' && <button className="erp-link-btn" onClick={() => openResume(m)}><CirclePlay size={13}/> Resume</button>}
+          {m.status === 'active' && !renewal && <button className="erp-link-btn" onClick={() => openRenew(m)}><Repeat size={13}/> Renew</button>}
+          <button className="erp-link-btn erp-danger" onClick={() => setCancelForm({membership: m, reason: ''})}>Cancel subscription</button></>}</td></tr>; })}
       </tbody></table></div>}</section>}
 
     {tab === 'payments' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Payments</h2><p>{payments.length} payment(s) · {formatINR(payments.filter(p => p.status !== 'void').reduce((s, p) => s + (p.amountPaise || 0), 0))} collected shown</p></div>
@@ -2188,39 +2367,107 @@ export function FeesPage(props) {
           : <button className="erp-link-btn erp-danger" onClick={async () => { const reason = window.prompt('Reason for voiding this payment (required for audit):', ''); if (reason === null) return; if (!reason.trim()) return props.notify('Enter a reason to void this payment.'); await erp.act(c => c.voidPayment({id: p.id, reason: reason.trim()}), 'Payment voided. The original receipt remains in history.'); }}>Void</button>)}</td></tr>)}
       </tbody></table></div>}</section>}
 
-    {tab === 'plans' && !isStudent && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Plans</h2><p>{data.plans.length} plan(s){!canManageOrg(ctx) ? ' · Organization plans are maintained by Owner/Co-owner.' : ''}</p></div>
+    {tab === 'plans' && !isStudent && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Plans</h2><p>{data.plans.length} subscription template(s){!canManageOrg(ctx) ? ' · Organization plans are maintained by Owner/Co-owner.' : ''}</p></div>
       {canManageOrg(ctx) && <button className="primary-button" onClick={() => setPlanForm({name: '', amountRupees: '', durationMonths: 1})}><Plus size={16}/> Add plan</button>}</div>
       {data.plans.length === 0 ? <Empty icon={Wallet} title="No plans yet" text="Example: “Monthly — All Batches” at ₹1,500 for 1 month. You decide the names and prices."/> :
-      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Plan</th><th>Price</th><th>Duration</th><th>Members</th><th>Actions</th></tr></thead><tbody>
-        {data.plans.map(p => <tr key={p.id}><td><strong>{p.name}</strong></td><td>{formatINR(p.amountPaise)}{billing.gstEnabled && !billing.priceIncludesGst ? ' + GST' : ''}</td><td>{p.durationMonths} month(s)</td><td>{data.memberships.filter(m => m.planId === p.id && m.status === 'active').length}</td>
+      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Plan</th><th>Price</th><th>Duration</th><th>Active subscriptions</th><th>Actions</th></tr></thead><tbody>
+        {data.plans.map(p => <tr key={p.id}><td><strong>{p.name}</strong></td><td>{formatINR(p.amountPaise)}{billing.gstEnabled && !billing.priceIncludesGst ? ' + GST' : ''}</td><td>{p.durationMonths} month(s)</td><td>{data.memberships.filter(m => m.planId === p.id && subscriptionLifecycle(m, today).id === 'active').length}</td>
         <td>{canManageOrg(ctx) && <button className="erp-link-btn" onClick={() => setPlanForm({...p, amountRupees: paiseToRupees(p.amountPaise)})}><Pencil size={13}/> Edit</button>}</td></tr>)}
       </tbody></table></div>}</section>}
 
     {tab === 'setup' && canManageOrg(ctx) && <PaymentSetupPanel data={data} erp={erp} mode={props.mode}/>}
 
-    {planForm && <Dialog title={planForm.id ? 'Edit plan' : 'Add plan'} sub="Price changes apply to new memberships; existing memberships keep their agreed amount." onClose={() => setPlanForm(null)}>
+    {planForm && <Dialog title={planForm.id ? 'Edit plan' : 'Add plan'} sub="Plan price and duration changes apply to new subscriptions and future renewals. Existing subscription periods keep their agreed amount." onClose={() => setPlanForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); if (await erp.act(c => c.savePlan({id: planForm.id, name: planForm.name, amountPaise: rupeesToPaise(planForm.amountRupees), durationMonths: planForm.durationMonths}), 'Plan saved.')) setPlanForm(null); }}>
         <label className="erp-field">Plan name<input required value={planForm.name} onChange={e => setPlanForm({...planForm, name: e.target.value})} placeholder="e.g. Monthly — All Batches"/></label>
         <label className="erp-field">Price (₹{billing.gstEnabled && !billing.priceIncludesGst ? ', before GST' : ''})<input type="number" min={0} step="0.01" required value={planForm.amountRupees} onChange={e => setPlanForm({...planForm, amountRupees: e.target.value})}/></label>
         <label className="erp-field">Duration (months)<input type="number" min={1} max={24} required value={planForm.durationMonths} onChange={e => setPlanForm({...planForm, durationMonths: e.target.value})}/></label>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPlanForm(null)}>Cancel</button><button className="primary-button">Save plan</button></div></form></Dialog>}
 
-    {membershipForm && <Dialog title="New membership" sub="Choose calendar-month billing (1st to month-end) or joining-date billing (same date monthly)." onClose={() => setMembershipForm(null)}>
+    {membershipForm && <Dialog title="New subscription" sub="Choose calendar-month billing (1st to month-end) or joining-date billing (same date monthly). Renewal is tracked here; it does not charge the student automatically." onClose={() => setMembershipForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); const student = data.students.find(s => s.id === membershipForm.studentId); const plan = data.plans.find(p => p.id === membershipForm.planId);
-        if (await erp.act(c => c.saveMembership({studentId: membershipForm.studentId, planId: membershipForm.planId, branchId: student?.branchId || '', startDate: membershipForm.startDate, billingCycle: membershipForm.billingCycle, durationMonths: plan?.durationMonths, amountPaise: rupeesToPaise(membershipForm.amountRupees)}), 'Membership created.')) setMembershipForm(null); }}>
-        <label className="erp-field">Student<select required value={membershipForm.studentId} onChange={e => setMembershipForm({...membershipForm, studentId: e.target.value})}>{data.students.filter(s => s.status === 'active').map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label className="erp-field">Plan<select required value={membershipForm.planId} onChange={e => { const plan = data.plans.find(p => p.id === e.target.value); setMembershipForm({...membershipForm, planId: e.target.value, amountRupees: plan ? paiseToRupees(plan.amountPaise) : ''}); }}>{data.plans.map(p => <option key={p.id} value={p.id}>{p.name} · {formatINR(p.amountPaise)}</option>)}</select></label>
+        if (await erp.act(c => c.saveMembership({
+          studentId: membershipForm.studentId, planId: membershipForm.planId, branchId: student?.branchId || '',
+          startDate: membershipForm.startDate, billingCycle: membershipForm.billingCycle,
+          durationMonths: plan?.durationMonths, amountPaise: rupeesToPaise(membershipForm.amountRupees),
+          status: 'active', autoRenew: membershipForm.autoRenew !== false,
+          previousMembershipId: '', renewalNumber: 0, totalPausedDays: 0,
+        }), 'Subscription created.')) setMembershipForm(null); }}>
+        <label className="erp-field">Student<select required value={membershipForm.studentId} onChange={e => setMembershipForm({...membershipForm, studentId: e.target.value})}>{data.students.filter(s => s.status === 'active' && inBranch(ctx, s.branchId)).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label className="erp-field">Plan<select required value={membershipForm.planId} onChange={e => { const plan = data.plans.find(p => p.id === e.target.value); setMembershipForm({...membershipForm, planId: e.target.value, amountRupees: plan ? paiseToRupees(plan.amountPaise) : ''}); }}>{data.plans.filter(p => p.status !== 'archived').length === 0 && <option value="">No active plan available</option>}{data.plans.filter(p => p.status !== 'archived').map(p => <option key={p.id} value={p.id}>{p.name} · {formatINR(p.amountPaise)}</option>)}</select></label>
         <label className="erp-field">Start date<input type="date" required value={membershipForm.startDate} onChange={e => setMembershipForm({...membershipForm, startDate: e.target.value})}/></label>
         <label className="erp-field">Billing cycle<select value={membershipForm.billingCycle} onChange={e => setMembershipForm({...membershipForm, billingCycle: e.target.value})}><option value="joining">Joining date (monthly)</option><option value="calendar">Calendar month</option></select></label>
         <label className="erp-field">Amount (₹{billing.gstEnabled && !billing.priceIncludesGst ? ', before GST' : ''})<input type="number" min={0} step="0.01" required value={membershipForm.amountRupees} onChange={e => setMembershipForm({...membershipForm, amountRupees: e.target.value})}/></label>
         <span className="erp-field">Ends on<span style={{fontSize: 14, color: '#3d3547'}}>{formatDate(membershipEnd(membershipForm.startDate, data.plans.find(p => p.id === membershipForm.planId)?.durationMonths || 1, membershipForm.billingCycle))}</span></span>
-        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setMembershipForm(null)}>Cancel</button><button className="primary-button">Create membership</button></div></form></Dialog>}
+        <label className="erp-toggle-row full"><input type="checkbox" checked={membershipForm.autoRenew !== false} onChange={e => setMembershipForm({...membershipForm, autoRenew: e.target.checked})}/> <span>Renewal enabled — show the next renewal date and renewal reminders (manager-confirmed, no automatic charge)</span></label>
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setMembershipForm(null)}>Cancel</button><button className="primary-button" disabled={!membershipForm.planId}>Create subscription</button></div></form></Dialog>}
+
+    {pauseForm && <Dialog title="Pause subscription" sub={`Pause ${studentName(data, pauseForm.membership.studentId)}’s current period. When it resumes, the elapsed pause days are added to the end date. Attendance and batch enrolment are not changed automatically.`} onClose={() => setPauseForm(null)}>
+      <form className="erp-form" onSubmit={async e => { e.preventDefault();
+        if (await erp.act(c => c.saveMembership({
+          ...pauseForm.membership, status: 'paused', pausedFrom: pauseForm.pausedFrom,
+          pausedUntil: pauseForm.pausedUntil, pauseReason: pauseForm.reason.trim(),
+        }), 'Subscription paused.')) setPauseForm(null); }}>
+        <label className="erp-field">Pause from<input type="date" required min={pauseForm.membership.startDate} max={pauseForm.membership.endDate} value={pauseForm.pausedFrom} onChange={e => setPauseForm({...pauseForm, pausedFrom: e.target.value})}/></label>
+        <label className="erp-field">Expected resume date<input type="date" min={pauseForm.pausedFrom} value={pauseForm.pausedUntil} onChange={e => setPauseForm({...pauseForm, pausedUntil: e.target.value})}/></label>
+        <label className="erp-field full">Pause reason<input maxLength={500} value={pauseForm.reason} onChange={e => setPauseForm({...pauseForm, reason: e.target.value})} placeholder="Travel, medical break, exams…"/></label>
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPauseForm(null)}>Cancel</button><button className="primary-button">Pause subscription</button></div></form></Dialog>}
+
+    {resumeForm && <Dialog title="Resume subscription" sub={`Resume ${studentName(data, resumeForm.membership.studentId)}’s subscription. Days since ${formatDate(resumeForm.membership.pausedFrom)} will be added to its end date.`} onClose={() => setResumeForm(null)}>
+      <form className="erp-form" onSubmit={async e => { e.preventDefault(); const addedDays = pauseDaysBetween(resumeForm.membership.pausedFrom, resumeForm.resumeDate);
+        if (await erp.act(c => c.saveMembership({
+          ...resumeForm.membership, status: 'active', pausedFrom: '', pausedUntil: '', pauseReason: '',
+          totalPausedDays: (Number(resumeForm.membership.totalPausedDays) || 0) + addedDays,
+          cancelledAt: null, cancelReason: '',
+        }), `Subscription resumed. Its end date moved by ${addedDays} paused day(s).`)) setResumeForm(null); }}>
+        <label className="erp-field">Resume date<input type="date" required min={resumeForm.membership.pausedFrom} value={resumeForm.resumeDate} onChange={e => setResumeForm({...resumeForm, resumeDate: e.target.value})}/></label>
+        <span className="erp-field">New end date<span style={{fontSize: 14, color: '#3d3547'}}>{formatDate(membershipEnd(resumeForm.membership.startDate, resumeForm.membership.durationMonths, resumeForm.membership.billingCycle, (Number(resumeForm.membership.totalPausedDays) || 0) + pauseDaysBetween(resumeForm.membership.pausedFrom, resumeForm.resumeDate)))}</span></span>
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setResumeForm(null)}>Cancel</button><button className="primary-button">Resume subscription</button></div></form></Dialog>}
+
+    {cancelForm && <Dialog title="Cancel subscription" sub={`Cancel ${studentName(data, cancelForm.membership.studentId)}’s subscription period. It cannot be reopened; recorded payments and receipts remain in history. Create a new subscription if the student returns.`} onClose={() => setCancelForm(null)}>
+      <form className="erp-form" onSubmit={async e => { e.preventDefault();
+        if (await erp.act(c => c.cancelMembership({id: cancelForm.membership.id, reason: cancelForm.reason.trim()}), 'Subscription cancelled.')) setCancelForm(null); }}>
+        <label className="erp-field full">Cancellation reason<input maxLength={500} value={cancelForm.reason} onChange={e => setCancelForm({...cancelForm, reason: e.target.value})} placeholder="Student requested, moving, completed…"/></label>
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setCancelForm(null)}>Keep subscription</button><button className="danger-button">Cancel subscription</button></div></form></Dialog>}
+
+    {renewForm && (() => { const renewalPlan = data.plans.find(plan => plan.id === renewForm.planId); return <Dialog title="Renew subscription" sub={`Create the next period for ${studentName(data, renewForm.membership.studentId)} at the current Plan price and duration. The existing period, its payments and receipts stay unchanged.`} onClose={() => setRenewForm(null)}>
+      <form className="erp-form" onSubmit={async e => { e.preventDefault(); if (!renewalPlan) return;
+        if (await erp.act(c => c.saveMembership({
+          studentId: renewForm.membership.studentId, planId: renewalPlan.id,
+          branchId: renewForm.membership.branchId, startDate: renewForm.startDate,
+          billingCycle: renewForm.billingCycle, durationMonths: renewalPlan.durationMonths,
+          amountPaise: renewalPlan.amountPaise, status: 'active', autoRenew: renewForm.autoRenew !== false,
+          previousMembershipId: renewForm.membership.id,
+          renewalNumber: (Number(renewForm.membership.renewalNumber) || 0) + 1,
+          pausedFrom: '', pausedUntil: '', pauseReason: '', totalPausedDays: 0,
+          cancelledAt: null, cancelReason: '',
+        }), 'Renewal subscription created at the current plan price. Its due balance and invoice are ready in Subscriptions & dues.')) setRenewForm(null); }}>
+        <label className="erp-field">Renewal plan<select required value={renewForm.planId} onChange={e => setRenewForm({...renewForm, planId: e.target.value})}>{data.plans.filter(plan => plan.status !== 'archived').length === 0 && <option value="">No active plan available</option>}{data.plans.filter(plan => plan.status !== 'archived').map(plan => <option key={plan.id} value={plan.id}>{plan.name} · {formatINR(plan.amountPaise)} · {plan.durationMonths} month(s)</option>)}</select></label>
+        <label className="erp-field">Renewal start date<input type="date" required value={renewForm.startDate} onChange={e => setRenewForm({...renewForm, startDate: e.target.value})}/></label>
+        <label className="erp-field">Billing cycle<select value={renewForm.billingCycle} onChange={e => setRenewForm({...renewForm, billingCycle: e.target.value})}><option value="joining">Joining date (monthly)</option><option value="calendar">Calendar month</option></select></label>
+        <label className="erp-field">Renewal amount (₹)<input type="number" readOnly value={renewalPlan ? paiseToRupees(renewalPlan.amountPaise) : ''}/></label>
+        <span className="erp-field">Renewal ends<span style={{fontSize: 14, color: '#3d3547'}}>{renewalPlan ? formatDate(membershipEnd(renewForm.startDate, renewalPlan.durationMonths, renewForm.billingCycle)) : '—'}</span></span>
+        <label className="erp-toggle-row full"><input type="checkbox" checked={renewForm.autoRenew !== false} onChange={e => setRenewForm({...renewForm, autoRenew: e.target.checked})}/> <span>Keep renewal enabled</span></label>
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setRenewForm(null)}>Cancel</button><button className="primary-button" disabled={!renewalPlan}>Create renewal</button></div></form></Dialog>; })()}
+
+    {historyMembership && <Dialog title="Subscription history" sub={`${studentName(data, historyMembership.studentId)} · ${historyChain.length} linked period(s)`} onClose={() => setHistoryMembershipId('')} className="erp-dialog-wide">
+      <div className="erp-subscription-history">
+        {historyChain.map(chainMembership => { const chainBalance = payableBalance(chainMembership, data.payments, billing, today); const chainLifecycle = subscriptionLifecycle(chainMembership, today); return <article key={chainMembership.id} className="erp-subscription-history-item">
+          <div><strong>{subscriptionPeriodLabel(chainMembership)}</strong><SubscriptionBadge membership={chainMembership} today={today}/></div>
+          <p>{planName(data, chainMembership.planId)} · {formatDate(chainMembership.startDate)} → {formatDate(chainMembership.endDate)}</p>
+          <p>{formatINR(chainBalance.total)} total · {formatINR(chainBalance.paid)} paid · {formatINR(chainBalance.due)} due</p>
+          {Number(chainMembership.totalPausedDays) > 0 && <small>{Number(chainMembership.totalPausedDays)} paused day(s) added to this period</small>}
+          {chainLifecycle.id === 'paused' && <small>Paused from {formatDate(chainMembership.pausedFrom)}{chainMembership.pausedUntil ? ` · expected resume ${formatDate(chainMembership.pausedUntil)}` : ''}{chainMembership.pauseReason ? ` · ${chainMembership.pauseReason}` : ''}</small>}
+          {chainLifecycle.id === 'cancelled' && <small>Cancelled{chainMembership.cancelledAt ? ` ${formatDate(String(chainMembership.cancelledAt).slice(0, 10))}` : ''}{chainMembership.cancelReason ? ` · ${chainMembership.cancelReason}` : ''}</small>}
+        </article>; })}
+      </div>
+      <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setHistoryMembershipId('')}>Close</button></div></Dialog>}
 
     {paymentForm && <Dialog title="Record verified payment" sub="Record only after funds are received/verified. A final receipt number is assigned by Supabase; if offline, the payment is saved on this device first and the receipt appears after sync." onClose={() => setPaymentForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); const m = data.memberships.find(x => x.id === paymentForm.membershipId); if (!m) return;
         if (await erp.act(c => c.recordPayment({membershipId: m.id, studentId: m.studentId, branchId: m.branchId, amountPaise: rupeesToPaise(paymentForm.amountRupees), method: paymentForm.method, paidOn: paymentForm.paidOn, note: paymentForm.note}), 'Payment recorded. Receipt is in the Payments tab.')) { setPaymentForm(null); setTab('payments'); } }}>
-        <label className="erp-field full">Membership<select required value={paymentForm.membershipId} onChange={e => { const m = data.memberships.find(x => x.id === e.target.value); setPaymentForm({...paymentForm, membershipId: e.target.value, amountRupees: m ? paiseToRupees(payableBalance(m, data.payments, billing, today).due) : ''}); }}>
-          {data.memberships.filter(m => m.status === 'active').map(m => <option key={m.id} value={m.id}>{studentName(data, m.studentId)} · {planName(data, m.planId)} · due {formatINR(payableBalance(m, data.payments, billing, today).due)}</option>)}</select></label>
+        <label className="erp-field full">Subscription<select required value={paymentForm.membershipId} onChange={e => { const m = data.memberships.find(x => x.id === e.target.value); setPaymentForm({...paymentForm, membershipId: e.target.value, amountRupees: m ? paiseToRupees(payableBalance(m, data.payments, billing, today).due) : ''}); }}>
+          {collectableMemberships.map(m => <option key={m.id} value={m.id}>{studentName(data, m.studentId)} · {planName(data, m.planId)} · {subscriptionLifecycle(m, today).id} · due {formatINR(payableBalance(m, data.payments, billing, today).due)}</option>)}</select></label>
         <label className="erp-field">Amount received (₹)<input type="number" min="0.01" step="0.01" required value={paymentForm.amountRupees} onChange={e => setPaymentForm({...paymentForm, amountRupees: e.target.value})}/></label>
         <label className="erp-field">Method<select value={paymentForm.method} onChange={e => setPaymentForm({...paymentForm, method: e.target.value})}>{PAYMENT_METHODS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></label>
         <label className="erp-field">Paid on<input type="date" required value={paymentForm.paidOn} onChange={e => setPaymentForm({...paymentForm, paidOn: e.target.value})}/></label>

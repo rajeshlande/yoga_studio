@@ -1,10 +1,10 @@
 # Yoga Studio
 
 A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
-studio: branches, students, instructors, batches, attendance, memberships,
+studio: branches, students, instructors, batches, attendance, subscriptions,
 INR fees, payment setup and themed invoice PDFs.
 
-> **Current source release:** 1.6.0 · **Database setup:** SQL v6 in
+> **Current source release:** 1.6.0 · **Database setup:** SQL v7 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -55,7 +55,7 @@ into the application.
 
 - Multi-branch studio structure with branch filtering throughout the ERP.
 - Dashboard KPIs for active students, today's classes, monthly collections
-  and pending dues, plus expiring-membership alerts and a setup checklist.
+  and pending dues, plus expiring-subscription alerts and a setup checklist.
 - Student records with branch, split first/last name, contact and admission
   profile details, joining date, batches, attendance history/percentage,
   search and CSV export.
@@ -63,10 +63,22 @@ into the application.
   duration, capacity and roster management.
 - Attendance by date and batch using **Present**, **Absent** and **Late**,
   including mark-all-present, history and CSV export.
-- INR fee plans and memberships using either calendar-month or joining-date
-  billing.
-- Membership price snapshots, partial payments, dues, expiry status and CSV
-  payment exports.
+- INR fee plans as reusable subscription templates, with each subscription
+  period using either calendar-month or joining-date billing.
+- **Native Odoo-style subscriptions:** active, scheduled, paused, expired and
+  cancelled lifecycle views; pause/resume with the elapsed pause days added
+  to the end date; cancellation reasons; renewal-enabled tracking and next
+  renewal dates; linked renewal history; and a Fees summary for active and
+  paused subscriptions, renewals due and monthly recurring revenue.
+- **One-click renewal:** a manager creates the next linked period at the
+  current Plan price and duration, starting the day after the current end
+  date (or today if already expired). The old period keeps its agreed amount,
+  payments and receipts. Only one live renewal can follow a period; a
+  cancelled future renewal can be replaced. A period must be resumed before
+  renewal, and cannot be paused while a live renewal already follows it.
+- Subscription price snapshots for existing periods, partial payments, dues
+  and CSV payment exports. Payments and due invoices remain available for
+  paused, scheduled and expired periods, but not cancelled subscriptions.
 - Append-only payments. A synced payment is corrected with an audited void
   and a required reason; it is never silently edited or deleted.
 - Fixed, server-enforced role portals (Odoo-inspired security groups plus
@@ -83,7 +95,9 @@ into the application.
     fees, payments, student editing, Instructor profile setup or access
     administration.
   - **Student:** a personal, view-only dashboard for their assigned batches,
-    next classes, attendance, membership, dues, payments and invoices. The
+    next classes, attendance, subscription lifecycle/next renewal, dues,
+    payments and invoices. Students can open their own subscription history
+    but cannot pause, cancel or renew it. The
     Student portal does not show studio rosters/class counts, sync badges or
     **Sync now**, or the **Studio ERP data** settings panel.
 - **In-app role access:** after a person creates and confirms a Supabase
@@ -308,7 +322,7 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v6 without deleting business rows.
+   earlier ERP installs to SQL v7 without deleting business rows.
 3. Configure the production Site URL for
    `https://rajeshlande.github.io/yoga_studio/` and add the scoped redirect
    pattern `https://rajeshlande.github.io/yoga_studio/**` so email links can
@@ -354,7 +368,7 @@ them. `.env.local` is ignored by Git.
 1. Confirm the top bar says **Online · synced** in Supabase mode.
 2. Create at least one branch, instructor, fee plan and student.
 3. Create batches, enroll students and verify attendance.
-4. Assign a membership/plan to a student.
+4. Assign a subscription/plan to a student.
 5. Complete **Fees → Payment setup**, especially UPI and/or bank receiving
    details and the GST choice that matches your CA's advice.
 6. Generate a due **Invoice PDF** and scan the UPI QR with a small test flow,
@@ -369,6 +383,11 @@ them. `.env.local` is ignored by Git.
    only their batches/attendance; Student sees only their own records. Then
    remove each test link and verify the studio no longer loads for that
    account on the next online Retry/Sync.
+10. As a manager in the Student's branch, pause and resume a test
+    subscription, renew it after changing the Plan price, and verify the
+    next period uses the new current price. Confirm the Student sees the
+    lifecycle/history but no Pause, Resume, Renew or Cancel controls, and
+    that an Admin from another branch and an Instructor cannot change it.
 
 ## Testing and quality gates
 
@@ -398,8 +417,10 @@ The suite includes:
   creation path; the student's personal view-only dashboard/assigned-batch
   portal without sync controls or **Studio ERP data** settings;
   Owner/Admin-only visibility of that settings panel; cleared studio
-  display after online revocation; and the account-first public admission
-  submission plus manager confirmation into a Student + portal grant;
+  display after online revocation; the account-first public admission
+  submission plus manager confirmation into a Student + portal grant; and a
+  mocked-Supabase subscription pause → resume → current-price renewal →
+  history → cancellation journey;
 - a mocked-Supabase payment-setup test proving offline save, mirrored queue,
   browser-close guard and automatic sync after reconnect.
 
@@ -427,13 +448,16 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v6 in the real Supabase project, test real Owner, Co-owner,
+running SQL v7 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
 confirmed email; submit and confirm a public admission from a fresh
 account and verify branch scope, Student portal access and Instructor
-medical-field redaction; verify other branch and own-record scoping; run an offline
-attendance/payment cycle and billing-settings sync as an authorized manager;
-and resolve a two-account conflict before operational sign-off.
+medical-field redaction; verify other branch and own-record scoping; pause,
+resume, renew and cancel test subscriptions as an authorized manager and
+verify the Student view is read-only; run an offline
+attendance/payment/subscription cycle and billing-settings sync as an
+authorized manager; and resolve a two-account conflict before operational
+sign-off.
 
 ## Build and deployment
 
@@ -456,9 +480,11 @@ the installed PWA/site data once so the old service-worker shell is replaced.
 Recommended go-live order for 1.6.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` to install **SQL v6**.
-   This is required for fixed Role Access management and is additive/
-   idempotent for existing ERP data.
+2. Run the complete current `supabase/erp_setup.sql` to install **SQL v7**.
+   This is required for fixed Role Access, public admissions and native
+   subscription lifecycle/renewals, and is additive/idempotent for existing
+   ERP data. Run it before using Pause, Resume, Renew or the new cancel
+   workflow from the deployed app.
 3. Deploy the 1.6.0 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
@@ -469,7 +495,7 @@ Recommended go-live order for 1.6.0:
 If the new app reaches an older database, a billing-settings change remains
 queued with a setup-needed message rather than becoming a false conflict,
 and **Access** / **Students → Portal access** / **Admission requests**
-report that SQL v6 is required; run the complete current SQL file and
+report that SQL v7 is required; run the complete current SQL file and
 reopen/focus the app to resume.
 
 ## Versioning and releases
@@ -527,7 +553,7 @@ fixtures or screenshots.
 │   │   ├── erp/
 │   │   │   ├── data.js      # Supabase offline-first client + mode routing
 │   │   │   ├── localStore.js  # Separate this-device ERP adapter
-│   │   │   ├── logic.js     # Money, dates, GST/UPI and shared ERP logic
+│   │   │   ├── logic.js     # Money, dates, subscriptions, GST/UPI logic
 │   │   │   └── syncStore.js # Snapshot, outbox, mirror and conflict engine
 │   │   └── theme.js         # Light/Dark/System theme helpers
 │   └── style.css            # Global application styles
@@ -589,6 +615,11 @@ granted, but browser eviction protection is weaker.
   government e-invoicing.
 - Live Razorpay/Cashfree checkout, webhook signature verification, refunds
   and automated reconciliation remain a separate trusted-backend phase.
+- Subscription renewal is manager-confirmed. This release has no unattended
+  recurring-invoice scheduler, saved-payment-method autopay, retry/dunning
+  workflow or Student self-service pause/cancel/renew. Pausing a fee
+  subscription also does not automatically change batch enrolment or
+  attendance eligibility.
 - Automated reminders/messaging, payroll, expenses, self check-in and
   advanced reporting remain outside the authorized ERP core.
 - Live Supabase Auth/RLS/email and real-device UAT remain owner-project

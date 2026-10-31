@@ -119,6 +119,22 @@
 .erp-banner.blue{background:#eee7f7;border-color:#ded1ef;color:#5c4377}
 .erp-link-btn{color:#8664ba;font-weight:700;font-size:12px;display:inline-flex;gap:5px;align-items:center;padding:6px 4px;min-height:36px}
 .erp-danger{color:#a34c4c!important}
+.erp-subscription-summary{margin:6px 0 16px}
+.erp-subscription-filters{display:flex;margin:0 0 16px}
+.erp-subscription-history{display:grid;gap:12px}
+.erp-subscription-history-item{border:1px solid #f0e9f5;background:#fdfcfe;border-radius:14px;padding:16px}
+.erp-subscription-history-item>div{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.erp-subscription-history-item strong{font-size:14px;color:#3d3547}
+.erp-subscription-history-item p{font-size:12px;color:#8d7d99;line-height:1.65;margin-top:7px}
+.erp-subscription-history-item small{display:block;font-size:11px;color:#9b92a4;line-height:1.6;margin-top:6px}
+:root[data-theme="dark"] .erp-subscription-history-item{background:#251f34;border-color:#3a304d}
+:root[data-theme="dark"] .erp-subscription-history-item strong{color:#f0e8f7}
+:root[data-theme="dark"] .erp-subscription-history-item p,:root[data-theme="dark"] .erp-subscription-history-item small{color:#aa99bd}
+@media(max-width:640px){
+ .erp-subscription-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .erp-subscription-summary .erp-kpi{padding:14px}
+ .erp-subscription-summary .erp-kpi strong{font-size:23px}
+}
 .erp-receipt{border:1px dashed #d9cbe8;border-radius:12px;padding:18px;margin:14px 0;background:#fdfcfe}
 .erp-receipt dl{display:grid;grid-template-columns:auto 1fr;gap:7px 18px;font-size:13px;margin:0}
 .erp-receipt dt{color:#a295ae;font-weight:600}.erp-receipt dd{margin:0;color:#3d3547;font-weight:600;text-align:right}

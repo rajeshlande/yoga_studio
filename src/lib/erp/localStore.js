@@ -8,7 +8,7 @@
 // module's internals later without any UI change — see docs/12-erp-core.
 
 import {
-  uid, toISODate, membershipEnd, emptySnapshot,
+  uid, toISODate, membershipEnd, emptySnapshot, normalizeSubscriptionLifecycle,
   normalizeBillingSettings, validateBillingSettings,
 } from './logic.js';
 
@@ -174,33 +174,89 @@ export const localStore = {
   async saveMembership(payload) {
     const db = loadDb();
     const plan = db.plans.find(p => p.id === payload.planId);
+    const old = payload.id ? db.memberships.find(m => m.id === payload.id) : null;
     const durationMonths = Number(payload.durationMonths) || plan?.durationMonths || 1;
+    const lifecycleInput = {...(old || {}), ...payload, status: payload.status || old?.status || 'active'};
+    if (!['active', 'paused', 'cancelled'].includes(lifecycleInput.status)) {
+      throw new Error('Choose an active, paused or cancelled subscription status.');
+    }
+    if (old?.status === 'cancelled' && lifecycleInput.status !== 'cancelled') {
+      throw new Error('A cancelled subscription cannot be reopened. Create a new subscription instead.');
+    }
+    if (lifecycleInput.status === 'paused') {
+      if (!lifecycleInput.pausedFrom || lifecycleInput.pausedFrom < payload.startDate) {
+        throw new Error('Choose a pause start on or after the subscription start date.');
+      }
+      if (lifecycleInput.pausedUntil && lifecycleInput.pausedUntil < lifecycleInput.pausedFrom) {
+        throw new Error('The expected resume date cannot be before the pause start date.');
+      }
+    }
+    const lifecycle = normalizeSubscriptionLifecycle(lifecycleInput, nowISO());
+    if (lifecycle.status === 'paused' && payload.id && db.memberships.some(m => (
+      m.previousMembershipId === payload.id && m.status !== 'cancelled' && m.id !== payload.id
+    ))) {
+      throw new Error('Cancel the scheduled renewal before pausing this subscription, so its end date does not move into the next period.');
+    }
+    if (lifecycle.previousMembershipId) {
+      const source = db.memberships.find(m => m.id === lifecycle.previousMembershipId);
+      if (!source || source.studentId !== payload.studentId) {
+        throw new Error('A renewal must follow an existing subscription for the same student.');
+      }
+      const isNewLink = !old || old.previousMembershipId !== lifecycle.previousMembershipId;
+      if (isNewLink && source.status === 'paused') {
+        throw new Error('Resume the previous subscription before renewing it, so the renewal start date is final.');
+      }
+      if (isNewLink && source.status === 'cancelled') {
+        throw new Error('A cancelled subscription cannot be renewed. Create a new subscription instead.');
+      }
+      if (lifecycle.status !== 'cancelled' && db.memberships.some(m => (
+        m.previousMembershipId === lifecycle.previousMembershipId
+        && m.status !== 'cancelled' && m.id !== payload.id
+      ))) {
+        throw new Error('This subscription has already been renewed.');
+      }
+    }
     upsert(db.memberships, {
       id: payload.id || uid(), studentId: payload.studentId, planId: payload.planId,
       branchId: payload.branchId || '', startDate: payload.startDate,
-      endDate: membershipEnd(payload.startDate, durationMonths, payload.billingCycle || 'joining'),
+      endDate: membershipEnd(
+        payload.startDate, durationMonths, payload.billingCycle || 'joining', lifecycle.totalPausedDays,
+      ),
       billingCycle: payload.billingCycle || 'joining', durationMonths,
       amountPaise: Number(payload.amountPaise) || plan?.amountPaise || 0,
-      status: payload.status || 'active', createdAt: payload.createdAt || nowISO(),
+      ...lifecycle, createdAt: old?.createdAt || payload.createdAt || nowISO(),
     });
     return saveDb(db);
   },
 
-  async cancelMembership(id) {
+  async cancelMembership(input, suppliedReason = '') {
     const db = loadDb();
+    const id = typeof input === 'string' ? input : input?.id;
+    const reason = typeof input === 'string' ? suppliedReason : (input?.reason || suppliedReason || '');
     const membership = db.memberships.find(m => m.id === id);
-    if (membership) membership.status = 'cancelled';
+    if (membership && membership.status !== 'cancelled') {
+      Object.assign(membership, normalizeSubscriptionLifecycle({
+        ...membership, status: 'cancelled', cancelReason: reason, cancelledAt: nowISO(),
+      }, nowISO()));
+    }
     return saveDb(db);
   },
 
   async recordPayment(payload) {
     const db = loadDb();
+    const membership = payload.membershipId
+      ? db.memberships.find(m => m.id === payload.membershipId)
+      : null;
+    if (membership?.status === 'cancelled') {
+      throw new Error('Payments cannot be recorded against a cancelled subscription.');
+    }
     db.counters.receipt += 1;
     const paidOn = payload.paidOn || toISODate();
     const year = String(paidOn).slice(0, 4);
     db.payments.push({
-      id: payload.id || uid(), studentId: payload.studentId, membershipId: payload.membershipId || '',
-      branchId: payload.branchId || '', amountPaise: Number(payload.amountPaise) || 0,
+      id: payload.id || uid(), studentId: membership?.studentId || payload.studentId,
+      membershipId: membership?.id || payload.membershipId || '',
+      branchId: membership?.branchId || payload.branchId || '', amountPaise: Number(payload.amountPaise) || 0,
       method: payload.method || 'cash', paidOn, note: payload.note || '',
       receiptNo: `YS-${year}-${String(db.counters.receipt).padStart(4, '0')}`,
       status: 'recorded', voidReason: '', syncVersion: 1,
