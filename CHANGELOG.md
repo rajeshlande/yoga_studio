@@ -6,6 +6,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.10.0 — 2026-11-01
+
+### Added — Admissions, guided enrolment and Instructor students
+
+- **Admission requests workspace:** **Students → Admission requests** now
+  supports search, status/branch filters, request cards and detail,
+  pending-age and duplicate warnings, phone/email/WhatsApp contact actions,
+  and guided confirmation into Student creation, batch assignment, plan/pass
+  selection and optional payment.
+- **Studio and branch public admission links:** managers can copy, share,
+  QR-open and test one studio-wide admission link plus one link per active
+  branch. A branch link pre-selects that branch for the applicant, while an
+  authorized manager can still change the final branch during confirmation.
+- **Guided Enroll student wizard:** the shared **Student → Batch → Plan →
+  Payment & review** flow adds duplicate handling, batch and plan previews,
+  payment shortcuts and balance, final review/edit steps, partial-progress
+  recovery, and an **Enrolment complete** screen with receipt and due-invoice
+  actions.
+- **Instructor Students workspace:** Instructors now have **Students / My
+  students** for students actively enrolled in their own batches. They can
+  share public admission links without viewing admission requests, create a
+  basic walk-in student, assign new or existing students only to batches they
+  teach, and record final manually verified payments only for an active
+  own-batch enrolment against the matching subscription/pass.
+- **Instructor plan visibility at Enroll Step 3:** active plans that arrive
+  after the wizard opens are selected automatically. SQL v11 reports
+  `setupVersion: 11`; if an Instructor is still connected to an older database
+  setup, Step 3 now shows an explicit SQL v11 update error with **Reload
+  plans** instead of a misleading generic no-plan state.
+
+### Added — Centralized error management
+
+- Browser, Auth, Supabase, network and common PostgreSQL failures are now
+  normalized into structured notices with a clear title, **What happened**,
+  **Possible solution**, severity, retry/dismiss actions where safe, and
+  expandable copyable technical details. This covers global notifications,
+  inline ERP notices and an application error boundary.
+
+### Database migration — SQL v11 (cumulative)
+
+- Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
+  Editor. SQL v11 adds branch-aware admission RPCs and Admin admission scope,
+  Instructor snapshot access to active plans/billing settings with only
+  current own-batch finance, server-enforced basic walk-in creation,
+  exact active-plan initial membership checks, final verified own-batch
+  payment checks, `setupVersion: 11` in `erp_get_context()`, and explicit
+  helper grants/revokes. Instructors still cannot create or edit plan
+  templates, view Medical / Physical issue, edit full Student records, review
+  public admission requests, void/refund payments or access unrelated finance.
+
+### Validation
+
+- Production build passes; the selected Node suite passes **50/50**. Browser
+  coverage includes manager admission confirmation, signed-in Instructor
+  scope and the delayed-plan Instructor walk-in enrolment/payment regression.
+  The SQL v11 PGlite role-access harness passes **103/103**, with cumulative
+  roster/profile regression and SQL v10 → v11 upgrade checks also passing.
+  Live five-role Supabase UAT remains required after running SQL v11.
+
 ## 1.9.0 — 2026-10-31
 
 ### Added — Branches & batches operational workspace

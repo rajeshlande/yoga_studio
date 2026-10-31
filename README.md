@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
 INR payments, payment setup and one-page A4 invoice PDFs.
 
-> **Current source release:** 1.9.0 · **Database setup:** SQL v10 in
+> **Current source release:** 1.10.0 · **Database setup:** SQL v11 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -496,7 +496,7 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v10 in the real Supabase project, test real Owner, Co-owner,
+running SQL v11 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
 confirmed email; submit and confirm a public admission from a fresh
 account and verify branch scope, Student portal access and Instructor
@@ -531,15 +531,16 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.9.0:
+Recommended go-live order for 1.10.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
 2. Ensure the complete current `supabase/erp_setup.sql` has installed
-   **SQL v10**. Version 1.9.0 adds no database fields, so no new SQL run is
-   needed if SQL v10 is already live. If upgrading from SQL v9 or earlier,
-   run SQL v10 instead of stopping at v9; it is cumulative and preserves
-   existing business rows.
-3. Deploy the 1.9.0 web build with the two public Actions secrets.
+   **SQL v11**. Version 1.10.0 requires SQL v11 for branch-aware admissions,
+   Instructor Students, Instructor active-plan visibility and the
+   `setupVersion: 11` context check. If upgrading from SQL v10 or earlier,
+   run the complete SQL v11 file instead of stopping at an older version; it
+   is cumulative and preserves existing business rows.
+3. Deploy the 1.10.0 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.

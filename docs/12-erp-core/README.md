@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.9.0)
+# Yoga Studio ERP — Core (v1.10.0)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
@@ -44,7 +44,11 @@ sorting, seat-fill and next-class indicators, duplicate-batch setup, roster
 search, and warnings for full, empty, unassigned or instructor-overlapping
 batches. Instructor and Student versions of the batch workspace remain
 limited to their assigned batches; Students do not receive roster/capacity
-details.
+details. Version 1.10.0 expands admissions into studio-wide and
+branch-specific public links, adds the guided Student → Batch → Plan →
+Payment enrolment wizard, gives Instructors a scoped Students workspace with
+basic walk-in creation and final own-batch payment collection under SQL v11,
+and centralizes actionable error notices.
 This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
@@ -54,14 +58,14 @@ saved-method autopay.
 |---|---|
 | Dashboard | KPIs (active students, today's classes, collected this month, pending dues), today's class list, subscriptions expiring in 7 days, first-run setup checklist; role-specific cards for Instructor/Student |
 | Branches & batches | Manager workspace with **Branches**, **Batches** and **Instructor profiles** tabs; branch summary KPIs and searchable/sortable branch health cards (students, active batches, enrolled seats/fill, instructors teaching, weekly/today classes, recent attendance and next class), drill-down to that branch's Batches or Students, add/edit/archive branches, and searchable Instructor cards with bio, specialties/styles, qualifications/certifications, experience, joining date, status, assigned batches/students and next class |
-| Students | Add/edit/deactivate, search, branch, split name/contact/admission profile, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email, and a copyable public admission link with pending/confirmed/rejected manager review |
+| Students | Add/edit/deactivate, search, branch, split name/contact/admission profile, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email, and studio/branch public admission links with pending/confirmed/rejected manager review and guided enrolment |
 | Batches | Manager tab under Branches & batches; standalone assigned-batch view remains for Instructor/Student. Role-tailored summary cards, searchable/filterable/sortable batch cards and a recurring weekly Schedule view; next class, recent attendance and (except for Students) enrolled/capacity/seats-left progress. Managers can duplicate batch settings, and the batch form warns about capacity below current enrollment or an instructor time overlap without silently blocking an intentional exception. Roster dialog includes fill/search plus enroll/remove with capacity guard. A signed-in Instructor may edit only the roster of an active batch assigned to them and only with existing active students from that branch; a Student sees only assigned batches/schedule and no roster or capacity counts |
 | Attendance | Date + batch picker (today's batch auto-selected), Present/Absent/Late per student, mark-all-present, history + CSV; students see only their own |
 | Subscriptions | Odoo-style Plan templates (type, ₹ price, billing period in months, default alignment, renewal default, Active/Archived); subscription periods with **calendar-month or joining-date** billing, amount/offering snapshots, lifecycle, pause/resume, cancellation reasons, renewal tracking/history, one-click current-price renewal, active/paused/renewals-due/MRR summary and dues. **One-month passes** are shown separately and cannot pause/renew or enter MRR |
 | Payments | Payment history, Record verified payment for subscriptions or one-month passes, server receipt numbers `YS-YYYY-NNNN`, CSV export, Owner/Co-owner Payment setup with optional GST/UPI/bank/public-gateway readiness, and exactly-one-page A4 portrait PDFs for unpaid/partial invoices and paid receipts with dynamic UPI QR only while outstanding; synced payments are append-only and corrected by audited void |
 | Offline sync | Signed-in Supabase mode downloads a per-user device copy, applies ERP changes locally while offline, queues them in a durable mirrored outbox, requests persistent storage, and pushes in dependency order when internet returns; the global top bar plus ERP toolbar/Settings show Online/Offline, synced, waiting, syncing, setup-needed and conflict states |
 | Conflicts | Server row versions detect concurrent edits. Sync never uses last-write-wins: a review dialog compares **This device** with **Supabase now**; Keep Supabase discards the local proposal, while Keep mine reapplies only the fields changed on that device |
-| Access & portals | Five fixed server-enforced roles: protected primary Owner; all-branch Co-owner; selected-branch Admin; Instructor limited to linked batches/rosters/attendance; Student limited to a view-only own-record portal. **Access** manages Co-owner/Admin/Instructor sign-ins by confirmed email; **Students → Portal access** manages Student sign-ins |
+| Access & portals | Five fixed server-enforced roles: protected primary Owner; all-branch Co-owner; selected-branch Admin; Instructor limited to linked batches/rosters/attendance, own-student enrolment and scoped own-batch final payment collection; Student limited to a view-only own-record portal. **Access** manages Co-owner/Admin/Instructor sign-ins by confirmed email; **Students → Portal access** manages Student sign-ins |
 | Account profile | Role-aware signed-in **Profile** with editable name/phone/personal bio, read-only sign-in email, organization, ERP role/access scope, shortcuts and a linked Instructor teaching-profile or Student-record summary where applicable |
 | Appearance | Light/Dark/System theme from `feature_development`, adapted to every ERP screen, dialog, table and form; persisted as `ys-theme`, with pre-paint bootstrap and OS-preference sync |
 
@@ -501,10 +505,10 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.9.0 the required database remains **SQL v10**; 1.9.0 adds no
-   tables, columns or RPCs, so do not rerun SQL only for this app release if
-   SQL v10 is already live. Upgrading from an earlier release installs SQL
-   v10: all prior sync,
+   For v1.10.0 the required database is **SQL v11**. Version 1.10.0 changes
+   admission RPCs/snapshot authorization, so rerun the complete SQL file if
+   SQL v10 or earlier is live. Upgrading from an earlier release installs SQL
+   v11: all prior sync,
    billing and Student-access objects; SQL v5 Co-owner/selected-branch
    authorization and staff-access RPCs; the SQL v6 organization admission
    code, locked `erp_admissions` workflow and structured Student profile;
@@ -515,10 +519,14 @@ a backup.
    visibility, and matching direct/sync assigned-batch roster authorization;
    plus SQL v10 identity-only Instructor student snapshot fields,
    display-name-only Student instructor rows, own-subscription Student Plan
-   scoping, and revocation of direct browser access to internal helpers.
-   It is additive and does not delete business rows. Existing Instructors
-   preserve name/contact/home branch/status and gain an empty profile. Run
-   SQL v10 (rather than stopping at v9) before using the deployed 1.9.0 app.
+   scoping, and revocation of direct browser access to internal helpers;
+   plus SQL v11 branch-aware admission RPCs/Admin scope, Instructor
+   active-plan/billing snapshot visibility with own-batch finance only,
+   server-enforced Instructor walk-in/enrolment/payment rules, and
+   `setupVersion: 11` in the context response. It is additive and does not
+   delete business rows. Existing Instructors preserve
+   name/contact/home branch/status and gain an empty profile. Run SQL v11
+   (rather than stopping at v10 or v9) before using the deployed 1.10.0 app.
    If the new app reaches an older
    database, supported older sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and a queued one-month operation
