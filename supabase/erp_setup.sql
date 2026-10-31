@@ -1,13 +1,13 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 9.
--- Matches app version 1.8.0 (safer autosync, GST/UPI invoicing,
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 10.
+-- Matches app version 1.8.1 (safer autosync, GST/UPI invoicing,
 -- Owner/Co-owner payment configuration/readiness checks, Student portal
 -- access, Odoo-style fixed Role Access management for all five roles,
 -- account-first public Student admissions with manager confirmation,
 -- native Odoo-style subscription lifecycle and one-click renewals, and
 -- Odoo-style plan templates with a separate one-month-only offering,
--- rich Instructor profiles, and assigned-batch roster editing for a
--- signed-in Instructor).
+-- rich Instructor profiles, assigned-batch roster editing for a signed-in
+-- Instructor, and SQL v10 least-privilege field/record hardening).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -46,7 +46,12 @@
 --     rosters/attendance only)
 --     and Student (own portal records only). One active account has one
 --     ERP role in one organization; Admin/Instructor branch assignments are
---     explicit branch-member rows.
+--     explicit branch-member rows. This follows Odoo's two-layer model:
+--     model/operation access by role, refined by record rules (organization,
+--     selected branch, assigned Instructor batch, or the Student's own id).
+--     Hiding a menu is never the security boundary: the snapshot removes or
+--     blanks unauthorized rows/fields and every writer re-checks the same
+--     rules server-side.
 --   * Offline sync uses the single typed erp_sync_push(jsonb) door. Every
 --     queued device operation has a unique id (idempotent retries) and every
 --     syncable row has a sync_version (optimistic concurrency). If the row
@@ -1037,8 +1042,9 @@ end $$;
 -- ----------------------------------------------------------------------------
 -- One bounded snapshot for all screens (one call per load / per mutation).
 -- Visibility: org managers see their org; branch admins their branches;
--- instructors their batches + enrolled students + minimal active-student
--- roster candidates in a branch where they teach; students only themselves.
+-- instructors see only their batches, roster identities and minimal
+-- same-branch candidates; students see only themselves, their assigned
+-- batches (teacher display name only), and their own finance records/plans.
 -- ----------------------------------------------------------------------------
 create or replace function public.erp_get_snapshot()
 returns jsonb language plpgsql stable security definer set search_path = public as $$
@@ -1074,27 +1080,28 @@ begin
     'students', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', s.id, 'branchId', s.branch_id, 'firstName', s.first_name,
         'lastName', s.last_name, 'fullName', s.full_name,
-        'phone', case when vis.full_record or vis.instructor_enrolled then s.phone else '' end,
-        'email', case when vis.full_record or vis.instructor_enrolled then s.email else '' end,
-        'gender', case when vis.full_record or vis.instructor_enrolled then s.gender else '' end,
-        'dob', case when vis.full_record or vis.instructor_enrolled
+        'phone', case when vis.full_record then s.phone else '' end,
+        'email', case when vis.full_record then s.email else '' end,
+        'gender', case when vis.full_record then s.gender else '' end,
+        'dob', case when vis.full_record
           then coalesce(s.dob::text, '') else '' end,
         'joiningDate', s.joining_date::text, 'status', s.status,
-        'notes', case when vis.full_record or vis.instructor_enrolled then s.notes else '' end,
-        'address', case when vis.full_record or vis.instructor_enrolled then s.address else '' end,
-        'pinCode', case when vis.full_record or vis.instructor_enrolled then s.pin_code else '' end,
-        'admissionSubject', case when vis.full_record or vis.instructor_enrolled
+        'notes', case when vis.full_record then s.notes else '' end,
+        'address', case when vis.full_record then s.address else '' end,
+        'pinCode', case when vis.full_record then s.pin_code else '' end,
+        'admissionSubject', case when vis.full_record
           then s.admission_subject else '' end,
-        'referredBy', case when vis.full_record or vis.instructor_enrolled
+        'referredBy', case when vis.full_record
           then s.referred_by else '' end,
-        'yogaExperience', case when vis.full_record or vis.instructor_enrolled
+        'yogaExperience', case when vis.full_record
           then s.yoga_experience else '' end,
-        -- Medical / physical details are manager-and-self-only. Instructors
-        -- receive roster fields for enrolled students and only the name,
-        -- branch/status/joining fields for not-yet-enrolled candidates.
+        -- Instructors receive only identity/schedule fields needed for an
+        -- assigned-batch roster or roster candidate list (name, branch,
+        -- status and joining date). Contact, address, admission and medical
+        -- details remain manager-and-self-only.
         'medicalPhysicalIssue', case when vis.full_record
           then s.medical_physical_issue else '' end,
-        'reasonToJoin', case when vis.full_record or vis.instructor_enrolled
+        'reasonToJoin', case when vis.full_record
           then s.reason_to_join else '' end,
         -- Portal fields are manager-only metadata, never part of the student
         -- record's offline-sync payload. Other roles receive "hidden".
@@ -1135,14 +1142,27 @@ begin
      where s.org_id = v_org and s.branch_id = any(v_branches)
        and (vis.full_record or vis.instructor_enrolled or vis.instructor_candidate)),
     'instructors', (select coalesce(jsonb_agg(jsonb_build_object(
-        'id', i.id, 'branchId', coalesce(i.branch_id::text, ''), 'fullName', i.full_name,
-        'phone', i.phone, 'email', i.email, 'bio', i.bio,
-        'specialties', to_jsonb(i.specialties), 'qualifications', i.qualifications,
-        'experienceYears', i.experience_years,
-        'joiningDate', coalesce(i.joining_date::text, ''),
-        'status', i.status, 'createdAt', i.created_at, 'updatedAt', i.updated_at, 'syncVersion', i.sync_version)
+        'id', i.id,
+        'branchId', case when ivis.full_record then coalesce(i.branch_id::text, '') else '' end,
+        'fullName', i.full_name,
+        'phone', case when ivis.full_record then i.phone else '' end,
+        'email', case when ivis.full_record then i.email else '' end,
+        'bio', case when ivis.full_record then i.bio else '' end,
+        'specialties', case when ivis.full_record then to_jsonb(i.specialties) else '[]'::jsonb end,
+        'qualifications', case when ivis.full_record then i.qualifications else '' end,
+        'experienceYears', case when ivis.full_record then i.experience_years else 0 end,
+        'joiningDate', case when ivis.full_record then coalesce(i.joining_date::text, '') else '' end,
+        'status', case when ivis.full_record then i.status else '' end,
+        'createdAt', i.created_at, 'updatedAt', i.updated_at, 'syncVersion', i.sync_version)
         order by i.full_name), '[]')
       from public.erp_instructors i
+      join lateral (
+        select (
+          v_org_mgr
+          or cardinality(v_admin_branches) > 0
+          or (v_instructor is not null and i.id = v_instructor)
+        ) as full_record
+      ) ivis on true
      where i.org_id = v_org
        and (
          v_org_mgr
@@ -1189,13 +1209,21 @@ begin
             or (v_instructor is not null and bt.instructor_id = v_instructor)
             or (v_student is not null and a.student_id = v_student))),
     'plans', (select coalesce(jsonb_agg(jsonb_build_object(
-        'id', id, 'name', name, 'amountPaise', amount_paise,
-        'durationMonths', duration_months, 'planType', plan_type,
-        'billingCycle', billing_cycle, 'renewalEnabledDefault', renewal_enabled_default,
-        'status', status, 'createdAt', created_at, 'updatedAt', updated_at, 'syncVersion', sync_version)
-        order by created_at), '[]')
-      from public.erp_plans where org_id = v_org
-        and (v_org_mgr or cardinality(v_admin_branches) > 0 or v_student is not null)),
+        'id', p.id, 'name', p.name, 'amountPaise', p.amount_paise,
+        'durationMonths', p.duration_months, 'planType', p.plan_type,
+        'billingCycle', p.billing_cycle, 'renewalEnabledDefault', p.renewal_enabled_default,
+        'status', p.status, 'createdAt', p.created_at, 'updatedAt', p.updated_at, 'syncVersion', p.sync_version)
+        order by p.created_at), '[]')
+      from public.erp_plans p
+     where p.org_id = v_org
+        and (
+          v_org_mgr
+          or cardinality(v_admin_branches) > 0
+          or (v_student is not null and exists (
+            select 1 from public.erp_memberships m
+             where m.org_id = v_org and m.plan_id = p.id
+               and m.student_id = v_student))
+        )),
     'memberships', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', m.id, 'studentId', m.student_id, 'planId', m.plan_id, 'branchId', m.branch_id,
         'startDate', m.start_date::text, 'endDate', m.end_date::text,
@@ -4170,17 +4198,28 @@ revoke all on function public.erp__assert_access_account_available(uuid, uuid, t
 revoke all on function public.erp__can_manage_instructor_access(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.erp__admission_json(public.erp_admissions) from public, anon, authenticated;
 revoke all on function public.erp__admission_org(text) from public, anon, authenticated;
+-- Context/authorization helpers are internal too. The browser receives the
+-- server-derived result through erp_get_context/erp_get_snapshot; it must not
+-- be able to call the helpers (or forge audit rows through erp__log) directly.
+revoke all on function public.erp_current_org() from public, anon, authenticated;
+revoke all on function public.erp_my_roles() from public, anon, authenticated;
+revoke all on function public.erp_can_manage() from public, anon, authenticated;
+revoke all on function public.erp_my_instructor_id() from public, anon, authenticated;
+revoke all on function public.erp_my_student_id() from public, anon, authenticated;
+revoke all on function public.erp__require_org() from public, anon, authenticated;
+revoke all on function public.erp__require_manager() from public, anon, authenticated;
+revoke all on function public.erp__log(uuid, text, text, uuid) from public, anon, authenticated;
 
 -- ----------------------------------------------------------------------------
--- Function permissions: signed-in users only; never anonymous.
+-- Function permissions: signed-in users only; never anonymous. Only the
+-- application-facing RPCs below are granted. Each one re-checks the caller's
+-- fixed role and record scope from auth.uid(); the grant itself is not the
+-- authorization decision.
 -- ----------------------------------------------------------------------------
 do $$
 declare f text;
 begin
   foreach f in array array[
-    'erp_current_org()', 'erp_my_roles()', 'erp_can_manage()',
-    'erp_my_instructor_id()', 'erp_my_student_id()', 'erp__require_org()',
-    'erp__require_manager()', 'erp__log(uuid, text, text, uuid)',
     'erp_bootstrap_organization(text)', 'erp_get_context()', 'erp_get_snapshot()',
     'erp_save_branch(jsonb)', 'erp_archive_branch(uuid)', 'erp_save_student(jsonb)',
     'erp_archive_student(uuid)', 'erp_grant_student_access(uuid, text)',

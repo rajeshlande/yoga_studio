@@ -352,6 +352,9 @@ test('owner manages co-owner, branch Admin and instructor sign-in access', async
   await instructorDialog.getByRole('button', {name: 'Yes, remove access'}).click();
   await expect(page.getByRole('row', {name: /Isha Rao.*Suspended/})).toBeVisible();
   expect(roleCalls.at(-1)).toEqual({name: 'erp_revoke_instructor_access', body: {p_instructor_id: INSTRUCTOR_RECORD}});
+
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Studio ERP data'})).toBeVisible();
 });
 
 test('co-owner can set up instructor profiles and grant instructor portal access', async ({page}) => {
@@ -414,6 +417,9 @@ test('co-owner can set up instructor profiles and grant instructor portal access
     p_email: 'instructor-login@example.test',
     p_branch_ids: [BRANCH],
   }]);
+
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Studio ERP data'})).toHaveCount(0);
 });
 
 test('branch Admin access page hides organization roles and owner-only setup actions', async ({page}) => {
@@ -479,6 +485,8 @@ test('branch Admin access page hides organization roles and owner-only setup act
   await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
   await page.getByRole('button', {name: 'Payments', exact: true}).click();
   await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Studio ERP data'})).toBeVisible();
 });
 
 test('signed-in instructor is locked to their linked instructor record', async ({page}) => {
@@ -498,7 +506,7 @@ test('signed-in instructor is locked to their linked instructor record', async (
   server.batches.push({id: BATCH, branchId: BRANCH, name: 'Morning Hatha', instructorId: INSTRUCTOR_RECORD, days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20, status: 'active', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1});
   server.students.push(
     {id: STUDENT, branchId: BRANCH, firstName: 'Asha', lastName: 'Patil', fullName: 'Asha Patil', phone: '1111111111', email: 'asha@example.test', gender: '', dob: '', joiningDate: '2026-01-01', status: 'active', notes: '', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1},
-    // SQL v9 sends only roster-candidate fields for a not-yet-enrolled
+    // SQL v10 sends only roster identity fields for an Instructor's
     // same-branch student; private profile fields stay blank in this fixture.
     {id: CANDIDATE, branchId: BRANCH, firstName: 'Nikhil', lastName: 'Sharma', fullName: 'Nikhil Sharma', phone: '', email: '', gender: '', dob: '', joiningDate: '2026-02-01', status: 'active', notes: '', createdAt: '2026-01-01T00:00:00Z', syncVersion: 1},
   );
@@ -560,6 +568,8 @@ test('signed-in instructor is locked to their linked instructor record', async (
   const instructorPicker = page.getByLabel('Signed-in instructor');
   await expect(instructorPicker).toBeDisabled();
   await expect(instructorPicker).toHaveValue(INSTRUCTOR_RECORD);
+  await expect(page.getByLabel('Portal role')).toBeDisabled();
+  await expect(page.getByLabel('Portal role')).toHaveValue('instructor');
   await expect(page.getByRole('combobox', {name: 'Attendance batch'})).toHaveValue(BATCH);
 
   await page.getByRole('button', {name: 'Profile', exact: true}).click();
@@ -568,6 +578,8 @@ test('signed-in instructor is locked to their linked instructor record', async (
   await expect(page.locator('.profile-linked-record')).toContainText('Breath-led Hatha');
   await expect(page.locator('.profile-linked-record')).toContainText('RYT-500');
   await expect(page.locator('.profile-linked-record')).toContainText('Morning Hatha');
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Studio ERP data'})).toHaveCount(0);
 });
 
 test('signed-in student sees a view-only portal for their own records', async ({page}) => {
@@ -666,6 +678,8 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await signIn(page);
   await expect(page.getByLabel('Signed-in student')).toBeDisabled();
   await expect(page.getByLabel('Signed-in student')).toHaveValue(STUDENT);
+  await expect(page.getByLabel('Portal role')).toBeDisabled();
+  await expect(page.getByLabel('Portal role')).toHaveValue('student');
   await expect(page.getByText(/Supabase · Synced|Online · synced/)).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Sync now'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);

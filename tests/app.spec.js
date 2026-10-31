@@ -59,27 +59,14 @@ test('signup validates names; login errors are safe; forgot password calls provi
  expect(await page.evaluate(()=>Object.values(localStorage).some(v=>v.includes('valid-test-password')))).toBeFalsy();
 });
 
-test('studio ERP data settings are limited to Owner and Admin',async({page})=>{
+test('signed-in ERP portal role cannot be self-selected before server access is known',async({page})=>{
  await page.goto('/');
  await signIn(page);
- await page.getByRole('button',{name:'Settings',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Studio ERP data'})).toBeVisible();
-
- await page.getByRole('button',{name:'Dashboard',exact:true}).click();
- await page.getByLabel('Portal role').selectOption('admin');
- await page.getByRole('button',{name:'Settings',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Studio ERP data'})).toBeVisible();
-
- await page.getByRole('button',{name:'Dashboard',exact:true}).click();
- await page.getByLabel('Portal role').selectOption('co_owner');
- await page.getByRole('button',{name:'Settings',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Studio ERP data'})).toHaveCount(0);
-
- await page.getByRole('button',{name:'Dashboard',exact:true}).click();
- await page.getByLabel('Portal role').selectOption('student');
- await expect(page.getByText(/Supabase · Synced|Online · synced/)).toHaveCount(0);
- await page.getByRole('button',{name:'Settings',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Studio ERP data'})).toHaveCount(0);
+ const portalRole=page.getByLabel('Portal role');
+ await expect(portalRole).toBeDisabled();
+ await expect(portalRole).toHaveValue('');
+ await expect(portalRole.locator('option')).toHaveCount(1);
+ await expect(portalRole.locator('option')).toHaveText(/Checking access|No ERP role linked/);
 });
 
 test('recovery session updates password through provider, with mismatch validation',async({page})=>{

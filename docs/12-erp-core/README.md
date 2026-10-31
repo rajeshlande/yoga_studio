@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.8.0)
+# Yoga Studio ERP — Core (v1.8.1)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
@@ -16,7 +16,7 @@ signed-in **Student portal access** workflow. Version 1.6.0 generalizes that
 server-checked account-linking model to **fixed Role Access for all five
 roles**: each person creates/confirms a dedicated account first, then an
 authorized manager links the exact sign-in email in **Access** (or
-**Students → Portal access** for a Student). SQL v9 enforces the role,
+**Students → Portal access** for a Student). SQL v10 enforces the role,
 selected-branch and own-record rules on snapshot, direct RPC and offline-sync
 paths; there is no custom permission-group/module editor. It also adds an
 account-first public Student admission link: a signed-in applicant submits
@@ -33,6 +33,11 @@ Version 1.8.0 turns Instructor records into rich teaching profiles, lets a
 signed-in Instructor add/remove existing active same-branch students in an
 active batch assigned to them, makes the signed-in account **Profile**
 role-aware, and fixes invoice/receipt print output to one A4 portrait page.
+Patch 1.8.1 / SQL v10 is a least-privilege role-authorization hardening:
+Instructor student rows are identity-only, Student instructor rows are
+display-name-only, Students receive only Plans used by their own
+subscriptions/passes, and internal context/authorization/audit helpers are
+no longer browser-callable.
 This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
@@ -106,7 +111,7 @@ the last successful pull; the sync RPC re-checks current permission on push.
 
 ### Role access and Student portal access
 
-Version 1.8.0 continues five fixed authorization roles, adapting Odoo's
+Version 1.8.1 continues five fixed authorization roles, adapting Odoo's
 security-group and record-rule ideas to this ERP:
 
 | Role | Scope | May manage access for | Important restrictions |
@@ -114,14 +119,23 @@ security-group and record-rule ideas to this ERP:
 | **Owner** | All branches | Co-owner, Admin, Instructor, Student | Primary Owner is protected; ownership transfer/removal is not offered in the app |
 | **Co-owner** | All branches | Admin, Instructor, Student | Cannot add/remove Owner or Co-owner |
 | **Admin** | Explicitly selected branches | Instructor and Student in those branches | Cannot manage Admins/Co-owners, plans, Payment setup or unassigned branches |
-| **Instructor** | Own linked instructor record and batches in authorized branches | Nobody | May add/remove existing active same-branch students in an active assigned batch, subject to capacity; no fees/payments, Student-record creation/editing, batch schedule/capacity editing, Instructor profile setup or access administration |
-| **Student** | Own student record and assigned batches | Nobody | Personal view-only dashboard; no ERP writes, studio roster/class counts, sync badges/controls or **Studio ERP data** settings |
+| **Instructor** | Own linked instructor record and batches in authorized branches | Nobody | May add/remove existing active same-branch students in an active assigned batch, subject to capacity; student snapshot fields are identity-only, with no contact/address/admission/medical data; no fees/payments, Student-record creation/editing, batch schedule/capacity editing, Instructor profile setup or access administration |
+| **Student** | Own student record and assigned batches | Nobody | Personal view-only dashboard; no other student, no instructor contact/profile data beyond the assigned teacher's display name, no unrelated Plan, no ERP writes, studio roster/class counts, sync badges/controls or **Studio ERP data** settings |
 
 The matrix is deliberately fixed. This release does not provide custom
 security groups, per-user permission matrices or module-level
 None/View/Manage permission editors. The SQL snapshot, direct RPCs and
 `erp_sync_push` all re-check organization, role and branch/record scope;
 hiding a screen in React is not treated as authorization.
+
+SQL v10 also applies default-deny at the RPC boundary. ERP tables have no
+browser grants, every SQL function is either one of the application-facing
+authenticated RPCs or explicitly revoked from `public`, `anon` and
+`authenticated`, and internal context/authorization/audit helpers cannot be
+called directly by a signed-in browser user. In Supabase mode the Portal
+selector is locked to the server-returned role; the selectable role preview
+exists only in the separate device-only local mode and cannot read the
+Supabase snapshot.
 
 Instructor profile setup and Instructor Portal authorization are separate
 manager-only steps. **Branches & batches → Instructor profiles** creates and
@@ -135,11 +149,12 @@ screens hide both controls from Instructor and Student accounts, and
 `erp_grant_instructor_access` and `erp_revoke_instructor_access` re-check
 the same manager/branch boundary in SQL.
 
-Roster editing is the one narrow Instructor write added in SQL v9. The
-snapshot gives an Instructor full roster fields for students already enrolled
-in their batches and only name/branch/status/joining fields for active
-same-branch candidates in a branch where they teach; candidate contact,
-address, notes, admission details and medical text are blank. The direct
+Roster editing is the one narrow Instructor write added in SQL v9 and
+field-hardened in SQL v10. The snapshot gives an Instructor only identity
+fields (name, branch, status and joining date) for both students already
+enrolled in their batches and active same-branch candidates in a branch
+where they teach; contact, address, notes, admission details and medical
+text are blank. The direct
 `erp_enroll_student`/`erp_end_enrollment` RPCs and the enrollment branch of
 `erp_sync_push` call the same server helper: managers keep their branch
 scope, while an Instructor must be the active batch's assigned instructor
@@ -280,8 +295,9 @@ issue and reason to join) and are editable later by an authorized manager.
 `fullName` remains the canonical display name composed from first/last.
 Medical / Physical issue is returned only to Owner/Co-owner, an Admin of the
 student's branch and that student; Instructor snapshots deliberately carry
-an empty value. SQL v9 also redacts a not-yet-enrolled roster candidate's
-contact/address/notes/admission fields from the Instructor snapshot. The
+an empty value. SQL v10 redacts contact/address/notes/admission fields for
+both enrolled students and not-yet-enrolled roster candidates in the
+Instructor snapshot. The
 student can view their own confirmed admission details
 on the personal dashboard but remains view-only.
 
@@ -478,7 +494,7 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.8.0 this upgrades the database to **SQL v9**: all prior sync,
+   For v1.8.1 this upgrades the database to **SQL v10**: all prior sync,
    billing and Student-access objects; SQL v5 Co-owner/selected-branch
    authorization and staff-access RPCs; the SQL v6 organization admission
    code, locked `erp_admissions` workflow and structured Student profile;
@@ -486,12 +502,14 @@ a backup.
    one-month offering fields; and SQL v9 Instructor `bio`, `specialties`,
    `qualifications`, `experience_years` and `joining_date`, profile
    constraints/index/snapshot fields, candidate-redacted Instructor student
-   visibility, and matching direct/sync assigned-batch roster authorization.
+   visibility, and matching direct/sync assigned-batch roster authorization;
+   plus SQL v10 identity-only Instructor student snapshot fields,
+   display-name-only Student instructor rows, own-subscription Student Plan
+   scoping, and revocation of direct browser access to internal helpers.
    It is additive and does not delete business rows. Existing Instructors
    preserve name/contact/home branch/status and gain an empty profile. Run
-   SQL v9 (rather than stopping at v8) before using rich Instructor profiles
-   or Instructor roster editing from the deployed app. If the new app reaches
-   an older
+   SQL v10 (rather than stopping at v9) before using the deployed 1.8.1 app.
+   If the new app reaches an older
    database, supported older sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and a queued one-month operation
    may need to be discarded and re-entered after the SQL upgrade.
@@ -515,7 +533,7 @@ rule), keeping it idempotent and non-destructive.
 
 ## Verification
 
-- The Node suite in `npm test` includes 38 checks: security configuration,
+- The Node suite in `npm test` includes 39 checks: security configuration and the SQL role-boundary contract,
   billing and subscription dates/lifecycle/MRR/money, Instructor profile
   normalization, attendance, sync
   coalescing/dependency waves (including source-before-renewal),
@@ -585,8 +603,18 @@ rule), keeping it idempotent and non-destructive.
   student branch move, profile sync persistence and idempotent rerun; a
   separate SQL v8 → v9 simulation passes 6 checks preserving an existing
   Instructor while adding the empty profile and allowing a later rich
-  update. Those harnesses are not shipped and are not live Supabase UAT.
-- Production UAT still required after running SQL v9 in the real project:
+  update. A dedicated SQL v10 adversarial role harness passes **79/79**
+  checks as the `authenticated` database role: Instructor/Student context
+  and snapshot field/record minimization, selected-branch Admin scope,
+  bootstrap non-escalation for linked accounts, direct-RPC and sync denial
+  for access administration, Student/Instructor/Branch/Batch/Plan/
+  Membership/Payment/Admission writes outside each role, other-batch
+  roster/attendance denial, enrolled-only attendance, internal-helper and
+  direct-table denial, and idempotent rerun. The SQL v10 roster/profile
+  harness still passes 24/24, and v9 → v10 and v8 → v10 upgrade simulations
+  pass 7/7 and 6/6. Those harnesses are not shipped and are not live
+  Supabase UAT.
+- Production UAT still required after running SQL v10 in the real project:
   sign in as Owner and wait for **Online · synced**; save Payment setup as
   Owner/Co-owner; go offline and mark attendance + record a payment; verify
   the close warning, reconnect and verify automatic sync and one receipt
@@ -601,7 +629,9 @@ rule), keeping it idempotent and non-destructive.
   verify a branch Admin cannot confirm outside assigned branches, confirm
   into the correct branch, verify the applicant opens the Student portal,
   and verify an Instructor's roster/snapshot does not expose Medical /
-  Physical issue or a candidate's private fields; edit that Instructor's
+  Physical issue or any enrolled/candidate private fields, and a Student
+  cannot see another student, an unrelated Plan or assigned-instructor
+  contact/profile fields; edit that Instructor's
   bio/specialties/qualifications/experience/joining date, sign in as the
   Instructor, add/remove a same-branch active student in an assigned batch,
   fill the batch to capacity, confirm another Instructor's batch, inactive

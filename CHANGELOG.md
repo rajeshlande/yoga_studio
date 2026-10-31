@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.8.1 — 2026-10-31
+
+### Security — Fixed-role authorization hardening (SQL v10)
+
+- **Instructor snapshots are identity-only for students.** SQL v10 now sends
+  an Instructor only name, branch, status and joining information for both
+  enrolled students and same-branch roster candidates. Phone, email, gender,
+  date of birth, address/PIN, notes, admission/referral/experience/reason and
+  Medical / Physical issue stay blank unless the caller is Owner/Co-owner, an
+  Admin of the student's branch, or the student themselves. The Instructor's
+  narrow assigned-batch roster and attendance rights are unchanged; Student
+  records, batch settings, subscriptions, payments, Instructor profiles and
+  role access remain outside that role.
+- **Student snapshots expose no other person or unrelated Plan.** An assigned
+  instructor is now display-name-only for a Student: branch, phone, email,
+  bio, specialties, qualifications, experience, joining date and status are
+  blank. Plan rows are limited to Plans referenced by that student's own
+  subscriptions/passes. Other students, other memberships/payments and
+  unassigned batches were already excluded and are regression-tested.
+- **Internal helpers are no longer RPCs.** Browser execution is explicitly
+  revoked for `erp_current_org`, `erp_my_roles`, `erp_can_manage`,
+  `erp_my_instructor_id`, `erp_my_student_id`, `erp__require_org`,
+  `erp__require_manager` and the audit-writing `erp__log`; every SQL function
+  is either an application-facing authenticated RPC or explicitly revoked.
+  The signed-in Portal selector is also locked to the server-returned role;
+  only the separate device-only local mode keeps a presentation-only preview.
+
+### Database migration — SQL v10 (includes SQL v9–v5)
+
+- Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
+  Editor; do not stop at SQL v9. SQL v10 is cumulative and changes snapshot
+  field visibility plus function grants only; it does not delete or rewrite
+  business rows. Authorization is re-checked by the snapshot, direct RPCs
+  and `erp_sync_push`, following Odoo's default-deny group/record-rule model:
+  Owner is organization-wide, Co-owner is all-branch without Owner/Co-owner
+  administration, Admin is selected-branch only, Instructor is
+  assigned-batch only, and Student is own-document/read-only.
+
+### Validation
+
+- A new ephemeral PGlite adversarial role harness passes **79/79** checks as
+  the `authenticated` database role, covering Instructor/Student snapshot
+  minimization, Admin branch scope, linked-account bootstrap non-escalation,
+  direct and offline-sync write denial, enrolled-only attendance,
+  internal-helper/direct-table denial and idempotent rerun. SQL v10
+  roster/profile checks pass **24/24**; v9 → v10 and v8 → v10 simulations
+  pass **7/7** and **6/6**. A shipped Node contract test prevents internal
+  helpers from being re-granted in a future SQL edit. Live Supabase UAT with
+  all five roles remains required after running SQL v10.
+
 ## 1.8.0 — 2026-10-31
 
 ### Added — Rich Instructor profiles and assigned-batch roster editing

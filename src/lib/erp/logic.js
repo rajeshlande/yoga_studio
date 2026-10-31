@@ -23,7 +23,7 @@ export const ROLES = [
 /**
  * Instructor records are operational profiles, not only sign-in links. Keep
  * the optional teaching profile bounded and predictable across the local
- * store, offline queue and SQL v9 RPCs.
+ * store, offline queue and SQL RPCs.
  */
 export function normalizeInstructorProfile(record = {}) {
   const rawSpecialties = Array.isArray(record.specialties)

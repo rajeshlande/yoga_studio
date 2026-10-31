@@ -547,14 +547,20 @@ function SyncControls({data, erp, mode}) {
 }
 
 export function ErpToolbar({data, ctx, setCtx, mode, remoteContext, erp}) {
-  const roles = mode === 'supabase' && remoteContext?.roles?.length
-    ? ROLES.filter(r => remoteContext.roles.includes(r.id))
+  const roles = mode === 'supabase'
+    ? ROLES.filter(r => remoteContext?.roles?.includes(r.id))
     : ROLES;
+  const roleLocked = mode === 'supabase' && roles.length <= 1;
+  const pendingRoleLabel = remoteContext && !remoteContext.organizationId
+    ? 'No ERP role linked'
+    : 'Checking access…';
   const set = patch => setCtx(prev => ({...prev, ...patch}));
   return <div className="erp-toolbar" aria-label="ERP filters">
     <label>Portal
-      <select aria-label="Portal role" value={ctx.role} onChange={e => set({role: e.target.value})}>
-        {roles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+      <select aria-label="Portal role" value={roles.some(r => r.id === ctx.role) ? ctx.role : (roles[0]?.id || '')} disabled={roleLocked} onChange={e => set({role: e.target.value})}>
+        {roles.length
+          ? roles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)
+          : <option value="">{pendingRoleLabel}</option>}
       </select>
     </label>
     <label>Branch
@@ -1130,7 +1136,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v9) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v10) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>

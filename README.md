@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
 INR payments, payment setup and one-page A4 invoice PDFs.
 
-> **Current source release:** 1.8.0 · **Database setup:** SQL v9 in
+> **Current source release:** 1.8.1 · **Database setup:** SQL v10 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -111,14 +111,19 @@ into the application.
     or other branches.
   - **Instructor:** own linked batches, rosters and attendance only. They
     may add/remove existing active same-branch students in those batches,
-    but cannot create/edit Student records, change batch settings/capacity,
-    see fees/payments, set up Instructor profiles or administer access.
+    but the server sends only roster identity fields—not student contact,
+    address, admission or medical details—and they cannot create/edit
+    Student records, change batch settings/capacity, see fees/payments,
+    set up Instructor profiles or administer access.
   - **Student:** a personal, view-only dashboard for their assigned batches,
     next classes, attendance, subscription lifecycle/next renewal, dues,
     payments and invoices. Students can open their own subscription history
     but cannot pause, cancel or renew it. The
     Student portal does not show studio rosters/class counts, sync badges or
-    **Sync now**, or the **Studio ERP data** settings panel.
+    **Sync now**, or the **Studio ERP data** settings panel. Its server
+    snapshot contains no other student, no instructor contact/profile fields
+    beyond the assigned teacher's display name, and no Plan except one used
+    by that student's own subscription/pass.
 - **In-app role access:** after a person creates and confirms a Supabase
   account and does not create their own organization, an authorized manager
   links that exact sign-in email. Use **Access** for Co-owner, branch Admin
@@ -348,7 +353,7 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v9 without deleting business rows.
+   earlier ERP installs to SQL v10 without deleting business rows.
 3. Configure the production Site URL for
    `https://rajeshlande.github.io/yoga_studio/` and add the scoped redirect
    pattern `https://rajeshlande.github.io/yoga_studio/**` so email links can
@@ -483,11 +488,13 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v9 in the real Supabase project, test real Owner, Co-owner,
+running SQL v10 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
 confirmed email; submit and confirm a public admission from a fresh
 account and verify branch scope, Student portal access and Instructor
-medical-field redaction; edit an Instructor's rich profile as each manager
+student-field redaction; verify a Student cannot see another student, an
+unrelated Plan or an assigned instructor's contact/profile fields; edit an
+Instructor's rich profile as each manager
 type; as that Instructor add/remove a same-branch active student in an
 assigned batch and confirm capacity plus other-batch/other-branch denials;
 verify the role-aware Profile for each role; verify other branch and
@@ -516,16 +523,16 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.8.0:
+Recommended go-live order for 1.8.1:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` to install **SQL v9**.
-   SQL v9 is cumulative: it includes the v5–v8 role, admission, subscription
-   and Plan-template work, adds bounded Instructor profile fields, and adds
-   server-side assigned-batch roster authorization for Instructors. Existing
-   Instructor rows keep name/contact/home branch/status and gain an empty
-   teaching profile. Run SQL v9 instead of stopping at v8.
-3. Deploy the 1.8.0 web build with the two public Actions secrets.
+2. Run the complete current `supabase/erp_setup.sql` to install **SQL v10**.
+   SQL v10 is cumulative: it includes the v5–v9 role, admission, subscription,
+   Plan-template, Instructor-profile and roster work, then tightens the
+   snapshots/RPC surface to least privilege. Existing Instructor rows keep
+   name/contact/home branch/status and gain an empty teaching profile if they
+   do not already have one. Run SQL v10 instead of stopping at v9.
+3. Deploy the 1.8.1 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.
@@ -564,6 +571,8 @@ the diff, and only then commit, push and deploy through the approved process.
 - No gateway secret or webhook secret is requested, stored or bundled.
 - Business-table access is through approved RPCs with per-call organization
   and role checks; tables are RLS-locked without browser table grants.
+  Internal authorization/context/audit helper functions are not granted to
+  browser roles, and role snapshots blank fields a role does not need.
 - Signed-in offline data is namespaced by user and organization. Use trusted
   devices, sign out on shared devices, and remove/reset the offline copy
   when appropriate after sync.
