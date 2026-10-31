@@ -1,10 +1,11 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 7.
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 8.
 -- Matches app version 1.6.0 (safer autosync, GST/UPI invoicing,
 -- Owner/Co-owner payment configuration/readiness checks, Student portal
 -- access, Odoo-style fixed Role Access management for all five roles,
--- account-first public Student admissions with manager confirmation, and
--- native Odoo-style subscription lifecycle and one-click renewals).
+-- account-first public Student admissions with manager confirmation,
+-- native Odoo-style subscription lifecycle and one-click renewals, and
+-- Odoo-style plan templates with a separate one-month-only offering).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -166,8 +167,16 @@ create table if not exists public.erp_plans (
   name text not null,
   amount_paise bigint not null check (amount_paise >= 0),
   duration_months integer not null default 1 check (duration_months between 1 and 24),
+  plan_type text not null default 'subscription'
+    constraint erp_plans_plan_type_check check (plan_type in ('subscription','one_month')),
+  billing_cycle text not null default 'joining'
+    constraint erp_plans_billing_cycle_check check (billing_cycle in ('joining','calendar')),
+  renewal_enabled_default boolean not null default true,
   status text not null default 'active' check (status in ('active','archived')),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint erp_plans_one_month_template_check
+    check (plan_type = 'subscription'
+        or (duration_months = 1 and renewal_enabled_default = false))
 );
 
 create table if not exists public.erp_memberships (
@@ -183,6 +192,8 @@ create table if not exists public.erp_memberships (
   amount_paise bigint not null check (amount_paise >= 0),
   status text not null default 'active'
     constraint erp_memberships_status_check check (status in ('active','paused','cancelled')),
+  offering_type text not null default 'subscription'
+    constraint erp_memberships_offering_type_check check (offering_type in ('subscription','one_month')),
   auto_renew boolean not null default true,
   previous_membership_id uuid references public.erp_memberships(id) on delete restrict,
   renewal_number integer not null default 0
@@ -204,7 +215,12 @@ create table if not exists public.erp_memberships (
         or (status <> 'paused' and paused_from is null and paused_until is null and pause_reason = '')),
   constraint erp_memberships_cancel_state_check
     check ((status = 'cancelled' and cancelled_at is not null)
-        or (status <> 'cancelled' and cancelled_at is null and cancel_reason = ''))
+        or (status <> 'cancelled' and cancelled_at is null and cancel_reason = '')),
+  constraint erp_memberships_one_month_state_check
+    check (offering_type = 'subscription'
+        or (duration_months = 1 and auto_renew = false
+            and previous_membership_id is null and renewal_number = 0
+            and total_paused_days = 0 and status <> 'paused'))
 );
 
 create table if not exists public.erp_payments (
@@ -491,6 +507,57 @@ create unique index if not exists erp_memberships_one_live_renewal_idx
   where previous_membership_id is not null and status <> 'cancelled';
 create index if not exists erp_memberships_org_status_end_idx
   on public.erp_memberships(org_id, status, end_date);
+
+-- ----------------------------------------------------------------------------
+-- Odoo-style plan templates and one-month-only offerings (SQL v8). Existing
+-- Plans and periods backfill as subscriptions, preserving every agreed
+-- amount/date. A Plan now carries its template billing period/alignment and
+-- renewal default. Each membership snapshots offering_type at creation, so
+-- editing a template later cannot convert an existing period. One-month
+-- passes use the same dues/payment records but cannot pause or renew.
+-- ----------------------------------------------------------------------------
+alter table public.erp_plans add column if not exists plan_type text not null default 'subscription';
+alter table public.erp_plans add column if not exists billing_cycle text not null default 'joining';
+alter table public.erp_plans add column if not exists renewal_enabled_default boolean not null default true;
+alter table public.erp_memberships add column if not exists offering_type text not null default 'subscription';
+
+update public.erp_plans
+   set plan_type = 'subscription'
+ where plan_type is null or plan_type not in ('subscription','one_month');
+update public.erp_plans
+   set billing_cycle = 'joining'
+ where billing_cycle is null or billing_cycle not in ('joining','calendar');
+update public.erp_plans
+   set duration_months = 1, renewal_enabled_default = false
+ where plan_type = 'one_month'
+   and (duration_months <> 1 or renewal_enabled_default is distinct from false);
+update public.erp_memberships
+   set offering_type = 'subscription'
+ where offering_type is null or offering_type not in ('subscription','one_month');
+
+alter table public.erp_plans drop constraint if exists erp_plans_plan_type_check;
+alter table public.erp_plans add constraint erp_plans_plan_type_check
+  check (plan_type in ('subscription','one_month'));
+alter table public.erp_plans drop constraint if exists erp_plans_billing_cycle_check;
+alter table public.erp_plans add constraint erp_plans_billing_cycle_check
+  check (billing_cycle in ('joining','calendar'));
+alter table public.erp_plans drop constraint if exists erp_plans_one_month_template_check;
+alter table public.erp_plans add constraint erp_plans_one_month_template_check
+  check (plan_type = 'subscription'
+      or (duration_months = 1 and renewal_enabled_default = false));
+alter table public.erp_memberships drop constraint if exists erp_memberships_offering_type_check;
+alter table public.erp_memberships add constraint erp_memberships_offering_type_check
+  check (offering_type in ('subscription','one_month'));
+alter table public.erp_memberships drop constraint if exists erp_memberships_one_month_state_check;
+alter table public.erp_memberships add constraint erp_memberships_one_month_state_check
+  check (offering_type = 'subscription'
+      or (duration_months = 1 and auto_renew = false
+          and previous_membership_id is null and renewal_number = 0
+          and total_paused_days = 0 and status <> 'paused'));
+create index if not exists erp_plans_org_type_status_idx
+  on public.erp_plans(org_id, plan_type, status);
+create index if not exists erp_memberships_org_offering_status_end_idx
+  on public.erp_memberships(org_id, offering_type, status, end_date);
 
 create or replace function public.erp__touch_sync()
 returns trigger language plpgsql as $$
@@ -970,7 +1037,9 @@ begin
             or (v_student is not null and a.student_id = v_student))),
     'plans', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', id, 'name', name, 'amountPaise', amount_paise,
-        'durationMonths', duration_months, 'status', status, 'createdAt', created_at, 'updatedAt', updated_at, 'syncVersion', sync_version)
+        'durationMonths', duration_months, 'planType', plan_type,
+        'billingCycle', billing_cycle, 'renewalEnabledDefault', renewal_enabled_default,
+        'status', status, 'createdAt', created_at, 'updatedAt', updated_at, 'syncVersion', sync_version)
         order by created_at), '[]')
       from public.erp_plans where org_id = v_org
         and (v_org_mgr or cardinality(v_admin_branches) > 0 or v_student is not null)),
@@ -978,7 +1047,7 @@ begin
         'id', m.id, 'studentId', m.student_id, 'planId', m.plan_id, 'branchId', m.branch_id,
         'startDate', m.start_date::text, 'endDate', m.end_date::text,
         'billingCycle', m.billing_cycle, 'durationMonths', m.duration_months,
-        'amountPaise', m.amount_paise, 'status', m.status,
+        'amountPaise', m.amount_paise, 'status', m.status, 'offeringType', m.offering_type,
         'autoRenew', m.auto_renew, 'previousMembershipId', coalesce(m.previous_membership_id::text, ''),
         'renewalNumber', m.renewal_number, 'pausedFrom', coalesce(m.paused_from::text, ''),
         'pausedUntil', coalesce(m.paused_until::text, ''), 'pauseReason', m.pause_reason,
@@ -2586,28 +2655,60 @@ end $$;
 
 create or replace function public.erp_save_plan(p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_org uuid; v_id uuid;
+declare
+  v_org uuid;
+  v_id uuid;
+  v_current public.erp_plans%rowtype;
+  v_plan_type text;
+  v_billing_cycle text;
+  v_renewal_default boolean;
+  v_status text;
+  v_months integer;
+  v_amount bigint;
 begin
   v_org := public.erp__require_org_manager();
   v_id := nullif(p_payload->>'id', '')::uuid;
   if nullif(trim(p_payload->>'name'), '') is null then raise exception 'VALIDATION_FAILED: name'; end if;
+  if v_id is not null then
+    select * into v_current from public.erp_plans where id = v_id and org_id = v_org for update;
+    if not found then raise exception 'FORBIDDEN'; end if;
+  end if;
+  v_plan_type := coalesce(nullif(p_payload->>'planType', ''), v_current.plan_type, 'subscription');
+  v_billing_cycle := coalesce(nullif(p_payload->>'billingCycle', ''), v_current.billing_cycle, 'joining');
+  v_status := coalesce(nullif(p_payload->>'status', ''), v_current.status, 'active');
+  v_amount := coalesce(nullif(p_payload->>'amountPaise', '')::bigint, v_current.amount_paise, 0);
+  v_months := case
+    when v_plan_type = 'one_month' then 1
+    else coalesce(nullif(p_payload->>'durationMonths', '')::integer, v_current.duration_months, 1)
+  end;
+  v_renewal_default := case
+    when v_plan_type = 'one_month' then false
+    when p_payload ? 'renewalEnabledDefault' then coalesce(nullif(p_payload->>'renewalEnabledDefault', '')::boolean, coalesce(v_current.renewal_enabled_default, true))
+    else coalesce(v_current.renewal_enabled_default, true)
+  end;
+  if v_plan_type not in ('subscription','one_month')
+     or v_billing_cycle not in ('joining','calendar')
+     or v_status not in ('active','archived')
+     or v_months < 1 or v_months > 24 or v_amount < 0 then
+    raise exception 'VALIDATION_FAILED: plan template';
+  end if;
   if v_id is null then
-    insert into public.erp_plans(org_id, name, amount_paise, duration_months)
-    values (v_org, trim(p_payload->>'name'),
-            coalesce(nullif(p_payload->>'amountPaise', '')::bigint, 0),
-            coalesce(nullif(p_payload->>'durationMonths', '')::integer, 1))
+    insert into public.erp_plans(org_id, name, amount_paise, duration_months,
+      plan_type, billing_cycle, renewal_enabled_default, status)
+    values (v_org, trim(p_payload->>'name'), v_amount, v_months,
+      v_plan_type, v_billing_cycle, v_renewal_default, v_status)
     returning id into v_id;
   else
     update public.erp_plans set name = trim(p_payload->>'name'),
-      amount_paise = coalesce(nullif(p_payload->>'amountPaise', '')::bigint, amount_paise),
-      duration_months = coalesce(nullif(p_payload->>'durationMonths', '')::integer, duration_months)
+      amount_paise = v_amount, duration_months = v_months,
+      plan_type = v_plan_type, billing_cycle = v_billing_cycle,
+      renewal_enabled_default = v_renewal_default, status = v_status
      where id = v_id and org_id = v_org;
     if not found then raise exception 'FORBIDDEN'; end if;
   end if;
   perform public.erp__log(v_org, 'save', 'plan', v_id);
   return jsonb_build_object('id', v_id);
 end $$;
-
 create or replace function public.erp_save_membership(p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -2617,6 +2718,7 @@ declare
   v_current public.erp_memberships%rowtype;
   v_source public.erp_memberships%rowtype;
   v_status text; v_auto_renew boolean; v_previous uuid; v_renewal_number integer;
+  v_plan_type text; v_offering_type text;
   v_paused_from date; v_paused_until date; v_pause_reason text;
   v_total_paused_days integer; v_cancelled_at timestamptz; v_cancel_reason text;
   v_existing_child uuid; v_is_new boolean;
@@ -2632,7 +2734,7 @@ begin
   v_branch := v_student_branch;
   if v_branch is null then raise exception 'FORBIDDEN'; end if;
   perform public.erp__require_branch_manager(v_org, v_student_branch);
-  select duration_months, amount_paise into v_months, v_amount
+  select duration_months, amount_paise, plan_type into v_months, v_amount, v_plan_type
     from public.erp_plans where id = v_plan and org_id = v_org;
   if v_months is null or v_start is null then raise exception 'VALIDATION_FAILED: planId/startDate'; end if;
   v_months := coalesce(nullif(p_payload->>'durationMonths', '')::integer, v_months);
@@ -2648,6 +2750,20 @@ begin
     if not found then raise exception 'FORBIDDEN'; end if;
     perform public.erp__require_branch_manager(v_org, v_current.branch_id);
   end if;
+
+  v_offering_type := coalesce(
+    v_current.offering_type,
+    nullif(p_payload->>'offeringType', ''),
+    v_plan_type,
+    'subscription');
+  if v_offering_type not in ('subscription','one_month') then
+    raise exception 'VALIDATION_FAILED: offeringType';
+  end if;
+  if v_is_new and nullif(p_payload->>'offeringType', '') is not null
+     and nullif(p_payload->>'offeringType', '') is distinct from v_plan_type then
+    raise exception 'VALIDATION_FAILED: offeringType/planType';
+  end if;
+  if v_offering_type = 'one_month' then v_months := 1; end if;
 
   v_status := coalesce(nullif(p_payload->>'status', ''), v_current.status, 'active');
   if v_status not in ('active','paused','cancelled') then
@@ -2671,6 +2787,17 @@ begin
     nullif(p_payload->>'totalPausedDays', '')::integer, v_current.total_paused_days, 0);
   v_cancelled_at := nullif(p_payload->>'cancelledAt', '')::timestamptz;
   v_cancel_reason := left(trim(coalesce(p_payload->>'cancelReason', '')), 500);
+  if v_offering_type = 'one_month' then
+    if v_previous is not null then
+      raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_RENEWAL';
+    end if;
+    if v_status = 'paused' then
+      raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_PAUSE';
+    end if;
+    v_auto_renew := false;
+    v_renewal_number := 0;
+    v_total_paused_days := 0;
+  end if;
   if v_renewal_number < 0 or v_renewal_number > 10000
      or v_total_paused_days < 0 or v_total_paused_days > 3660 then
     raise exception 'VALIDATION_FAILED: subscription lifecycle';
@@ -2700,6 +2827,13 @@ begin
       raise exception 'FORBIDDEN';
     end if;
     perform public.erp__require_branch_manager(v_org, v_source.branch_id);
+    if v_source.offering_type = 'one_month' then
+      raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_RENEWAL';
+    end if;
+    if v_plan_type = 'one_month'
+       and (v_is_new or v_current.previous_membership_id is distinct from v_previous) then
+      raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_RENEWAL';
+    end if;
     if v_source.status = 'cancelled'
        and (v_is_new or v_current.previous_membership_id is distinct from v_previous) then
       raise exception 'VALIDATION_FAILED: SUBSCRIPTION_CANCELLED';
@@ -2740,17 +2874,18 @@ begin
   if v_is_new then
     insert into public.erp_memberships(
       org_id, student_id, plan_id, branch_id, start_date, end_date,
-      billing_cycle, duration_months, amount_paise, status, auto_renew,
+      billing_cycle, duration_months, amount_paise, status, offering_type, auto_renew,
       previous_membership_id, renewal_number, paused_from, paused_until,
       pause_reason, total_paused_days, cancelled_at, cancel_reason)
     values (v_org, v_student, v_plan, v_branch, v_start, v_end, v_cycle, v_months,
-      v_amount, v_status, v_auto_renew, v_previous, v_renewal_number, v_paused_from,
+      v_amount, v_status, v_offering_type, v_auto_renew, v_previous, v_renewal_number, v_paused_from,
       v_paused_until, v_pause_reason, v_total_paused_days, v_cancelled_at, v_cancel_reason)
     returning id into v_id;
   else
     update public.erp_memberships set student_id = v_student, plan_id = v_plan, branch_id = v_branch,
       start_date = v_start, end_date = v_end, billing_cycle = v_cycle,
       duration_months = v_months, amount_paise = v_amount, status = v_status,
+      offering_type = v_offering_type,
       auto_renew = v_auto_renew, previous_membership_id = v_previous,
       renewal_number = v_renewal_number, paused_from = v_paused_from,
       paused_until = v_paused_until, pause_reason = v_pause_reason,
@@ -3259,6 +3394,11 @@ declare
   v_id uuid := nullif(v_payload->>'id', '')::uuid;
   v_base integer := coalesce(nullif(p_op->>'baseVersion', '')::integer, 0);
   v_status text := coalesce(nullif(v_payload->>'status', ''), 'active');
+  v_plan_type text;
+  v_billing_cycle text;
+  v_renewal_default boolean;
+  v_months integer;
+  v_amount bigint;
   v_current public.erp_plans%rowtype;
   v_version integer;
 begin
@@ -3267,6 +3407,25 @@ begin
   end if;
   if v_status not in ('active','archived') then raise exception 'VALIDATION_FAILED: status'; end if;
   select * into v_current from public.erp_plans where id = v_id for update;
+  v_plan_type := coalesce(nullif(v_payload->>'planType', ''), v_current.plan_type, 'subscription');
+  v_billing_cycle := coalesce(nullif(v_payload->>'billingCycle', ''), v_current.billing_cycle, 'joining');
+  v_status := coalesce(nullif(v_payload->>'status', ''), v_current.status, 'active');
+  v_amount := coalesce(nullif(v_payload->>'amountPaise', '')::bigint, v_current.amount_paise, 0);
+  v_months := case
+    when v_plan_type = 'one_month' then 1
+    else coalesce(nullif(v_payload->>'durationMonths', '')::integer, v_current.duration_months, 1)
+  end;
+  v_renewal_default := case
+    when v_plan_type = 'one_month' then false
+    when v_payload ? 'renewalEnabledDefault' then coalesce(nullif(v_payload->>'renewalEnabledDefault', '')::boolean, coalesce(v_current.renewal_enabled_default, true))
+    else coalesce(v_current.renewal_enabled_default, true)
+  end;
+  if v_plan_type not in ('subscription','one_month')
+     or v_billing_cycle not in ('joining','calendar')
+     or v_status not in ('active','archived')
+     or v_months < 1 or v_months > 24 or v_amount < 0 then
+    raise exception 'VALIDATION_FAILED: plan template';
+  end if;
   if v_current.id is not null then
     if v_current.org_id <> p_org then
       return public.erp__sync_result(p_op, 'conflict', v_id, null, 'ID_IN_USE', 'That record ID is already in use.');
@@ -3275,19 +3434,19 @@ begin
       return public.erp__sync_result(p_op, 'conflict', v_id, v_current.sync_version, 'VERSION_CONFLICT', 'This plan changed in Supabase after it was copied to this device.');
     end if;
     update public.erp_plans set
-      name = trim(v_payload->>'name'),
-      amount_paise = coalesce(nullif(v_payload->>'amountPaise', '')::bigint, amount_paise),
-      duration_months = coalesce(nullif(v_payload->>'durationMonths', '')::integer, duration_months),
+      name = trim(v_payload->>'name'), amount_paise = v_amount,
+      duration_months = v_months, plan_type = v_plan_type,
+      billing_cycle = v_billing_cycle, renewal_enabled_default = v_renewal_default,
       status = v_status
      where id = v_id returning sync_version into v_version;
   else
     if v_base > 0 then
       return public.erp__sync_result(p_op, 'conflict', null, null, 'RECORD_MISSING', 'This plan no longer exists in Supabase.');
     end if;
-    insert into public.erp_plans(id, org_id, name, amount_paise, duration_months, status)
-    values (v_id, p_org, trim(v_payload->>'name'),
-            coalesce(nullif(v_payload->>'amountPaise', '')::bigint, 0),
-            coalesce(nullif(v_payload->>'durationMonths', '')::integer, 1), v_status)
+    insert into public.erp_plans(id, org_id, name, amount_paise, duration_months,
+      plan_type, billing_cycle, renewal_enabled_default, status)
+    values (v_id, p_org, trim(v_payload->>'name'), v_amount, v_months,
+      v_plan_type, v_billing_cycle, v_renewal_default, v_status)
     returning sync_version into v_version;
   end if;
   return public.erp__sync_result(p_op, 'applied', v_id, v_version);
@@ -3313,6 +3472,8 @@ declare
   v_child public.erp_memberships%rowtype;
   v_version integer;
   v_student_branch uuid;
+  v_plan_type text;
+  v_offering_type text := nullif(v_payload->>'offeringType', '');
   v_auto_renew boolean := coalesce(nullif(v_payload->>'autoRenew', '')::boolean, true);
   v_previous uuid := nullif(v_payload->>'previousMembershipId', '')::uuid;
   v_renewal_number integer := coalesce(nullif(v_payload->>'renewalNumber', '')::integer, 0);
@@ -3353,11 +3514,29 @@ begin
   v_branch := coalesce(v_branch, v_student_branch);
   perform public.erp__require_branch_manager(p_org, v_student_branch);
   perform public.erp__require_branch_manager(p_org, v_branch);
-  select duration_months, amount_paise into v_months, v_amount
+  select duration_months, amount_paise, plan_type into v_months, v_amount, v_plan_type
     from public.erp_plans where id = v_plan and org_id = p_org;
   if v_months is null then raise exception 'FORBIDDEN'; end if;
+  select * into v_current from public.erp_memberships where id = v_id for update;
+  v_offering_type := coalesce(v_current.offering_type, v_offering_type, v_plan_type, 'subscription');
+  if v_offering_type not in ('subscription','one_month') then
+    raise exception 'VALIDATION_FAILED: offeringType';
+  end if;
+  if v_current.id is null and nullif(v_payload->>'offeringType', '') is not null
+     and nullif(v_payload->>'offeringType', '') is distinct from v_plan_type then
+    raise exception 'VALIDATION_FAILED: offeringType/planType';
+  end if;
   v_months := coalesce(nullif(v_payload->>'durationMonths', '')::integer, v_months);
   v_amount := coalesce(nullif(v_payload->>'amountPaise', '')::bigint, v_amount);
+  if v_offering_type = 'one_month' then
+    if v_previous is not null then raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_RENEWAL'; end if;
+    if v_status = 'paused' then raise exception 'VALIDATION_FAILED: ONE_MONTH_NO_PAUSE'; end if;
+    v_months := 1;
+    v_auto_renew := false;
+    v_renewal_number := 0;
+    v_total_paused_days := 0;
+    v_paused_from := null; v_paused_until := null; v_pause_reason := '';
+  end if;
   if v_months < 1 or v_months > 24 or v_amount < 0 then
     raise exception 'VALIDATION_FAILED: membership terms';
   end if;
@@ -3371,7 +3550,6 @@ begin
     raise exception 'VALIDATION_FAILED: pausedFrom';
   end if;
 
-  select * into v_current from public.erp_memberships where id = v_id for update;
   if v_current.id is not null then
     if v_current.org_id <> p_org then
       return public.erp__sync_result(p_op, 'conflict', v_id, null, 'ID_IN_USE', 'That record ID is already in use.');
@@ -3404,6 +3582,13 @@ begin
     if v_source.student_id <> v_student then
       raise exception 'VALIDATION_FAILED: renewal student';
     end if;
+    if v_source.offering_type = 'one_month' then
+      return public.erp__sync_result(p_op, 'conflict', v_source.id, v_source.sync_version, 'ONE_MONTH_NO_RENEWAL', 'A one-month pass cannot be renewed. Create a new pass or subscription instead.');
+    end if;
+    if v_plan_type = 'one_month'
+       and (v_current.id is null or v_current.previous_membership_id is distinct from v_previous) then
+      return public.erp__sync_result(p_op, 'conflict', v_source.id, v_source.sync_version, 'ONE_MONTH_NO_RENEWAL', 'Choose a subscription plan for a renewal; a one-month-only plan cannot create a renewal period.');
+    end if;
     if v_source.status = 'cancelled'
        and (v_current.id is null or v_current.previous_membership_id is distinct from v_previous) then
       return public.erp__sync_result(p_op, 'conflict', v_source.id, v_source.sync_version, 'SUBSCRIPTION_CANCELLED', 'The previous subscription was cancelled in Supabase, so this renewal cannot follow it.');
@@ -3430,6 +3615,7 @@ begin
       student_id = v_student, plan_id = v_plan, branch_id = v_branch,
       start_date = v_start, end_date = v_end, billing_cycle = v_cycle,
       duration_months = v_months, amount_paise = v_amount, status = v_status,
+      offering_type = v_offering_type,
       auto_renew = v_auto_renew, previous_membership_id = v_previous,
       renewal_number = v_renewal_number, paused_from = v_paused_from,
       paused_until = v_paused_until, pause_reason = v_pause_reason,
@@ -3439,11 +3625,11 @@ begin
   else
     insert into public.erp_memberships(
       id, org_id, student_id, plan_id, branch_id, start_date, end_date,
-      billing_cycle, duration_months, amount_paise, status, auto_renew,
+      billing_cycle, duration_months, amount_paise, status, offering_type, auto_renew,
       previous_membership_id, renewal_number, paused_from, paused_until,
       pause_reason, total_paused_days, cancelled_at, cancel_reason)
     values (v_id, p_org, v_student, v_plan, v_branch, v_start, v_end, v_cycle,
-      v_months, v_amount, v_status, v_auto_renew, v_previous, v_renewal_number,
+      v_months, v_amount, v_status, v_offering_type, v_auto_renew, v_previous, v_renewal_number,
       v_paused_from, v_paused_until, v_pause_reason, v_total_paused_days,
       v_cancelled_at, v_cancel_reason)
     returning sync_version into v_version;

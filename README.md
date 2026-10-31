@@ -2,9 +2,9 @@
 
 A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
-INR fees, payment setup and themed invoice PDFs.
+INR payments, payment setup and themed invoice PDFs.
 
-> **Current source release:** 1.6.0 · **Database setup:** SQL v7 in
+> **Current source release:** 1.7.0 · **Database setup:** SQL v8 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -60,25 +60,39 @@ into the application.
   profile details, joining date, batches, attendance history/percentage,
   search and CSV export.
 - Instructor records and recurring batches with weekdays, start time,
-  duration, capacity and roster management.
+  duration, capacity and roster management. Managers manage them from
+  **Branches & batches → Batches** and **Branches & batches → Instructor
+  profiles**; Instructors and Students keep their standalone assigned-batch
+  view.
 - Attendance by date and batch using **Present**, **Absent** and **Late**,
   including mark-all-present, history and CSV export.
-- INR fee plans as reusable subscription templates, with each subscription
-  period using either calendar-month or joining-date billing.
-- **Native Odoo-style subscriptions:** active, scheduled, paused, expired and
-  cancelled lifecycle views; pause/resume with the elapsed pause days added
-  to the end date; cancellation reasons; renewal-enabled tracking and next
-  renewal dates; linked renewal history; and a Fees summary for active and
-  paused subscriptions, renewals due and monthly recurring revenue.
+- INR fee plans as reusable Odoo-style templates in **Subscriptions → Plans**.
+  A template now records its type (**Subscription** or **One-month only**),
+  price, billing period in months, default calendar-month/joining-date
+  alignment, renewal-tracking default and Active/Archived status.
+- **Native Odoo-style subscriptions:** the top-level **Subscriptions** menu
+  contains **Subscriptions & dues**, **One-month passes** and **Plans**.
+  Subscriptions have active, scheduled, paused, expired and cancelled
+  lifecycle views; pause/resume with the elapsed pause days added to the end
+  date; cancellation reasons; renewal-enabled tracking and next renewal
+  dates; linked renewal history; and a summary for active and paused
+  subscriptions, renewals due and monthly recurring revenue.
 - **One-click renewal:** a manager creates the next linked period at the
   current Plan price and duration, starting the day after the current end
   date (or today if already expired). The old period keeps its agreed amount,
   payments and receipts. Only one live renewal can follow a period; a
   cancelled future renewal can be replaced. A period must be resumed before
   renewal, and cannot be paused while a live renewal already follows it.
+- **One-month-only passes:** a one-month Plan creates a distinct single fixed
+  month shown separately under **Subscriptions → One-month passes**. It has
+  its own dues, invoice and payment, but no Pause, Renew, History, renewal
+  date or MRR contribution.
 - Subscription price snapshots for existing periods, partial payments, dues
   and CSV payment exports. Payments and due invoices remain available for
   paused, scheduled and expired periods, but not cancelled subscriptions.
+- The top-level **Payments** menu contains payment history, **Record
+  payment**, paid/due invoice PDFs and **Payment setup**. The payment form
+  can collect against either a subscription period or a one-month pass.
 - Append-only payments. A synced payment is corrected with an audited void
   and a required reason; it is never silently edited or deleted.
 - Fixed, server-enforced role portals (Odoo-inspired security groups plus
@@ -104,7 +118,7 @@ into the application.
   account and does not create their own organization, an authorized manager
   links that exact sign-in email. Use **Access** for Co-owner, branch Admin
   and Instructor roles, and **Students → Portal access** for a Student.
-  Instructor profile setup in **Batches → Instructor profiles** and
+  Instructor profile setup in **Branches & batches → Instructor profiles** and
   Instructor Portal grants/removals are limited to the Owner, a Co-owner or
   an Admin acting within their assigned branches. Manual membership SQL is
   an emergency-repair fallback only.
@@ -198,7 +212,7 @@ uploads its data automatically.
 
 ## Payments, GST and invoice PDFs
 
-Open **Fees → Payment setup** as an Owner or Co-owner to configure:
+Open **Payments → Payment setup** as an Owner or Co-owner to configure:
 
 - billing legal name, address, city, state/PIN, email, phone, invoice prefix,
   due-days and invoice terms;
@@ -254,7 +268,7 @@ theme. The in-app filename/title uses the invoice/receipt reference.
   GSTIN, SAC/HSN or tax split.
 - With GST on and GST-inclusive prices, tax is back-calculated from the fee.
 - With GST on and GST-exclusive prices, tax is added to the taxable fee and
-  the invoice grand total/QR uses the tax-inclusive payable amount. Fees and
+  the invoice grand total/QR uses the tax-inclusive payable amount. Subscriptions and
   dashboard dues then use those gross payable totals, recorded payments are
   the actual gross cash received, and paid-receipt tax breakups are derived
   from that received amount so GST is never added twice.
@@ -322,7 +336,7 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v7 without deleting business rows.
+   earlier ERP installs to SQL v8 without deleting business rows.
 3. Configure the production Site URL for
    `https://rajeshlande.github.io/yoga_studio/` and add the scoped redirect
    pattern `https://rajeshlande.github.io/yoga_studio/**` so email links can
@@ -366,10 +380,11 @@ them. `.env.local` is ignored by Git.
 ## First-run checklist
 
 1. Confirm the top bar says **Online · synced** in Supabase mode.
-2. Create at least one branch, instructor, fee plan and student.
+2. In **Branches & batches**, create at least one branch and instructor.
 3. Create batches, enroll students and verify attendance.
-4. Assign a subscription/plan to a student.
-5. Complete **Fees → Payment setup**, especially UPI and/or bank receiving
+4. In **Subscriptions → Plans**, create a subscription template and, if
+   needed, a separate One-month only template; assign one to a student.
+5. Complete **Payments → Payment setup**, especially UPI and/or bank receiving
    details and the GST choice that matches your CA's advice.
 6. Generate a due **Invoice PDF** and scan the UPI QR with a small test flow,
    or verify the displayed bank details without sending money.
@@ -385,9 +400,11 @@ them. `.env.local` is ignored by Git.
    account on the next online Retry/Sync.
 10. As a manager in the Student's branch, pause and resume a test
     subscription, renew it after changing the Plan price, and verify the
-    next period uses the new current price. Confirm the Student sees the
-    lifecycle/history but no Pause, Resume, Renew or Cancel controls, and
-    that an Admin from another branch and an Instructor cannot change it.
+    next period uses the new current price. Create a one-month pass and
+    confirm it has Collect/Invoice/Cancel pass only—no Pause, Renew or
+    History. Confirm the Student sees their subscription/pass but no
+    lifecycle controls, and that an Admin from another branch and an
+    Instructor cannot change it.
 
 ## Testing and quality gates
 
@@ -448,13 +465,13 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v7 in the real Supabase project, test real Owner, Co-owner,
+running SQL v8 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
 confirmed email; submit and confirm a public admission from a fresh
 account and verify branch scope, Student portal access and Instructor
 medical-field redaction; verify other branch and own-record scoping; pause,
-resume, renew and cancel test subscriptions as an authorized manager and
-verify the Student view is read-only; run an offline
+resume, renew and cancel test subscriptions, create/collect a one-month
+pass, and verify the Student view is read-only; run an offline
 attendance/payment/subscription cycle and billing-settings sync as an
 authorized manager; and resolve a two-account conflict before operational
 sign-off.
@@ -477,15 +494,15 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.6.0:
+Recommended go-live order for 1.7.0:
 
 1. Back up/verify the Supabase project according to your operational policy.
-2. Run the complete current `supabase/erp_setup.sql` to install **SQL v7**.
-   This is required for fixed Role Access, public admissions and native
-   subscription lifecycle/renewals, and is additive/idempotent for existing
-   ERP data. Run it before using Pause, Resume, Renew or the new cancel
-   workflow from the deployed app.
-3. Deploy the 1.6.0 web build with the two public Actions secrets.
+2. Run the complete current `supabase/erp_setup.sql` to install **SQL v8**.
+   SQL v8 includes all v5–v7 role, admission and subscription work and adds
+   Odoo-style Plan template fields plus each period's snapshotted offering
+   type. Existing Plans/periods backfill as subscriptions without changing
+   amounts or dates. Run it before using a One-month only Plan or pass.
+3. Deploy the 1.7.0 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.
@@ -495,8 +512,8 @@ Recommended go-live order for 1.6.0:
 If the new app reaches an older database, a billing-settings change remains
 queued with a setup-needed message rather than becoming a false conflict,
 and **Access** / **Students → Portal access** / **Admission requests**
-report that SQL v7 is required; run the complete current SQL file and
-reopen/focus the app to resume.
+report that the current SQL setup is required; run the complete current
+SQL file and reopen/focus the app to resume.
 
 ## Versioning and releases
 
@@ -587,7 +604,7 @@ choose a side. Do not clear site data first.
 
 ### An unpaid invoice has no QR code
 
-An Owner or Co-owner must add a valid receiving UPI ID in **Fees → Payment setup**.
+An Owner or Co-owner must add a valid receiving UPI ID in **Payments → Payment setup**.
 Bank details can be shown without UPI, but there is no QR until a UPI ID is
 configured. Paid and void invoices intentionally hide the QR.
 

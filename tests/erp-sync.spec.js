@@ -131,7 +131,7 @@ test('signed-in Supabase mode saves offline, reports a version conflict, and syn
   // student operation depends on the branch, so sync sends it in a later wave.
   syncRequests.length = 0;
   await page.context().setOffline(true);
-  await page.getByRole('button', {name: 'Branches', exact: true}).click();
+  await page.getByRole('button', {name: 'Branches & batches', exact: true}).click();
   await page.getByRole('button', {name: 'Add branch'}).click();
   await page.getByRole('dialog').getByLabel('Branch name').fill('Offline Branch');
   await page.getByRole('button', {name: 'Save branch'}).click();
@@ -396,7 +396,8 @@ test('co-owner can set up instructor profiles and grant instructor portal access
 
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', {name: 'Batches', exact: true}).click();
+  await page.getByRole('button', {name: 'Branches & batches', exact: true}).click();
+  await page.getByRole('tab', {name: 'Instructor profiles'}).click();
   await expect(page.getByRole('heading', {name: 'Instructor profiles'})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Add instructor'})).toBeVisible();
   await page.getByRole('button', {name: 'Portal access'}).click();
@@ -470,11 +471,13 @@ test('branch Admin access page hides organization roles and owner-only setup act
     p_branch_ids: [BRANCH],
   }]);
 
-  await page.getByRole('button', {name: 'Fees', exact: true}).click();
-  await expect(page.getByRole('heading', {name: /Fees & payments/})).toBeVisible();
+  await page.getByRole('button', {name: 'Subscriptions', exact: true}).click();
+  await expect(page.getByRole('heading', {name: /^Subscriptions/, level: 1})).toBeVisible();
   await page.getByRole('tab', {name: 'Plans'}).click();
   await expect(page.getByRole('heading', {name: 'Plans', exact: true})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Add plan'})).toHaveCount(0);
+  await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Payments', exact: true}).click();
   await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
 });
 
@@ -498,7 +501,9 @@ test('signed-in instructor is locked to their linked instructor record', async (
   await page.goto('/');
   await signIn(page);
   await expect(page.getByRole('button', {name: 'Access', exact: true})).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Fees', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Subscriptions', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Payments', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Branches & batches', exact: true})).toHaveCount(0);
   await page.getByRole('button', {name: 'Batches', exact: true}).click();
   await expect(page.getByRole('heading', {name: 'Instructor profiles'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Add instructor'})).toHaveCount(0);
@@ -609,10 +614,10 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByText(/Supabase · Synced|Online · synced/)).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Sync now'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Students', exact: true})).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Branches', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Branches & batches', exact: true})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Access', exact: true})).toHaveCount(0);
   await expect(page.getByRole('heading', {name: 'My assigned batches'})).toBeVisible();
-  await expect(page.getByRole('heading', {name: 'My subscription & fees'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'My subscription & passes'})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Recent attendance'})).toBeVisible();
   await expect(page.getByText('Morning Yoga').first()).toBeVisible();
   await expect(page.getByText('Evening Yoga')).toHaveCount(0);
@@ -635,7 +640,7 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByRole('heading', {name: 'My attendance'})).toBeVisible();
   await expect(page.getByRole('cell', {name: 'Morning Yoga'})).toBeVisible();
 
-  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await page.getByRole('button', {name: 'Subscriptions', exact: true}).click();
   await expect(page.getByRole('heading', {name: 'Subscriptions & dues'})).toBeVisible();
   await expect(page.getByText('Next renewal 1 Jan 2027')).toBeVisible();
   await expect(page.getByRole('tab', {name: 'Payment setup'})).toHaveCount(0);
@@ -647,7 +652,7 @@ test('signed-in student sees a view-only portal for their own records', async ({
   await expect(page.getByRole('button', {name: 'Cancel subscription', exact: true})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'History'})).toBeVisible();
   await expect(page.getByRole('button', {name: /Invoice PDF/})).toBeVisible();
-  await page.getByRole('tab', {name: 'Payments'}).click();
+  await page.getByRole('button', {name: 'Payments', exact: true}).click();
   await expect(page.getByText('YS-2026-0001')).toBeVisible();
   await expect(page.getByRole('button', {name: /Invoice PDF/})).toBeVisible();
 
@@ -1051,7 +1056,7 @@ test('manager pauses, resumes, renews and cancels a subscription at the current 
 
   await page.goto('/');
   await signIn(page);
-  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await page.getByRole('button', {name: 'Subscriptions', exact: true}).click();
   await expect(page.getByRole('heading', {name: 'Subscriptions & dues'})).toBeVisible();
   await expect(page.getByText('Monthly recurring revenue')).toBeVisible();
   let subscriptionRow = page.getByRole('row', {name: /Asha Patil/});
@@ -1162,7 +1167,7 @@ test('payment setup saved offline stays local, warns before close, then auto-syn
 
   await page.context().setOffline(true);
   await expect(page.locator('.connection-badge')).toContainText('Offline · local copy');
-  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await page.getByRole('button', {name: 'Payments', exact: true}).click();
   await page.getByRole('tab', {name: 'Payment setup'}).click();
   await page.getByLabel('UPI ID').fill('offline@okbank');
   await page.getByLabel('UPI payee name').fill('Yoga Studio');

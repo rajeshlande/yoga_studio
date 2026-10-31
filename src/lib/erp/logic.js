@@ -20,6 +20,48 @@ export const ROLES = [
   {id: 'instructor', label: 'Instructor'},
   {id: 'student', label: 'Student'},
 ];
+export const PLAN_TYPES = [
+  {id: 'subscription', label: 'Subscription'},
+  {id: 'one_month', label: 'One-month only (no subscription)'},
+];
+
+export function normalizePlanType(value) {
+  return value === 'one_month' ? 'one_month' : 'subscription';
+}
+
+/**
+ * Odoo separates a recurring plan's billing period/alignment from each
+ * customer's subscription. Yoga keeps those template defaults on the Plan:
+ * billing period in months, joining-date versus calendar alignment, and the
+ * default renewal-tracking behaviour. A one-month-only offering is a fixed
+ * single period, never a renewable subscription.
+ */
+export function normalizePlanTemplate(plan = {}) {
+  const planType = normalizePlanType(plan.planType);
+  const durationMonths = planType === 'one_month'
+    ? 1
+    : Math.min(24, Math.max(1, Math.trunc(Number(plan.durationMonths) || 1)));
+  return {
+    planType,
+    durationMonths,
+    billingCycle: plan.billingCycle === 'calendar' ? 'calendar' : 'joining',
+    renewalEnabledDefault: planType !== 'one_month' && plan.renewalEnabledDefault !== false,
+  };
+}
+
+export function planBillingPeriodLabel(plan = {}) {
+  const template = normalizePlanTemplate(plan);
+  if (template.planType === 'one_month') return 'One month only';
+  return `Every ${template.durationMonths} month${template.durationMonths === 1 ? '' : 's'}`;
+}
+
+export function membershipOfferingType(membership = {}, plan = null) {
+  return normalizePlanType(membership?.offeringType || plan?.planType);
+}
+
+export function isOneMonthMembership(membership = {}, plan = null) {
+  return membershipOfferingType(membership, plan) === 'one_month';
+}
 
 export function uid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -95,6 +137,7 @@ export function subscriptionLifecycle(membership, today = toISODate()) {
 }
 
 export function nextRenewalDate(membership, today = toISODate(), hasRenewal = false) {
+  if (isOneMonthMembership(membership)) return '';
   if (!membership?.endDate || hasRenewal || membership.autoRenew === false) return '';
   if (membership.status === 'paused' || membership.status === 'cancelled') return '';
   return addDaysISO(membership.endDate, 1);
@@ -113,16 +156,24 @@ export function pauseDaysBetween(pausedFrom, resumeDate) {
   return Math.max(0, Math.round((resume - from) / 86400000));
 }
 
-export function normalizeSubscriptionLifecycle(record = {}, cancelledAt = null) {
-  const status = ['active', 'paused', 'cancelled'].includes(record.status) ? record.status : 'active';
+export function normalizeSubscriptionLifecycle(record = {}, cancelledAt = null, offeringTypeValue = '') {
+  const offeringType = normalizePlanType(offeringTypeValue || record.offeringType);
+  const oneMonth = offeringType === 'one_month';
+  const requestedStatus = ['active', 'paused', 'cancelled'].includes(record.status) ? record.status : 'active';
+  const status = oneMonth && requestedStatus === 'paused' ? 'active' : requestedStatus;
   const paused = status === 'paused';
   const cancelled = status === 'cancelled';
-  const totalPausedDays = Math.min(3660, Math.max(0, Math.trunc(Number(record.totalPausedDays) || 0)));
+  const totalPausedDays = oneMonth
+    ? 0
+    : Math.min(3660, Math.max(0, Math.trunc(Number(record.totalPausedDays) || 0)));
   return {
     status,
-    autoRenew: record.autoRenew !== false,
-    previousMembershipId: record.previousMembershipId || '',
-    renewalNumber: Math.min(10000, Math.max(0, Math.trunc(Number(record.renewalNumber) || 0))),
+    offeringType,
+    autoRenew: !oneMonth && record.autoRenew !== false,
+    previousMembershipId: oneMonth ? '' : (record.previousMembershipId || ''),
+    renewalNumber: oneMonth
+      ? 0
+      : Math.min(10000, Math.max(0, Math.trunc(Number(record.renewalNumber) || 0))),
     pausedFrom: paused ? (record.pausedFrom || '') : '',
     pausedUntil: paused ? (record.pausedUntil || '') : '',
     pauseReason: paused ? String(record.pauseReason || '').trim().slice(0, 500) : '',
@@ -134,6 +185,7 @@ export function normalizeSubscriptionLifecycle(record = {}, cancelledAt = null) 
 
 export function monthlyRecurringRevenuePaise(memberships, today = toISODate()) {
   return Math.round((memberships || []).reduce((sum, membership) => {
+    if (isOneMonthMembership(membership)) return sum;
     if (subscriptionLifecycle(membership, today).id !== 'active') return sum;
     const months = Math.max(1, Number(membership.durationMonths) || 1);
     return sum + (Number(membership.amountPaise) || 0) / months;

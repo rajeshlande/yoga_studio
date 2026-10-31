@@ -8,10 +8,11 @@ import {
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
 import QRCode from 'qrcode';
 import {
-  ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, ROLES, attendanceSummary, batchTimeLabel,
-  emptySnapshot, formatDate, formatINR, initials, isBatchOnDate, payableBalance,
-  membershipEnd, monthlyRecurringRevenuePaise, nextRenewalDate, paiseToRupees,
-  pauseDaysBetween, renewalStartDate, rupeesToPaise, subscriptionLifecycle,
+  ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, PLAN_TYPES, ROLES, attendanceSummary, batchTimeLabel,
+  emptySnapshot, formatDate, formatINR, initials, isBatchOnDate, isOneMonthMembership,
+  membershipEnd, membershipOfferingType, monthlyRecurringRevenuePaise, nextRenewalDate,
+  normalizePlanTemplate, normalizePlanType, paiseToRupees, pauseDaysBetween,
+  planBillingPeriodLabel, payableBalance, renewalStartDate, rupeesToPaise, subscriptionLifecycle,
   toCSV, toISODate, addDaysISO,
   INDIA_STATE_CODES, billingReadiness, buildUpiUri, calculateInvoiceTax,
   formatInvoiceINR, normalizeBillingSettings,
@@ -252,6 +253,17 @@ function branchName(data, id) { return data.branches.find(b => b.id === id)?.nam
 function studentName(data, id) { return data.students.find(s => s.id === id)?.fullName || '—'; }
 function instructorName(data, id) { return data.instructors.find(i => i.id === id)?.fullName || 'Not assigned'; }
 function planName(data, id) { return data.plans.find(p => p.id === id)?.name || '—'; }
+function planTypeLabel(plan) {
+  return PLAN_TYPES.find(type => type.id === normalizePlanType(plan?.planType))?.label || 'Subscription';
+}
+function activePlans(data, planType = 'subscription') {
+  return data.plans.filter(plan => plan.status !== 'archived'
+    && normalizePlanType(plan.planType) === planType);
+}
+function membershipKindLabel(data, membership) {
+  const plan = data.plans.find(item => item.id === membership?.planId) || null;
+  return isOneMonthMembership(membership, plan) ? 'One-month pass' : 'Subscription';
+}
 function inBranch(ctx, branchId) { return !ctx.branchId || ctx.branchId === 'all' || ctx.branchId === branchId; }
 function renewalChildByPrevious(data) {
   const byPrevious = new Map();
@@ -299,6 +311,7 @@ function subscriptionChain(data, membership) {
   return chain;
 }
 function subscriptionPeriodLabel(membership) {
+  if (isOneMonthMembership(membership)) return 'One-month pass';
   return Number(membership?.renewalNumber) > 0
     ? `Renewal #${Number(membership.renewalNumber)}`
     : 'Original subscription';
@@ -393,6 +406,8 @@ const SYNC_FIELD_LABELS = {
   firstName: 'First Name', lastName: 'Last Name', admissionSubject: 'Subject',
   referredBy: 'Reference by', yogaExperience: 'Experience in yoga',
   medicalPhysicalIssue: 'Medical / Physical issue', reasonToJoin: 'Reasons to join yoga',
+  planType: 'Plan type', offeringType: 'Offering type',
+  renewalEnabledDefault: 'Renewal enabled by default',
   autoRenew: 'Renewal enabled', previousMembershipId: 'Previous subscription',
   renewalNumber: 'Renewal number', pausedFrom: 'Paused from', pausedUntil: 'Expected resume date',
   pauseReason: 'Pause reason', totalPausedDays: 'Total paused days',
@@ -410,6 +425,10 @@ function syncValue(field, value, data) {
   if (value === null || value === undefined || value === '') return '—';
   if (field === 'amountPaise') return formatINR(value);
   if (field === 'yogaExperience') return yogaExperienceLabel(value);
+  if (field === 'planType' || field === 'offeringType') {
+    return value === 'one_month' ? 'One-month only' : 'Subscription';
+  }
+  if (field === 'billingCycle') return value === 'calendar' ? 'Calendar month' : 'Joining date';
   if (field === 'days' && Array.isArray(value)) return value.map(day => DAY_LABELS[day] || day).join(', ');
   if (field === 'branchId') return branchName(data, value);
   if (field === 'studentId') return studentName(data, value);
@@ -438,7 +457,9 @@ function conflictTitle(data, conflict) {
     return `Payment: ${studentName(data, record.studentId)} · ${formatINR(record.amountPaise)}`;
   }
   if (conflict.op.entity === 'enrollments') return `Enrollment: ${studentName(data, record.studentId)}`;
-  if (conflict.op.entity === 'memberships') return `Subscription: ${studentName(data, record.studentId)}`;
+  if (conflict.op.entity === 'memberships') {
+    return `${record.offeringType === 'one_month' ? 'One-month pass' : 'Subscription'}: ${studentName(data, record.studentId)}`;
+  }
   return fallback;
 }
 
@@ -613,6 +634,10 @@ function StudentDashboardSection(props) {
     || openMembershipEntries[0] || membershipEntries[0];
   const dueTotal = openMembershipEntries.reduce((sum, {bal}) => sum + bal.due, 0);
   const currentLifecycle = currentMembership ? subscriptionLifecycle(currentMembership.m, today) : null;
+  const currentIsOneMonth = currentMembership
+    ? isOneMonthMembership(currentMembership.m, data.plans.find(plan => plan.id === currentMembership.m.planId))
+    : false;
+  const currentKindLabel = currentIsOneMonth ? 'One-month pass' : 'Subscription';
   const renewedMembership = currentMembership ? childByPrevious.get(currentMembership.m.id) : null;
   const currentRenewalDate = currentMembership
     ? nextRenewalDate(currentMembership.m, today, Boolean(renewedMembership))
@@ -683,19 +708,27 @@ function StudentDashboardSection(props) {
 
       <div className="erp-student-columns">
         <section className="erp-panel">
-          <div className="erp-panel-head"><div><h2>My subscription & fees</h2><p>Your current plan, lifecycle, renewal date, balance and recent payments.</p></div>
-            <button className="secondary-button" onClick={() => go('fees')}><Wallet size={15}/> View fees</button></div>
-          {!currentMembership ? <Empty icon={Wallet} title="No subscription yet" text="Your subscription and fee balance will appear here when the studio assigns a plan."/> : <>
+          <div className="erp-panel-head"><div><h2>My subscription & passes</h2><p>Your current plan or one-month pass, balance and recent payments.</p></div>
+            <button className="secondary-button" onClick={() => go('subscriptions')}><Wallet size={15}/> View subscriptions</button></div>
+          {!currentMembership ? <Empty icon={Wallet} title="No subscription or pass yet" text="Your subscription, one-month pass and balance will appear here when the studio assigns a plan."/> : <>
             <div className="erp-student-detail-grid">
-              <div><small>Plan</small><strong>{planName(data, currentMembership.m.planId)}</strong></div>
+              <div><small>Plan</small><strong>{planName(data, currentMembership.m.planId)} · {currentKindLabel}</strong></div>
               <div><small>Status</small><strong>{currentLifecycle?.label || 'Active'}</strong></div>
               <div><small>Period</small><strong>{formatDate(currentMembership.m.startDate)} → {formatDate(currentMembership.m.endDate)}</strong></div>
-              <div><small>Next renewal</small><strong>{renewedMembership ? formatDate(renewedMembership.startDate) : currentRenewalDate ? formatDate(currentRenewalDate) : '—'}</strong></div>
+              <div><small>{currentIsOneMonth ? 'Renewal' : 'Next renewal'}</small><strong>{currentIsOneMonth ? 'No renewal' : renewedMembership ? formatDate(renewedMembership.startDate) : currentRenewalDate ? formatDate(currentRenewalDate) : '—'}</strong></div>
               <div><small>Paid</small><strong>{formatINR(currentMembership.bal.paid)}</strong></div>
               <div><small>Due</small><strong>{formatINR(currentMembership.bal.due)}</strong></div>
             </div>
-            <div className="erp-student-progress" role="progressbar" aria-label="Subscription amount paid" aria-valuemin={0} aria-valuemax={100} aria-valuenow={paidPercent}><span style={{width: `${paidPercent}%`}}/></div>
-            <p className="erp-student-note">{currentLifecycle?.id === 'paused'
+            <div className="erp-student-progress" role="progressbar" aria-label={`${currentKindLabel} amount paid`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={paidPercent}><span style={{width: `${paidPercent}%`}}/></div>
+            <p className="erp-student-note">{currentIsOneMonth
+              ? currentLifecycle?.id === 'cancelled'
+                ? 'This one-month pass was cancelled. Please contact the studio if you want a new pass or subscription.'
+                : currentLifecycle?.id === 'scheduled'
+                  ? `This one-month pass starts ${formatDate(currentMembership.m.startDate)} and does not renew · ${paidPercent}% paid`
+                  : currentLifecycle?.id === 'expired'
+                    ? 'This one-month pass has ended and does not renew. Please contact the studio for a new pass or subscription.'
+                    : `${currentMembership.bal.daysLeft !== null ? `${currentMembership.bal.daysLeft} day(s) left · ` : ''}${paidPercent}% paid. This one-month pass does not renew.`
+              : currentLifecycle?.id === 'paused'
               ? `Paused since ${formatDate(currentMembership.m.pausedFrom)}${currentMembership.m.pausedUntil ? ` · expected to resume ${formatDate(currentMembership.m.pausedUntil)}` : ''}. Please contact the studio for changes.`
               : currentLifecycle?.id === 'cancelled'
                 ? 'This subscription was cancelled. Please contact the studio if you want to start a new subscription.'
@@ -756,19 +789,19 @@ export function ErpDashboardSection(props) {
     .filter(x => x.bal.due > 0 && inBranch(ctx, x.m.branchId) && (ctx.role !== 'student' || x.m.studentId === ctx.studentId));
   const dueTotal = dues.reduce((s, x) => s + x.bal.due, 0);
   const dashboardChildByPrevious = renewalChildByPrevious(data);
-  const expiring = data.memberships.filter(m => m.status === 'active' && m.autoRenew !== false
-      && !dashboardChildByPrevious.has(m.id) && inBranch(ctx, m.branchId))
+  const expiring = data.memberships.filter(m => m.status === 'active' && m.offeringType !== 'one_month'
+      && m.autoRenew !== false && !dashboardChildByPrevious.has(m.id) && inBranch(ctx, m.branchId))
     .map(m => ({m, bal: payableBalance(m, data.payments, billing, today)}))
     .filter(x => x.bal.daysLeft !== null && x.bal.daysLeft >= 0 && x.bal.daysLeft <= 7);
   const myAttendance = data.attendance.filter(a => a.studentId === ctx.studentId);
   const myRate = attendanceSummary(myAttendance).rate;
 
   const checks = [
-    {done: data.branches.length > 0, title: 'Add your first branch', text: 'Branches keep students, batches and fees organized by location.', page: 'branches'},
-    {done: data.instructors.length > 0, title: 'Add an instructor', text: 'Instructors are assigned to batches and mark attendance.', page: 'batches'},
+    {done: data.branches.length > 0, title: 'Add your first branch', text: 'Branches keep students, batches, subscriptions and payments organized by location.', page: 'branches'},
+    {done: data.instructors.length > 0, title: 'Add an instructor', text: 'Use Branches & batches → Instructor profiles, then assign instructors to batches.', page: 'branches'},
     {done: data.students.length > 0, title: 'Add students', text: 'Create student records with branch and contact details.', page: 'students'},
-    {done: data.batches.length > 0, title: 'Create a batch & enroll', text: 'Set days and time, then enroll students into the batch.', page: 'batches'},
-    {done: data.plans.length > 0 && data.memberships.length > 0, title: 'Add a plan & subscription', text: 'Monthly plan templates drive subscriptions, dues and receipts.', page: 'fees'},
+    {done: data.batches.length > 0, title: 'Create a batch & enroll', text: 'Use Branches & batches → Batches to set days and time, then enroll students.', page: 'branches'},
+    {done: data.plans.length > 0 && data.memberships.length > 0, title: 'Add a plan & subscription', text: 'Plan templates drive subscriptions or one-month passes, dues and receipts.', page: 'subscriptions'},
   ];
   const showSetup = canManageOrg(ctx) && checks.some(c => !c.done);
 
@@ -785,7 +818,7 @@ export function ErpDashboardSection(props) {
         <div className="erp-kpi"><small>{ctx.role === 'instructor' ? 'My active batches' : 'Active students'}</small><strong>{ctx.role === 'instructor' ? myBatches.length : students.length}</strong><p>{ctx.branchId === 'all' || !ctx.branchId ? 'Across all branches' : branchName(data, ctx.branchId)}</p></div>
         <div className="erp-kpi"><small>Classes today</small><strong>{todayBatches.length}</strong><p>{formatDate(today)}</p></div>
         {canManage(ctx) && <div className="erp-kpi"><small>Collected this month</small><strong>{formatINR(collected)}</strong><p>{monthPayments.length} payment(s)</p></div>}
-        {canManage(ctx) && <div className="erp-kpi"><small>Pending dues</small><strong>{formatINR(dueTotal)}</strong><p>{dues.length} subscription(s) with a balance</p></div>}
+        {canManage(ctx) && <div className="erp-kpi"><small>Pending dues</small><strong>{formatINR(dueTotal)}</strong><p>{dues.length} period(s) with a balance</p></div>}
       </>}
     </div>
 
@@ -801,7 +834,7 @@ export function ErpDashboardSection(props) {
         <tbody>{todayBatches.map(b => <tr key={b.id}><td><strong>{b.name}</strong></td><td>{branchName(data, b.branchId)}</td><td>{instructorName(data, b.instructorId)}</td><td>{batchTimeLabel(b)}</td><td>{data.enrollments.filter(e => e.batchId === b.id && e.status === 'active').length}/{b.capacity}</td></tr>)}</tbody></table></div>}
     </section>
 
-    {canManage(ctx) && expiring.length > 0 && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Expiring in 7 days</h2><p>Renew these subscriptions before they lapse.</p></div><button className="secondary-button" onClick={() => go('fees')}><Wallet size={15}/> Open fees</button></div>
+    {canManage(ctx) && expiring.length > 0 && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Expiring in 7 days</h2><p>Renew these subscriptions before they lapse.</p></div><button className="secondary-button" onClick={() => go('subscriptions')}><Repeat size={15}/> Open subscriptions</button></div>
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan</th><th>Ends</th><th>Days left</th><th>Due</th></tr></thead>
         <tbody>{expiring.map(({m, bal}) => <tr key={m.id}><td>{studentName(data, m.studentId)}</td><td>{planName(data, m.planId)}</td><td>{formatDate(m.endDate)}</td><td><span className="erp-badge amber">{bal.daysLeft} day(s)</span></td><td>{formatINR(bal.due)}</td></tr>)}</tbody></table></div></section>}
   </>;
@@ -809,14 +842,11 @@ export function ErpDashboardSection(props) {
 
 /* ---------------- branches ---------------- */
 
-export function BranchesPage(props) {
+function BranchesSection(props) {
   const {erp, ctx} = props; const {data} = erp;
   const [editing, setEditing] = useState(null);
   const save = async e => { e.preventDefault(); if (await erp.act(c => c.saveBranch(editing), 'Branch saved.')) setEditing(null); };
   return <>
-    <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Branches <span className="flower">✳</span></h1><p>Every location of your studio, in one place.</p></div>
-    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     <section className="erp-panel"><div className="erp-panel-head"><div><h2>All branches</h2><p>{data.branches.length} branch(es)</p></div>
       {canManageOrg(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', city: '', address: '', phone: ''})}><Plus size={16}/> Add branch</button>}</div>
       {data.branches.length === 0 ? <Empty icon={Building2} title="No branch yet" text="Add your first studio location to start adding students and batches."/> :
@@ -829,7 +859,7 @@ export function BranchesPage(props) {
           <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveBranch(b.id), b.status === 'archived' ? 'Branch restored.' : 'Branch archived.')}>{b.status === 'archived' ? 'Restore' : 'Archive'}</button></>}</td></tr>)}
       </tbody></table></div>}
     </section>
-    {editing && <Dialog title={editing.id ? 'Edit branch' : 'Add branch'} sub="Students, batches and fees are organized under a branch." onClose={() => setEditing(null)}>
+    {editing && <Dialog title={editing.id ? 'Edit branch' : 'Add branch'} sub="Students, batches, subscriptions and payments are organized under a branch." onClose={() => setEditing(null)}>
       <form className="erp-form" onSubmit={save}>
         <label className="erp-field">Branch name<input required value={editing.name} onChange={e => setEditing({...editing, name: e.target.value})} placeholder="e.g. Panvel"/></label>
         <label className="erp-field">City<input value={editing.city || ''} onChange={e => setEditing({...editing, city: e.target.value})}/></label>
@@ -837,6 +867,27 @@ export function BranchesPage(props) {
         <label className="erp-field">Phone<input type="tel" value={editing.phone || ''} onChange={e => setEditing({...editing, phone: e.target.value})}/></label>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button">Save branch</button></div>
       </form></Dialog>}
+  </>;
+}
+
+export function BranchesPage(props) {
+  const {erp, ctx} = props; const {data} = erp;
+  const [tab, setTab] = useState('branches');
+  const branchTabs = [
+    ['branches', 'Branches'],
+    ['batches', 'Batches'],
+    ...(canSetupInstructorProfiles(ctx) ? [['instructors', 'Instructor profiles']] : []),
+  ];
+  return <>
+    <ErpBlockingState {...props}/>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>Branches &amp; batches <span className="flower">✳</span></h1><p>Locations, recurring batches, rosters and instructor profiles in one branch workspace.</p></div>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
+    <div className="erp-seg" role="tablist" aria-label="Branches sections" style={{marginBottom: 16}}>
+      {branchTabs.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
+    </div>
+    {tab === 'branches' && <BranchesSection {...props}/>}
+    {tab === 'batches' && <BatchesSection {...props} onShowBranches={() => setTab('branches')}/>}
+    {tab === 'instructors' && canSetupInstructorProfiles(ctx) && <InstructorProfilesSection {...props}/>}
   </>;
 }
 
@@ -1063,7 +1114,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v6) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v8) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
@@ -1452,7 +1503,7 @@ function InstructorAccessDialog({instructor, branches, erp, ctx, onClose, onSave
       : `Instructor access removed for ${instructor.fullName}.`,
   );
 
-  return <Dialog title="Instructor sign-in access" sub={`${instructor.fullName} will see only assigned batches, their rosters and attendance in the selected branches. Fees and payments stay hidden.`} onClose={onClose}>
+  return <Dialog title="Instructor sign-in access" sub={`${instructor.fullName} will see only assigned batches, their rosters and attendance in the selected branches. Subscriptions and Payments stay hidden.`} onClose={onClose}>
     <div style={{display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16}}>
       <span className={`erp-badge ${isActive ? 'green' : instructor.accessStatus === 'suspended' ? 'amber' : 'grey'}`}>
         {isActive ? 'Sign-in active' : instructor.accessStatus === 'suspended' ? 'Sign-in suspended' : 'No sign-in access'}
@@ -1596,7 +1647,7 @@ export function RoleAccessPage(props) {
     ['Owner', 'All branches', 'Everything, including Co-owner access and organization ownership safeguards', 'Primary Owner cannot be removed here'],
     ['Co-owner', 'All branches', 'All operations, payment setup, and Admin/Instructor/Student access', 'Cannot add/remove Owner or Co-owner'],
     ['Admin', 'Selected branches', 'Branch operations and Instructor/Student access in assigned branches', 'Cannot manage Admins, Co-owners, plans, payment setup or other branches'],
-    ['Instructor', 'Assigned batches', 'Own schedule, rosters and attendance marking', 'No fees, payments, student editing or access administration'],
+    ['Instructor', 'Assigned batches', 'Own schedule, rosters and attendance marking', 'No subscriptions, payments, student editing or access administration'],
     ['Student', 'Own records', 'View own batches, attendance, membership, dues, payments and PDFs', 'No ERP writes'],
   ];
 
@@ -1684,7 +1735,7 @@ export function RoleAccessPage(props) {
             <div className="erp-panel-head"><div><h2>Instructor sign-ins</h2><p>Only the Owner, a Co-owner or an authorized branch Admin can grant or remove Instructor Portal access. Each account is linked to one instructor record and sees only that instructor’s batches in authorized branches.</p></div>
               <span className="erp-search"><Search size={16}/><input aria-label="Search instructors" placeholder="Search instructor or email…" value={instructorQuery} onChange={e => setInstructorQuery(e.target.value)}/></span>
             </div>
-            {instructors.length === 0 ? <Empty icon={Users} title="No instructors in your scope" text="Add an instructor in Batches, sync the record, then grant sign-in access here."/> :
+            {instructors.length === 0 ? <Empty icon={Users} title="No instructors in your scope" text="Add an instructor in Branches → Instructor profiles, sync the record, then grant sign-in access here."/> :
             <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Instructor</th><th>Branches</th><th>Sign-in</th><th>Actions</th></tr></thead><tbody>
               {instructors.map(instructor => {
                 const accessBranchNames = (instructor.accessBranchIds || []).map(branchId => branchName(data, branchId)).filter(name => name !== '—');
@@ -1733,30 +1784,41 @@ export function RoleAccessPage(props) {
 
 /* ---------------- batches & instructors ---------------- */
 
-export function BatchesPage(props) {
+function InstructorProfilesSection(props) {
   const {erp, ctx, go} = props; const {data} = erp;
-  const [editing, setEditing] = useState(null); const [roster, setRoster] = useState(null);
-  const [newInstructor, setNewInstructor] = useState(null); const [addStudentId, setAddStudentId] = useState('');
-  const batches = data.batches.filter(b => inBranch(ctx, b.branchId)
-    && (ctx.role !== 'instructor' || b.instructorId === ctx.instructorId)
-    && (ctx.role !== 'student' || data.enrollments.some(e => e.batchId === b.id && e.studentId === ctx.studentId && e.status === 'active')));
-  const toggleDay = day => setEditing(prev => ({...prev, days: prev.days.includes(day) ? prev.days.filter(d => d !== day) : [...prev.days, day]}));
-  const saveBatch = async e => { e.preventDefault(); if (!editing.days.length) return; if (await erp.act(c => c.saveBatch(editing), 'Batch saved.')) setEditing(null); };
+  const [newInstructor, setNewInstructor] = useState(null);
   const saveInstructor = async e => { e.preventDefault(); if (!canSetupInstructorProfiles(ctx)) return; if (await erp.act(c => c.saveInstructor(newInstructor), 'Instructor saved.')) setNewInstructor(null); };
-  const rosterList = roster ? data.enrollments.filter(e => e.batchId === roster.id && e.status === 'active') : [];
-  const addable = roster ? data.students.filter(s => s.status === 'active' && s.branchId === roster.branchId && !rosterList.some(e => e.studentId === s.id)) : [];
+  if (!canSetupInstructorProfiles(ctx)) return null;
   return <>
-    <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{ctx.role === 'student' ? 'My batches' : 'Batches'} <span className="flower">✳</span></h1><p>{ctx.role === 'student' ? 'Only the batches assigned to you.' : 'Recurring class groups, instructors and rosters.'}</p></div>
-    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
     {canSetupInstructorProfiles(ctx) && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Instructor profiles</h2><p>{data.instructors.length} instructor(s) · Profile setup is limited to the Owner, Co-owner and authorized branch Admins.</p></div>
       <div className="erp-actions"><button className="secondary-button" onClick={() => go('access')}><KeyRound size={15}/> Portal access</button><button className="secondary-button" onClick={() => setNewInstructor({fullName: '', phone: '', email: '', branchId: data.branches[0]?.id || ''})}><Plus size={15}/> Add instructor</button></div></div>
       {data.instructors.length === 0 ? <p style={{fontSize: 13, color: '#9b92a4'}}>No instructors yet. Add one before creating a batch.</p> :
       <div className="erp-actions">{data.instructors.map(i => <span key={i.id} className="erp-badge lavender" style={{padding: '8px 12px', fontSize: 12}}>{i.fullName}{i.branchId ? ` · ${branchName(data, i.branchId)}` : ''}</span>)}</div>}
     </section>}
+    {newInstructor && canSetupInstructorProfiles(ctx) && <Dialog title="Add instructor" onClose={() => setNewInstructor(null)}><form className="erp-form" onSubmit={saveInstructor}>
+      <label className="erp-field">Instructor name<input required value={newInstructor.fullName} onChange={e => setNewInstructor({...newInstructor, fullName: e.target.value})}/></label>
+      <label className="erp-field">Branch<select required={!canManageOrg(ctx)} value={newInstructor.branchId} onChange={e => setNewInstructor({...newInstructor, branchId: e.target.value})}>{canManageOrg(ctx) ? <option value="">All branches</option> : <option value="">Choose branch…</option>}{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+      <label className="erp-field">Phone<input type="tel" value={newInstructor.phone} onChange={e => setNewInstructor({...newInstructor, phone: e.target.value})}/></label>
+      <label className="erp-field">Email<input type="email" value={newInstructor.email} onChange={e => setNewInstructor({...newInstructor, email: e.target.value})}/></label>
+      <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setNewInstructor(null)}>Cancel</button><button className="primary-button">Save instructor</button></div></form></Dialog>}
+  </>;
+}
+
+function BatchesSection(props) {
+  const {erp, ctx, go, onShowBranches} = props; const {data} = erp;
+  const [editing, setEditing] = useState(null); const [roster, setRoster] = useState(null);
+  const [addStudentId, setAddStudentId] = useState('');
+  const batches = data.batches.filter(b => inBranch(ctx, b.branchId)
+    && (ctx.role !== 'instructor' || b.instructorId === ctx.instructorId)
+    && (ctx.role !== 'student' || data.enrollments.some(e => e.batchId === b.id && e.studentId === ctx.studentId && e.status === 'active')));
+  const toggleDay = day => setEditing(prev => ({...prev, days: prev.days.includes(day) ? prev.days.filter(d => d !== day) : [...prev.days, day]}));
+  const saveBatch = async e => { e.preventDefault(); if (!editing.days.length) return; if (await erp.act(c => c.saveBatch(editing), 'Batch saved.')) setEditing(null); };
+  const rosterList = roster ? data.enrollments.filter(e => e.batchId === roster.id && e.status === 'active') : [];
+  const addable = roster ? data.students.filter(s => s.status === 'active' && s.branchId === roster.branchId && !rosterList.some(e => e.studentId === s.id)) : [];
+  return <>
     <section className="erp-panel"><div className="erp-panel-head"><div><h2>{ctx.role === 'instructor' ? 'My batches' : ctx.role === 'student' ? 'My batches' : 'All batches'}</h2><p>{batches.length} batch(es)</p></div>
       {canManage(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', branchId: ctx.branchId !== 'all' ? ctx.branchId : (data.branches[0]?.id || ''), instructorId: '', days: [1, 2, 3, 4, 5], startTime: '07:00', durationMins: 60, capacity: 20})}><Plus size={16}/> Add batch</button>}</div>
-      {data.branches.length === 0 && canManage(ctx) ? <Empty icon={Building2} title="Add a branch first" text="Batches run at a branch." action={<button className="primary-button" onClick={() => go('branches')}>Go to Branches</button>}/> :
+      {data.branches.length === 0 && canManage(ctx) ? <Empty icon={Building2} title="Add a branch first" text="Batches run at a branch." action={<button className="primary-button" onClick={() => (onShowBranches ? onShowBranches() : go('branches'))}>Go to Branches</button>}/> :
       batches.length === 0 ? <Empty icon={Clock} title={ctx.role === 'student' ? 'No assigned batches yet' : 'No batches here'} text={ctx.role === 'instructor' && !ctx.instructorId ? 'Choose “Acting instructor” above to see assigned batches.' : ctx.role === 'student' && !ctx.studentId ? 'Choose “Acting student” above to see assigned batches.' : ctx.role === 'student' ? 'When the studio enrolls you in a batch, it will appear here.' : 'Create a batch with days and a start time, then enroll students.'}/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Batch</th><th>Instructor</th><th>Schedule</th><th>{ctx.role === 'student' ? 'My status' : 'Students'}</th><th>Status</th>{ctx.role !== 'student' && <th>Actions</th>}</tr></thead><tbody>
         {batches.map(b => { const count = data.enrollments.filter(e => e.batchId === b.id && e.status === 'active').length; return <tr key={b.id}>
@@ -1770,12 +1832,6 @@ export function BatchesPage(props) {
           <button className="erp-link-btn" onClick={() => erp.act(c => c.archiveBatch(b.id), b.status === 'archived' ? 'Batch restored.' : 'Batch archived.')}>{b.status === 'archived' ? 'Restore' : 'Archive'}</button></>}</td>}</tr>; })}
       </tbody></table></div>}
     </section>
-    {newInstructor && canSetupInstructorProfiles(ctx) && <Dialog title="Add instructor" onClose={() => setNewInstructor(null)}><form className="erp-form" onSubmit={saveInstructor}>
-      <label className="erp-field">Instructor name<input required value={newInstructor.fullName} onChange={e => setNewInstructor({...newInstructor, fullName: e.target.value})}/></label>
-      <label className="erp-field">Branch<select required={!canManageOrg(ctx)} value={newInstructor.branchId} onChange={e => setNewInstructor({...newInstructor, branchId: e.target.value})}>{canManageOrg(ctx) ? <option value="">All branches</option> : <option value="">Choose branch…</option>}{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
-      <label className="erp-field">Phone<input type="tel" value={newInstructor.phone} onChange={e => setNewInstructor({...newInstructor, phone: e.target.value})}/></label>
-      <label className="erp-field">Email<input type="email" value={newInstructor.email} onChange={e => setNewInstructor({...newInstructor, email: e.target.value})}/></label>
-      <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setNewInstructor(null)}>Cancel</button><button className="primary-button">Save instructor</button></div></form></Dialog>}
     {editing && <Dialog title={editing.id ? 'Edit batch' : 'Add batch'} sub="Classes are 60 minutes by default — adjust only if your studio differs." onClose={() => setEditing(null)}>
       <form className="erp-form" onSubmit={saveBatch}>
         <label className="erp-field">Batch name<input required value={editing.name} onChange={e => setEditing({...editing, name: e.target.value})} placeholder="e.g. Morning Hatha"/></label>
@@ -1795,6 +1851,16 @@ export function BatchesPage(props) {
         <label className="erp-field">Add student to batch<select value={addStudentId} onChange={e => setAddStudentId(e.target.value)}><option value="">Choose student…</option>{addable.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <div className="erp-form-actions"><button className="primary-button">Enroll student</button></div></form>}
     </Dialog>}
+  </>;
+}
+
+export function BatchesPage(props) {
+  const {erp, ctx} = props; const {data} = erp;
+  return <>
+    <ErpBlockingState {...props}/>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{ctx.role === 'student' ? 'My batches' : 'Batches'} <span className="flower">✳</span></h1><p>{ctx.role === 'student' ? 'Only the batches assigned to you.' : 'Recurring class groups, instructors and rosters.'}</p></div>
+    <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
+    <BatchesSection {...props}/>
   </>;
 }
 
@@ -1844,7 +1910,7 @@ export function AttendancePage(props) {
       </div></div>
       {batch && !isBatchOnDate(batch, date) && <div className="erp-banner"><AlertCircle size={18}/><span><b>{batch.name}</b> is not scheduled on {formatDate(date)} ({DAY_LABELS[new Date(`${date}T12:00:00`).getDay()]}). You can still record a special class.</span></div>}
       {batches.length === 0 ? <Empty icon={Clock} title="No batch to mark" text="Create a batch and enroll students first."/> :
-      roster.length === 0 ? <Empty icon={Users} title="Roster is empty" text="Enroll students into this batch from the Batches page."/> :
+      roster.length === 0 ? <Empty icon={Users} title="Roster is empty" text="Enroll students into this batch from Branches & batches → Batches."/> :
       roster.map(s => <div className="erp-att-row" key={s.id}>
         <span className="erp-person"><span className="avatar">{initials(s.fullName)}</span><span><strong>{s.fullName}</strong><small>{attendanceSummary(data.attendance.filter(a => a.studentId === s.id)).rate ?? '—'}% overall</small></span></span>
         <span className="erp-att-btns" role="group" aria-label={`Attendance for ${s.fullName}`}>{ATTENDANCE_STATUSES.map(st =>
@@ -1953,7 +2019,7 @@ function PaymentSetupPanel({data, erp, mode}) {
       </select></label>
       <label className="erp-field">PIN code<input inputMode="numeric" maxLength={6} value={form.pinCode} onChange={e => set('pinCode', e.target.value)} autoComplete="postal-code"/></label>
       <label className="erp-field">Payment due in (days)<input type="number" min={0} max={60} value={form.dueDays} onChange={e => set('dueDays', e.target.value)}/></label>
-      <label className="erp-field full">Invoice terms / footer note<textarea rows={2} value={form.terms} onChange={e => set('terms', e.target.value)} placeholder="Optional, e.g. Fees are payable in advance. Please share the UPI reference after payment."/></label>
+      <label className="erp-field full">Invoice terms / footer note<textarea rows={2} value={form.terms} onChange={e => set('terms', e.target.value)} placeholder="Optional, e.g. Dues are payable in advance. Please share the UPI reference after payment."/></label>
 
       <h3 className="erp-form-section">GST (optional)</h3>
       <label className="erp-toggle-row full"><input type="checkbox" checked={!!form.gstEnabled} onChange={e => set('gstEnabled', e.target.checked)}/> <span>Show GST breakup on invoices</span></label>
@@ -2004,6 +2070,7 @@ function InvoiceDialog({data, invoice, onClose}) {
     || null;
   const student = data.students.find(s => s.id === (payment?.studentId || membership?.studentId)) || null;
   const plan = data.plans.find(p => p.id === membership?.planId) || null;
+  const offeringLabel = membership && isOneMonthMembership(membership, plan) ? 'One-month pass' : 'Subscription';
   const branch = data.branches.find(b => b.id === (payment?.branchId || membership?.branchId)) || null;
   const balance = membership ? payableBalance(membership, data.payments, settings) : {total: 0, paid: 0, due: 0};
   const isPayment = invoice?.type === 'payment';
@@ -2102,10 +2169,10 @@ function InvoiceDialog({data, invoice, onClose}) {
           {buyerGstin && <p><strong>GSTIN:</strong> {buyerGstin}</p>}
         </div>
         <div>
-          <h4>{settings.gstEnabled ? 'Place of supply' : 'Subscription'}</h4>
+          <h4>{settings.gstEnabled ? 'Place of supply' : offeringLabel}</h4>
           {settings.gstEnabled
             ? <><p>{placeName} ({placeCode})</p><p>{tax.interState ? 'Inter-state supply · IGST' : 'Intra-state supply · CGST + SGST'}</p></>
-            : <p>Studio subscription fees</p>}
+            : <p>Studio {offeringLabel.toLowerCase()} charges</p>}
           {membership && <p>{formatDate(membership.startDate)} → {formatDate(membership.endDate)}</p>}
         </div>
       </section>
@@ -2154,7 +2221,7 @@ function InvoiceDialog({data, invoice, onClose}) {
                   : <div className="erp-invoice-qr-placeholder">UPI QR</div>}
                 <span>Scan to pay {formatInvoiceINR(payablePaise)}</span>
               </div>}
-            </div> : <div className="erp-invoice-warning">Payment instructions are not configured yet. Please contact the studio, or ask an Owner/Co-owner to complete Fees → Payment setup.</div>}
+            </div> : <div className="erp-invoice-warning">Payment instructions are not configured yet. Please contact the studio, or ask an Owner/Co-owner to complete Payments → Payment setup.</div>}
             <p className="erp-invoice-note">
               {settings.gatewayProvider === 'none'
                 ? 'Manual payment only. The studio will record the payment after verifying receipt.'
@@ -2168,7 +2235,7 @@ function InvoiceDialog({data, invoice, onClose}) {
 
         <div className="erp-invoice-summary" aria-label="Invoice summary">
           {!payment && balance.paid > 0 && <>
-            <div><span>Subscription total</span><strong>{formatInvoiceINR(balance.total)}</strong></div>
+            <div><span>{offeringLabel} total</span><strong>{formatInvoiceINR(balance.total)}</strong></div>
             <div><span>Already paid</span><strong>{formatInvoiceINR(balance.paid)}</strong></div>
           </>}
           <div><span>{settings.gstEnabled ? 'Taxable value' : 'Subtotal'}</span><strong>{formatInvoiceINR(tax.taxablePaise)}</strong></div>
@@ -2218,37 +2285,51 @@ function InvoiceDialog({data, invoice, onClose}) {
   </Dialog>;
 }
 
-/* ---------------- fees ---------------- */
+/* ---------------- subscriptions & payments ---------------- */
 
-export function FeesPage(props) {
-  const {erp, ctx} = props; const {data} = erp;
+function FinanceWorkspacePage(props) {
+  const {erp, ctx, go} = props; const {data} = erp;
+  const workspace = props.workspace === 'payments' ? 'payments' : 'subscriptions';
+  const isPaymentsWorkspace = workspace === 'payments';
   const today = toISODate();
-  const [tab, setTab] = useState('memberships');
+  const [tab, setTab] = useState(isPaymentsWorkspace ? 'payments' : 'memberships');
   const [planForm, setPlanForm] = useState(null); const [membershipForm, setMembershipForm] = useState(null);
   const [paymentForm, setPaymentForm] = useState(null); const [invoice, setInvoice] = useState(null);
   const [subscriptionFilter, setSubscriptionFilter] = useState('all');
+  const [oneTimeFilter, setOneTimeFilter] = useState('all');
   const [pauseForm, setPauseForm] = useState(null); const [resumeForm, setResumeForm] = useState(null);
   const [cancelForm, setCancelForm] = useState(null); const [renewForm, setRenewForm] = useState(null);
   const [historyMembershipId, setHistoryMembershipId] = useState('');
   const isStudent = ctx.role === 'student';
-  const memberships = data.memberships.filter(m => inBranch(ctx, m.branchId) && (!isStudent || m.studentId === ctx.studentId));
+  const allMemberships = data.memberships.filter(m => inBranch(ctx, m.branchId) && (!isStudent || m.studentId === ctx.studentId));
+  const isOneTime = membership => isOneMonthMembership(
+    membership, data.plans.find(plan => plan.id === membership.planId),
+  );
+  const memberships = allMemberships.filter(membership => !isOneTime(membership));
+  const oneTimeMemberships = allMemberships.filter(isOneTime);
   const childByPrevious = renewalChildByPrevious(data);
   const lifecycleOrder = {active: 0, paused: 1, scheduled: 2, expired: 3, cancelled: 4};
   const isRenewalDue = membership => membership.status === 'active' && membership.autoRenew !== false
     && !childByPrevious.has(membership.id) && membership.startDate <= today
     && membership.endDate <= addDaysISO(today, 7);
-  const sortedMemberships = [...memberships].sort((a, b) => (
+  const sortMemberships = rows => [...rows].sort((a, b) => (
     (lifecycleOrder[subscriptionLifecycle(a, today).id] - lifecycleOrder[subscriptionLifecycle(b, today).id])
     || String(a.endDate || '').localeCompare(String(b.endDate || ''))
     || String(a.startDate || '').localeCompare(String(b.startDate || ''))
   ));
+  const sortedMemberships = sortMemberships(memberships);
   const visibleMemberships = sortedMemberships.filter(membership => {
     const lifecycle = subscriptionLifecycle(membership, today).id;
     if (subscriptionFilter === 'all') return true;
     if (subscriptionFilter === 'renewals') return isRenewalDue(membership);
     return lifecycle === subscriptionFilter;
   });
-  const collectableMemberships = sortedMemberships.filter(membership => membership.status !== 'cancelled');
+  const sortedOneTimeMemberships = sortMemberships(oneTimeMemberships);
+  const visibleOneTimeMemberships = sortedOneTimeMemberships.filter(membership => (
+    oneTimeFilter === 'all' || subscriptionLifecycle(membership, today).id === oneTimeFilter
+  ));
+  const collectableMemberships = sortMemberships(allMemberships)
+    .filter(membership => membership.status !== 'cancelled');
   const subscriptionSummary = {
     active: memberships.filter(membership => subscriptionLifecycle(membership, today).id === 'active').length,
     paused: memberships.filter(membership => subscriptionLifecycle(membership, today).id === 'paused').length,
@@ -2260,6 +2341,14 @@ export function FeesPage(props) {
     .sort((a, b) => (b.paidOn || '').localeCompare(a.paidOn || ''));
   const billing = billingSettingsOf(data);
   const billingReady = billingReadiness(billing);
+  const oneTimeSummary = {
+    active: oneTimeMemberships.filter(membership => subscriptionLifecycle(membership, today).id === 'active').length,
+    scheduled: oneTimeMemberships.filter(membership => subscriptionLifecycle(membership, today).id === 'scheduled').length,
+    expired: oneTimeMemberships.filter(membership => subscriptionLifecycle(membership, today).id === 'expired').length,
+    due: oneTimeMemberships
+      .filter(membership => membership.status !== 'cancelled')
+      .reduce((sum, membership) => sum + payableBalance(membership, data.payments, billing, today).due, 0),
+  };
   const paymentConfigWarning = paymentForm?.method === 'upi' && !billingReady.manualUpi
     ? 'A receiving UPI ID is not configured. You can still record a manually verified UPI payment, but unpaid invoices will not show a QR code.'
     : paymentForm?.method === 'bank' && !billingReady.bankTransfer
@@ -2268,14 +2357,17 @@ export function FeesPage(props) {
         ? 'Card gateway automatic confirmation is not configured. Record a card payment only after verifying it on the card terminal, provider dashboard, or bank statement.'
         : '';
   const paymentGstWarning = billing.gstEnabled && !billing.priceIncludesGst
-    ? 'GST is added on top in Payment setup. Fees dues are shown as gross payable totals (taxable fee + GST); record the actual gross amount received.'
+    ? 'GST is added on top in Payment setup. Dues are shown as gross payable totals (taxable fee + GST); record the actual gross amount received.'
     : '';
-  const openMembership = () => {
+  const openMembership = (offeringType = 'subscription') => {
+    const normalizedOfferingType = normalizePlanType(offeringType);
     const student = data.students.find(s => s.status === 'active' && inBranch(ctx, s.branchId));
-    const plan = data.plans.find(p => p.status !== 'archived');
+    const plan = activePlans(data, normalizedOfferingType)[0];
+    const template = normalizePlanTemplate(plan || {planType: normalizedOfferingType});
     setMembershipForm({
+      offeringType: normalizedOfferingType,
       studentId: student?.id || '', planId: plan?.id || '', startDate: today,
-      billingCycle: 'joining', autoRenew: true,
+      billingCycle: template.billingCycle, autoRenew: template.renewalEnabledDefault,
       amountRupees: plan ? paiseToRupees(plan.amountPaise) : '',
     });
   };
@@ -2299,27 +2391,35 @@ export function FeesPage(props) {
       : today >= membership.pausedFrom ? today : membership.pausedFrom,
   });
   const openRenew = membership => {
-    const currentPlan = data.plans.find(plan => plan.id === membership.planId && plan.status !== 'archived')
-      || data.plans.find(plan => plan.status !== 'archived');
+    if (isOneTime(membership)) return;
+    const subscriptionPlans = activePlans(data, 'subscription');
+    const currentPlan = subscriptionPlans.find(plan => plan.id === membership.planId)
+      || subscriptionPlans[0];
+    const currentTemplate = normalizePlanTemplate(currentPlan || {});
     setRenewForm({
       membership, planId: currentPlan?.id || '',
-      startDate: renewalStartDate(membership, today), billingCycle: membership.billingCycle || 'joining',
-      autoRenew: membership.autoRenew !== false,
+      startDate: renewalStartDate(membership, today), billingCycle: currentTemplate.billingCycle,
+      autoRenew: currentTemplate.renewalEnabledDefault,
     });
   };
   const historyMembership = data.memberships.find(membership => membership.id === historyMembershipId) || null;
   const historyChain = historyMembership ? subscriptionChain(data, historyMembership) : [];
+  const cancelIsOneMonth = cancelForm ? isOneTime(cancelForm.membership) : false;
+  const cancelKindLabel = cancelIsOneMonth ? 'one-month pass' : 'subscription';
+  const financeTabs = isPaymentsWorkspace
+    ? [['payments', 'Payments'], ...(canManageOrg(ctx) ? [['setup', 'Payment setup']] : [])]
+    : [['memberships', 'Subscriptions & dues'], ['onetime', 'One-month passes'], ...(!isStudent ? [['plans', 'Plans']] : [])];
   return <>
     <ErpBlockingState {...props}/>
-    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{isStudent ? 'My fees & payments' : 'Fees & payments'} <span className="flower">✳</span></h1><p>{isStudent ? 'Your subscription, renewal dates, dues, payments and invoice PDFs in ₹.' : 'Plans, subscriptions, renewals, dues, themed invoice PDFs and payment setup in ₹. Renewals are manager-confirmed; no automatic charge is made.'}</p></div>
+    <div className="page-heading"><div className="eyebrow">STUDIO ERP</div><h1>{isStudent ? (isPaymentsWorkspace ? 'My payments' : 'My subscriptions & passes') : (isPaymentsWorkspace ? 'Payments' : 'Subscriptions')} <span className="flower">✳</span></h1><p>{isStudent ? (isPaymentsWorkspace ? 'Your payment receipts and invoice PDFs in ₹.' : 'Your subscriptions, one-month passes, renewal dates, dues and invoice PDFs in ₹.') : (isPaymentsWorkspace ? 'Verified payments, receipts, invoice PDFs and payment setup in ₹.' : 'Odoo-style plan templates, subscription periods, one-month passes, renewals and dues in ₹. Renewals are manager-confirmed; no automatic charge is made.')}</p></div>
     <ErpToolbar data={data} ctx={ctx} setCtx={props.setCtx} mode={props.mode} remoteContext={erp.remoteContext} erp={erp}/>
-    <div className="erp-seg" role="tablist" aria-label="Fees sections" style={{marginBottom: 16}}>
-      {[['memberships', 'Subscriptions & dues'], ['payments', 'Payments'], ...(!isStudent ? [['plans', 'Plans']] : []), ...(canManageOrg(ctx) ? [['setup', 'Payment setup']] : [])].map(([id, label]) =>
+    <div className="erp-seg" role="tablist" aria-label={isPaymentsWorkspace ? 'Payments sections' : 'Subscriptions sections'} style={{marginBottom: 16}}>
+      {financeTabs.map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
     </div>
 
     {tab === 'memberships' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Subscriptions & dues</h2><p>{visibleMemberships.length} of {memberships.length} subscription(s)</p></div>
-      {canManage(ctx) && <div className="erp-actions"><button className="secondary-button" onClick={() => openPayment(null)}><IndianRupee size={15}/> Record payment</button><button className="primary-button" onClick={openMembership}><Plus size={16}/> New subscription</button></div>}</div>
+      {canManage(ctx) && <div className="erp-actions"><button className="primary-button" onClick={() => openMembership('subscription')}><Plus size={16}/> New subscription</button></div>}</div>
       {canManage(ctx) && memberships.length > 0 && <div className="erp-grid erp-subscription-summary" aria-label="Subscription summary">
         <div className="erp-kpi"><small>Active subscriptions</small><strong>{subscriptionSummary.active}</strong><p>{subscriptionSummary.scheduled} scheduled</p></div>
         <div className="erp-kpi"><small>Paused subscriptions</small><strong>{subscriptionSummary.paused}</strong><p>Resume extends the end date</p></div>
@@ -2330,7 +2430,7 @@ export function FeesPage(props) {
         {[['all', 'All'], ['active', 'Active'], ['paused', 'Paused'], ['renewals', 'Renewals due'], ['expired', 'Expired'], ['cancelled', 'Cancelled']].map(([id, label]) =>
           <button key={id} type="button" aria-pressed={subscriptionFilter === id} className={subscriptionFilter === id ? 'on' : ''} onClick={() => setSubscriptionFilter(id)}>{label}</button>)}
       </div>}
-      {memberships.length === 0 ? <Empty icon={Wallet} title="No subscriptions yet" text={data.plans.length === 0 ? 'Create a monthly plan first (Plans tab), then assign it to a student.' : 'Assign a plan to a student to start tracking subscriptions, fees and dues.'}/> : visibleMemberships.length === 0 ? <Empty icon={CalendarClock} title="No subscriptions in this view" text="Choose another subscription status above."/> :
+      {memberships.length === 0 ? <Empty icon={Wallet} title="No subscriptions yet" text={activePlans(data, 'subscription').length === 0 ? 'Create a subscription plan first (Plans tab), then assign it to a student.' : 'Assign a subscription plan to a student to start tracking periods, renewals and dues.'}/> : visibleMemberships.length === 0 ? <Empty icon={CalendarClock} title="No subscriptions in this view" text="Choose another subscription status above."/> :
       <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan & period</th><th>Amount</th><th>Paid</th><th>Due</th><th>Subscription</th><th>Actions</th></tr></thead><tbody>
         {visibleMemberships.map(m => {
           const bal = payableBalance(m, data.payments, billing, today);
@@ -2355,6 +2455,35 @@ export function FeesPage(props) {
           <button className="erp-link-btn erp-danger" onClick={() => setCancelForm({membership: m, reason: ''})}>Cancel subscription</button></>}</td></tr>; })}
       </tbody></table></div>}</section>}
 
+    {tab === 'onetime' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>One-month passes</h2><p>{visibleOneTimeMemberships.length} of {oneTimeMemberships.length} one-month pass(es) · fixed single month, no subscription renewal</p></div>
+      {canManage(ctx) && <div className="erp-actions"><button className="primary-button" onClick={() => openMembership('one_month')}><Plus size={16}/> New one-month pass</button></div>}</div>
+      {canManage(ctx) && oneTimeMemberships.length > 0 && <div className="erp-grid erp-subscription-summary" aria-label="One-month pass summary">
+        <div className="erp-kpi"><small>Active one-month passes</small><strong>{oneTimeSummary.active}</strong><p>{oneTimeSummary.scheduled} scheduled</p></div>
+        <div className="erp-kpi"><small>Outstanding dues</small><strong>{formatINR(oneTimeSummary.due)}</strong><p>Collect from Payments or a pass row</p></div>
+        <div className="erp-kpi"><small>Expired passes</small><strong>{oneTimeSummary.expired}</strong><p>Create a new pass or subscription to continue</p></div>
+        <div className="erp-kpi"><small>Renewal</small><strong>None</strong><p>One fixed month only</p></div>
+      </div>}
+      {oneTimeMemberships.length > 0 && <div className="erp-seg erp-subscription-filters" aria-label="One-month pass status filter">
+        {[['all', 'All'], ['active', 'Active'], ['scheduled', 'Scheduled'], ['expired', 'Expired'], ['cancelled', 'Cancelled']].map(([id, label]) =>
+          <button key={id} type="button" aria-pressed={oneTimeFilter === id} className={oneTimeFilter === id ? 'on' : ''} onClick={() => setOneTimeFilter(id)}>{label}</button>)}
+      </div>}
+      {oneTimeMemberships.length === 0 ? <Empty icon={CalendarClock} title="No one-month passes yet" text={activePlans(data, 'one_month').length === 0 ? 'Create a “One-month only” plan first (Plans tab), then assign it to a student.' : 'Assign a one-month-only plan when a student wants a single fixed month without a subscription.'}/> : visibleOneTimeMemberships.length === 0 ? <Empty icon={CalendarClock} title="No one-month passes in this view" text="Choose another pass status above."/> :
+      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Student</th><th>Plan & period</th><th>Amount</th><th>Paid</th><th>Due</th><th>Pass</th><th>Actions</th></tr></thead><tbody>
+        {visibleOneTimeMemberships.map(m => {
+          const bal = payableBalance(m, data.payments, billing, today);
+          const lifecycle = subscriptionLifecycle(m, today);
+          return <tr key={m.id}>
+          <td><strong>{studentName(data, m.studentId)}</strong><br/><small style={{color: '#9b92a4'}}>{branchName(data, m.branchId)} · One-month pass</small></td>
+          <td>{planName(data, m.planId)}<br/><small style={{color: '#9b92a4'}}>{formatDate(m.startDate)} → {formatDate(m.endDate)}{m.billingCycle === 'calendar' ? ' · calendar month' : ' · joining date'}<br/>One month only · no renewal
+            {lifecycle.id === 'cancelled' && <><br/>Cancelled{m.cancelledAt ? ` ${formatDate(String(m.cancelledAt).slice(0, 10))}` : ''}{m.cancelReason ? ` · ${m.cancelReason}` : ''}</>}
+          </small></td>
+          <td>{formatINR(bal.total)}</td><td>{formatINR(bal.paid)}</td><td><strong>{formatINR(bal.due)}</strong></td>
+          <td><SubscriptionBadge membership={m} today={today}/><br/><span className={`erp-badge ${bal.paymentStatus === 'paid' ? 'green' : bal.paymentStatus === 'partial' ? 'amber' : 'red'}`}>{bal.paymentStatus}</span>{lifecycle.id === 'active' && bal.daysLeft !== null && bal.daysLeft <= 7 ? <><br/><small style={{color: '#9a6b31'}}>{bal.daysLeft} day(s) left</small></> : null}</td>
+          <td>{bal.due > 0 && m.status !== 'cancelled' && <button className="erp-link-btn" onClick={() => setInvoice({type: 'due', membership: m})}><Printer size={13}/> Invoice PDF</button>}
+          {canManage(ctx) && m.status !== 'cancelled' && <><button className="erp-link-btn" onClick={() => openPayment(m)}><IndianRupee size={13}/> Collect</button>
+          <button className="erp-link-btn erp-danger" onClick={() => setCancelForm({membership: m, reason: ''})}>Cancel pass</button></>}</td></tr>; })}
+      </tbody></table></div>}</section>}
+
     {tab === 'payments' && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Payments</h2><p>{payments.length} payment(s) · {formatINR(payments.filter(p => p.status !== 'void').reduce((s, p) => s + (p.amountPaise || 0), 0))} collected shown</p></div>
       <div className="erp-actions"><button className="secondary-button" onClick={() => exportCSV('payments.csv', payments, [{label: 'Receipt', value: p => p.receiptNo || 'Pending sync'}, {label: 'Date', value: p => p.paidOn}, {label: 'Student', value: p => studentName(data, p.studentId)}, {label: 'Method', value: p => p.method}, {label: 'Amount (INR)', value: p => paiseToRupees(p.amountPaise)}, {label: 'Status', value: p => p.status || 'recorded'}])}><Download size={15}/> CSV</button>
       {canManage(ctx) && <button className="primary-button" onClick={() => openPayment(null)}><Plus size={16}/> Record payment</button>}</div></div>
@@ -2367,40 +2496,57 @@ export function FeesPage(props) {
           : <button className="erp-link-btn erp-danger" onClick={async () => { const reason = window.prompt('Reason for voiding this payment (required for audit):', ''); if (reason === null) return; if (!reason.trim()) return props.notify('Enter a reason to void this payment.'); await erp.act(c => c.voidPayment({id: p.id, reason: reason.trim()}), 'Payment voided. The original receipt remains in history.'); }}>Void</button>)}</td></tr>)}
       </tbody></table></div>}</section>}
 
-    {tab === 'plans' && !isStudent && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Plans</h2><p>{data.plans.length} subscription template(s){!canManageOrg(ctx) ? ' · Organization plans are maintained by Owner/Co-owner.' : ''}</p></div>
-      {canManageOrg(ctx) && <button className="primary-button" onClick={() => setPlanForm({name: '', amountRupees: '', durationMonths: 1})}><Plus size={16}/> Add plan</button>}</div>
-      {data.plans.length === 0 ? <Empty icon={Wallet} title="No plans yet" text="Example: “Monthly — All Batches” at ₹1,500 for 1 month. You decide the names and prices."/> :
-      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Plan</th><th>Price</th><th>Duration</th><th>Active subscriptions</th><th>Actions</th></tr></thead><tbody>
-        {data.plans.map(p => <tr key={p.id}><td><strong>{p.name}</strong></td><td>{formatINR(p.amountPaise)}{billing.gstEnabled && !billing.priceIncludesGst ? ' + GST' : ''}</td><td>{p.durationMonths} month(s)</td><td>{data.memberships.filter(m => m.planId === p.id && subscriptionLifecycle(m, today).id === 'active').length}</td>
-        <td>{canManageOrg(ctx) && <button className="erp-link-btn" onClick={() => setPlanForm({...p, amountRupees: paiseToRupees(p.amountPaise)})}><Pencil size={13}/> Edit</button>}</td></tr>)}
+    {tab === 'plans' && !isStudent && <section className="erp-panel"><div className="erp-panel-head"><div><h2>Plans</h2><p>{data.plans.length} Odoo-style plan template(s) · billing period and alignment are defaults for new periods{!canManageOrg(ctx) ? ' · Organization plans are maintained by Owner/Co-owner.' : ''}</p></div>
+      {canManageOrg(ctx) && <button className="primary-button" onClick={() => setPlanForm({name: '', amountRupees: '', durationMonths: 1, planType: 'subscription', billingCycle: 'joining', renewalEnabledDefault: true, status: 'active'})}><Plus size={16}/> Add plan</button>}</div>
+      {data.plans.length === 0 ? <Empty icon={Wallet} title="No plans yet" text="Example: “Monthly — All Batches” as a subscription at ₹1,500 every month, or a separate “One Month Only” pass. You decide the names and prices."/> :
+      <div className="erp-table-wrap"><table className="erp-table"><thead><tr><th>Plan</th><th>Price</th><th>Billing period</th><th>Renewal</th><th>Active now</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+        {data.plans.map(p => { const template = normalizePlanTemplate(p); return <tr key={p.id}><td><strong>{p.name}</strong><br/><small style={{color: '#9b92a4'}}>{planTypeLabel(p)}</small></td><td>{formatINR(p.amountPaise)}{billing.gstEnabled && !billing.priceIncludesGst ? ' + GST' : ''}</td><td>{planBillingPeriodLabel(p)}<br/><small style={{color: '#9b92a4'}}>{template.billingCycle === 'calendar' ? 'Calendar month' : 'Joining date'}</small></td><td>{template.planType === 'one_month' ? 'No renewal' : template.renewalEnabledDefault ? 'Tracking on' : 'Tracking off'}</td><td>{data.memberships.filter(m => m.planId === p.id && subscriptionLifecycle(m, today).id === 'active').length}</td>
+        <td><span className={`erp-badge ${p.status === 'archived' ? 'grey' : 'green'}`}>{p.status === 'archived' ? 'Archived' : 'Active'}</span></td>
+        <td>{canManageOrg(ctx) && <button className="erp-link-btn" onClick={() => setPlanForm({...p, ...template, amountRupees: paiseToRupees(p.amountPaise), status: p.status || 'active'})}><Pencil size={13}/> Edit</button>}</td></tr>; })}
       </tbody></table></div>}</section>}
 
     {tab === 'setup' && canManageOrg(ctx) && <PaymentSetupPanel data={data} erp={erp} mode={props.mode}/>}
 
-    {planForm && <Dialog title={planForm.id ? 'Edit plan' : 'Add plan'} sub="Plan price and duration changes apply to new subscriptions and future renewals. Existing subscription periods keep their agreed amount." onClose={() => setPlanForm(null)}>
-      <form className="erp-form" onSubmit={async e => { e.preventDefault(); if (await erp.act(c => c.savePlan({id: planForm.id, name: planForm.name, amountPaise: rupeesToPaise(planForm.amountRupees), durationMonths: planForm.durationMonths}), 'Plan saved.')) setPlanForm(null); }}>
-        <label className="erp-field">Plan name<input required value={planForm.name} onChange={e => setPlanForm({...planForm, name: e.target.value})} placeholder="e.g. Monthly — All Batches"/></label>
+    {planForm && <Dialog title={planForm.id ? 'Edit plan' : 'Add plan'} sub="Odoo-style plan template: choose the offering type, billing period and period alignment. Template changes apply to new periods and future renewals; existing periods keep their snapshot type, amount and dates." onClose={() => setPlanForm(null)}>
+      <form className="erp-form" onSubmit={async e => { e.preventDefault(); const template = normalizePlanTemplate(planForm); if (await erp.act(c => c.savePlan({id: planForm.id, name: planForm.name, amountPaise: rupeesToPaise(planForm.amountRupees), ...template, status: planForm.status || 'active'}), 'Plan saved.')) setPlanForm(null); }}>
+        <label className="erp-field">Plan name<input required value={planForm.name} onChange={e => setPlanForm({...planForm, name: e.target.value})} placeholder={planForm.planType === 'one_month' ? 'e.g. One Month Only — All Batches' : 'e.g. Monthly — All Batches'}/></label>
+        <label className="erp-field">Plan type<select value={planForm.planType || 'subscription'} onChange={e => { const planType = e.target.value; setPlanForm({...planForm, planType, durationMonths: planType === 'one_month' ? 1 : (Number(planForm.durationMonths) || 1), renewalEnabledDefault: planType === 'one_month' ? false : planForm.renewalEnabledDefault !== false}); }}>{PLAN_TYPES.map(type => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label>
         <label className="erp-field">Price (₹{billing.gstEnabled && !billing.priceIncludesGst ? ', before GST' : ''})<input type="number" min={0} step="0.01" required value={planForm.amountRupees} onChange={e => setPlanForm({...planForm, amountRupees: e.target.value})}/></label>
-        <label className="erp-field">Duration (months)<input type="number" min={1} max={24} required value={planForm.durationMonths} onChange={e => setPlanForm({...planForm, durationMonths: e.target.value})}/></label>
+        <label className="erp-field">Billing period (months)<input type="number" min={1} max={24} required disabled={planForm.planType === 'one_month'} value={planForm.planType === 'one_month' ? 1 : planForm.durationMonths} onChange={e => setPlanForm({...planForm, durationMonths: e.target.value})}/></label>
+        <label className="erp-field">Default billing cycle<select value={planForm.billingCycle || 'joining'} onChange={e => setPlanForm({...planForm, billingCycle: e.target.value})}><option value="joining">Joining date (monthly anniversary)</option><option value="calendar">Calendar month (align to period start)</option></select></label>
+        <label className="erp-field">Plan status<select value={planForm.status || 'active'} onChange={e => setPlanForm({...planForm, status: e.target.value})}><option value="active">Active</option><option value="archived">Archived</option></select></label>
+        {planForm.planType === 'one_month'
+          ? <span className="erp-field full">Renewal<span style={{fontSize: 14, color: '#3d3547'}}>No renewal — each sale is one fixed month. Pause and subscription renewal controls will not appear.</span></span>
+          : <label className="erp-toggle-row full"><input type="checkbox" checked={planForm.renewalEnabledDefault !== false} onChange={e => setPlanForm({...planForm, renewalEnabledDefault: e.target.checked})}/> <span>Renewal tracking on by default for new subscriptions (manager-confirmed, no automatic charge)</span></label>}
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPlanForm(null)}>Cancel</button><button className="primary-button">Save plan</button></div></form></Dialog>}
 
-    {membershipForm && <Dialog title="New subscription" sub="Choose calendar-month billing (1st to month-end) or joining-date billing (same date monthly). Renewal is tracked here; it does not charge the student automatically." onClose={() => setMembershipForm(null)}>
-      <form className="erp-form" onSubmit={async e => { e.preventDefault(); const student = data.students.find(s => s.id === membershipForm.studentId); const plan = data.plans.find(p => p.id === membershipForm.planId);
+    {membershipForm && (() => {
+      const formOfferingType = normalizePlanType(membershipForm.offeringType);
+      const formIsOneMonth = formOfferingType === 'one_month';
+      const formPlans = activePlans(data, formOfferingType);
+      const selectedPlan = data.plans.find(plan => plan.id === membershipForm.planId) || null;
+      const selectedTemplate = normalizePlanTemplate(selectedPlan || {planType: formOfferingType});
+      return <Dialog title={formIsOneMonth ? 'New one-month pass' : 'New subscription'} sub={formIsOneMonth ? 'Create one fixed month with its own due balance and invoice. It does not renew and cannot be paused. Payments are collected manually after verification.' : 'Choose calendar-month billing (1st to month-end) or joining-date billing (same date monthly). Renewal is tracked here; it does not charge the student automatically.'} onClose={() => setMembershipForm(null)}>
+      <form className="erp-form" onSubmit={async e => { e.preventDefault(); const student = data.students.find(s => s.id === membershipForm.studentId); const plan = data.plans.find(p => p.id === membershipForm.planId); const template = normalizePlanTemplate(plan || {planType: formOfferingType});
         if (await erp.act(c => c.saveMembership({
           studentId: membershipForm.studentId, planId: membershipForm.planId, branchId: student?.branchId || '',
           startDate: membershipForm.startDate, billingCycle: membershipForm.billingCycle,
-          durationMonths: plan?.durationMonths, amountPaise: rupeesToPaise(membershipForm.amountRupees),
-          status: 'active', autoRenew: membershipForm.autoRenew !== false,
+          durationMonths: template.durationMonths, amountPaise: rupeesToPaise(membershipForm.amountRupees),
+          status: 'active', offeringType: formOfferingType,
+          autoRenew: formIsOneMonth ? false : membershipForm.autoRenew !== false,
           previousMembershipId: '', renewalNumber: 0, totalPausedDays: 0,
-        }), 'Subscription created.')) setMembershipForm(null); }}>
+        }), formIsOneMonth ? 'One-month pass created.' : 'Subscription created.')) setMembershipForm(null); }}>
         <label className="erp-field">Student<select required value={membershipForm.studentId} onChange={e => setMembershipForm({...membershipForm, studentId: e.target.value})}>{data.students.filter(s => s.status === 'active' && inBranch(ctx, s.branchId)).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label className="erp-field">Plan<select required value={membershipForm.planId} onChange={e => { const plan = data.plans.find(p => p.id === e.target.value); setMembershipForm({...membershipForm, planId: e.target.value, amountRupees: plan ? paiseToRupees(plan.amountPaise) : ''}); }}>{data.plans.filter(p => p.status !== 'archived').length === 0 && <option value="">No active plan available</option>}{data.plans.filter(p => p.status !== 'archived').map(p => <option key={p.id} value={p.id}>{p.name} · {formatINR(p.amountPaise)}</option>)}</select></label>
+        <label className="erp-field">Plan<select required value={membershipForm.planId} onChange={e => { const plan = data.plans.find(p => p.id === e.target.value); const template = normalizePlanTemplate(plan || {planType: formOfferingType}); setMembershipForm({...membershipForm, planId: e.target.value, amountRupees: plan ? paiseToRupees(plan.amountPaise) : '', billingCycle: template.billingCycle, autoRenew: template.renewalEnabledDefault}); }}>{formPlans.length === 0 && <option value="">{formIsOneMonth ? 'No active one-month plan available' : 'No active subscription plan available'}</option>}{formPlans.map(p => <option key={p.id} value={p.id}>{p.name} · {formatINR(p.amountPaise)} · {planBillingPeriodLabel(p)}</option>)}</select></label>
         <label className="erp-field">Start date<input type="date" required value={membershipForm.startDate} onChange={e => setMembershipForm({...membershipForm, startDate: e.target.value})}/></label>
         <label className="erp-field">Billing cycle<select value={membershipForm.billingCycle} onChange={e => setMembershipForm({...membershipForm, billingCycle: e.target.value})}><option value="joining">Joining date (monthly)</option><option value="calendar">Calendar month</option></select></label>
         <label className="erp-field">Amount (₹{billing.gstEnabled && !billing.priceIncludesGst ? ', before GST' : ''})<input type="number" min={0} step="0.01" required value={membershipForm.amountRupees} onChange={e => setMembershipForm({...membershipForm, amountRupees: e.target.value})}/></label>
-        <span className="erp-field">Ends on<span style={{fontSize: 14, color: '#3d3547'}}>{formatDate(membershipEnd(membershipForm.startDate, data.plans.find(p => p.id === membershipForm.planId)?.durationMonths || 1, membershipForm.billingCycle))}</span></span>
-        <label className="erp-toggle-row full"><input type="checkbox" checked={membershipForm.autoRenew !== false} onChange={e => setMembershipForm({...membershipForm, autoRenew: e.target.checked})}/> <span>Renewal enabled — show the next renewal date and renewal reminders (manager-confirmed, no automatic charge)</span></label>
-        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setMembershipForm(null)}>Cancel</button><button className="primary-button" disabled={!membershipForm.planId}>Create subscription</button></div></form></Dialog>}
+        <span className="erp-field">Ends on<span style={{fontSize: 14, color: '#3d3547'}}>{formatDate(membershipEnd(membershipForm.startDate, selectedTemplate.durationMonths, membershipForm.billingCycle))}</span></span>
+        {formIsOneMonth
+          ? <span className="erp-field full">Renewal<span style={{fontSize: 14, color: '#3d3547'}}>No renewal — this pass ends after one month.</span></span>
+          : <label className="erp-toggle-row full"><input type="checkbox" checked={membershipForm.autoRenew !== false} onChange={e => setMembershipForm({...membershipForm, autoRenew: e.target.checked})}/> <span>Renewal enabled — show the next renewal date and renewal reminders (manager-confirmed, no automatic charge)</span></label>}
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setMembershipForm(null)}>Cancel</button><button className="primary-button" disabled={!membershipForm.planId}>{formIsOneMonth ? 'Create one-month pass' : 'Create subscription'}</button></div></form></Dialog>;
+    })()}
 
     {pauseForm && <Dialog title="Pause subscription" sub={`Pause ${studentName(data, pauseForm.membership.studentId)}’s current period. When it resumes, the elapsed pause days are added to the end date. Attendance and batch enrolment are not changed automatically.`} onClose={() => setPauseForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault();
@@ -2424,25 +2570,26 @@ export function FeesPage(props) {
         <span className="erp-field">New end date<span style={{fontSize: 14, color: '#3d3547'}}>{formatDate(membershipEnd(resumeForm.membership.startDate, resumeForm.membership.durationMonths, resumeForm.membership.billingCycle, (Number(resumeForm.membership.totalPausedDays) || 0) + pauseDaysBetween(resumeForm.membership.pausedFrom, resumeForm.resumeDate)))}</span></span>
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setResumeForm(null)}>Cancel</button><button className="primary-button">Resume subscription</button></div></form></Dialog>}
 
-    {cancelForm && <Dialog title="Cancel subscription" sub={`Cancel ${studentName(data, cancelForm.membership.studentId)}’s subscription period. It cannot be reopened; recorded payments and receipts remain in history. Create a new subscription if the student returns.`} onClose={() => setCancelForm(null)}>
+    {cancelForm && <Dialog title={cancelIsOneMonth ? 'Cancel one-month pass' : 'Cancel subscription'} sub={`Cancel ${studentName(data, cancelForm.membership.studentId)}’s ${cancelKindLabel} period. It cannot be reopened; recorded payments and receipts remain in history. Create a new ${cancelKindLabel} if the student returns.`} onClose={() => setCancelForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault();
-        if (await erp.act(c => c.cancelMembership({id: cancelForm.membership.id, reason: cancelForm.reason.trim()}), 'Subscription cancelled.')) setCancelForm(null); }}>
+        if (await erp.act(c => c.cancelMembership({id: cancelForm.membership.id, reason: cancelForm.reason.trim()}), cancelIsOneMonth ? 'One-month pass cancelled.' : 'Subscription cancelled.')) setCancelForm(null); }}>
         <label className="erp-field full">Cancellation reason<input maxLength={500} value={cancelForm.reason} onChange={e => setCancelForm({...cancelForm, reason: e.target.value})} placeholder="Student requested, moving, completed…"/></label>
-        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setCancelForm(null)}>Keep subscription</button><button className="danger-button">Cancel subscription</button></div></form></Dialog>}
+        <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setCancelForm(null)}>{cancelIsOneMonth ? 'Keep pass' : 'Keep subscription'}</button><button className="danger-button">{cancelIsOneMonth ? 'Cancel one-month pass' : 'Cancel subscription'}</button></div></form></Dialog>}
 
-    {renewForm && (() => { const renewalPlan = data.plans.find(plan => plan.id === renewForm.planId); return <Dialog title="Renew subscription" sub={`Create the next period for ${studentName(data, renewForm.membership.studentId)} at the current Plan price and duration. The existing period, its payments and receipts stay unchanged.`} onClose={() => setRenewForm(null)}>
+    {renewForm && (() => { const renewalPlan = activePlans(data, 'subscription').find(plan => plan.id === renewForm.planId); return <Dialog title="Renew subscription" sub={`Create the next period for ${studentName(data, renewForm.membership.studentId)} at the current Plan price and duration. The existing period, its payments and receipts stay unchanged.`} onClose={() => setRenewForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); if (!renewalPlan) return;
         if (await erp.act(c => c.saveMembership({
           studentId: renewForm.membership.studentId, planId: renewalPlan.id,
           branchId: renewForm.membership.branchId, startDate: renewForm.startDate,
           billingCycle: renewForm.billingCycle, durationMonths: renewalPlan.durationMonths,
-          amountPaise: renewalPlan.amountPaise, status: 'active', autoRenew: renewForm.autoRenew !== false,
+          amountPaise: renewalPlan.amountPaise, status: 'active', offeringType: 'subscription',
+          autoRenew: renewForm.autoRenew !== false,
           previousMembershipId: renewForm.membership.id,
           renewalNumber: (Number(renewForm.membership.renewalNumber) || 0) + 1,
           pausedFrom: '', pausedUntil: '', pauseReason: '', totalPausedDays: 0,
           cancelledAt: null, cancelReason: '',
         }), 'Renewal subscription created at the current plan price. Its due balance and invoice are ready in Subscriptions & dues.')) setRenewForm(null); }}>
-        <label className="erp-field">Renewal plan<select required value={renewForm.planId} onChange={e => setRenewForm({...renewForm, planId: e.target.value})}>{data.plans.filter(plan => plan.status !== 'archived').length === 0 && <option value="">No active plan available</option>}{data.plans.filter(plan => plan.status !== 'archived').map(plan => <option key={plan.id} value={plan.id}>{plan.name} · {formatINR(plan.amountPaise)} · {plan.durationMonths} month(s)</option>)}</select></label>
+        <label className="erp-field">Renewal plan<select required value={renewForm.planId} onChange={e => { const plan = activePlans(data, 'subscription').find(item => item.id === e.target.value); const template = normalizePlanTemplate(plan || {}); setRenewForm({...renewForm, planId: e.target.value, billingCycle: template.billingCycle, autoRenew: template.renewalEnabledDefault}); }}>{activePlans(data, 'subscription').length === 0 && <option value="">No active subscription plan available</option>}{activePlans(data, 'subscription').map(plan => <option key={plan.id} value={plan.id}>{plan.name} · {formatINR(plan.amountPaise)} · {planBillingPeriodLabel(plan)}</option>)}</select></label>
         <label className="erp-field">Renewal start date<input type="date" required value={renewForm.startDate} onChange={e => setRenewForm({...renewForm, startDate: e.target.value})}/></label>
         <label className="erp-field">Billing cycle<select value={renewForm.billingCycle} onChange={e => setRenewForm({...renewForm, billingCycle: e.target.value})}><option value="joining">Joining date (monthly)</option><option value="calendar">Calendar month</option></select></label>
         <label className="erp-field">Renewal amount (₹)<input type="number" readOnly value={renewalPlan ? paiseToRupees(renewalPlan.amountPaise) : ''}/></label>
@@ -2465,16 +2612,29 @@ export function FeesPage(props) {
 
     {paymentForm && <Dialog title="Record verified payment" sub="Record only after funds are received/verified. A final receipt number is assigned by Supabase; if offline, the payment is saved on this device first and the receipt appears after sync." onClose={() => setPaymentForm(null)}>
       <form className="erp-form" onSubmit={async e => { e.preventDefault(); const m = data.memberships.find(x => x.id === paymentForm.membershipId); if (!m) return;
-        if (await erp.act(c => c.recordPayment({membershipId: m.id, studentId: m.studentId, branchId: m.branchId, amountPaise: rupeesToPaise(paymentForm.amountRupees), method: paymentForm.method, paidOn: paymentForm.paidOn, note: paymentForm.note}), 'Payment recorded. Receipt is in the Payments tab.')) { setPaymentForm(null); setTab('payments'); } }}>
-        <label className="erp-field full">Subscription<select required value={paymentForm.membershipId} onChange={e => { const m = data.memberships.find(x => x.id === e.target.value); setPaymentForm({...paymentForm, membershipId: e.target.value, amountRupees: m ? paiseToRupees(payableBalance(m, data.payments, billing, today).due) : ''}); }}>
-          {collectableMemberships.map(m => <option key={m.id} value={m.id}>{studentName(data, m.studentId)} · {planName(data, m.planId)} · {subscriptionLifecycle(m, today).id} · due {formatINR(payableBalance(m, data.payments, billing, today).due)}</option>)}</select></label>
+        if (await erp.act(c => c.recordPayment({membershipId: m.id, studentId: m.studentId, branchId: m.branchId, amountPaise: rupeesToPaise(paymentForm.amountRupees), method: paymentForm.method, paidOn: paymentForm.paidOn, note: paymentForm.note}), 'Payment recorded. Receipt is in Payments.')) { setPaymentForm(null); if (isPaymentsWorkspace) setTab('payments'); else go?.('payments'); } }}>
+        <label className="erp-field full">Subscription or one-month pass<select required value={paymentForm.membershipId} onChange={e => { const m = data.memberships.find(x => x.id === e.target.value); setPaymentForm({...paymentForm, membershipId: e.target.value, amountRupees: m ? paiseToRupees(payableBalance(m, data.payments, billing, today).due) : ''}); }}>
+          {collectableMemberships.map(m => <option key={m.id} value={m.id}>{studentName(data, m.studentId)} · {planName(data, m.planId)} · {membershipKindLabel(data, m)} · {subscriptionLifecycle(m, today).id} · due {formatINR(payableBalance(m, data.payments, billing, today).due)}</option>)}</select></label>
         <label className="erp-field">Amount received (₹)<input type="number" min="0.01" step="0.01" required value={paymentForm.amountRupees} onChange={e => setPaymentForm({...paymentForm, amountRupees: e.target.value})}/></label>
         <label className="erp-field">Method<select value={paymentForm.method} onChange={e => setPaymentForm({...paymentForm, method: e.target.value})}>{PAYMENT_METHODS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></label>
         <label className="erp-field">Paid on<input type="date" required value={paymentForm.paidOn} onChange={e => setPaymentForm({...paymentForm, paidOn: e.target.value})}/></label>
         <label className="erp-field">Note / transaction reference<input value={paymentForm.note} onChange={e => setPaymentForm({...paymentForm, note: e.target.value})} placeholder="UPI/bank/card reference (recommended)"/></label>
-        {(paymentConfigWarning || paymentGstWarning) && <div className="erp-banner" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><div>{paymentConfigWarning || paymentGstWarning}{paymentConfigWarning && paymentGstWarning ? <> {paymentGstWarning}</> : null}{paymentConfigWarning && canManageOrg(ctx) ? <> <button type="button" className="erp-link-btn" onClick={() => { setPaymentForm(null); setTab('setup'); }}>Open Payment setup</button></> : null}</div></div>}
+        {(paymentConfigWarning || paymentGstWarning) && <div className="erp-banner" style={{gridColumn: '1 / -1', margin: 0}}><AlertCircle size={18}/><div>{paymentConfigWarning || paymentGstWarning}{paymentConfigWarning && paymentGstWarning ? <> {paymentGstWarning}</> : null}{paymentConfigWarning && canManageOrg(ctx) ? <> <button type="button" className="erp-link-btn" onClick={() => { setPaymentForm(null); if (isPaymentsWorkspace) setTab('setup'); else go?.('payments'); }}>{isPaymentsWorkspace ? 'Open Payment setup' : 'Open Payments'}</button></> : null}</div></div>}
         <div className="erp-form-actions"><button type="button" className="secondary-button" onClick={() => setPaymentForm(null)}>Cancel</button><button className="primary-button">Save payment</button></div></form></Dialog>}
 
     {invoice && <InvoiceDialog data={data} invoice={invoice} onClose={() => setInvoice(null)}/>}
   </>;
+}
+
+export function SubscriptionsPage(props) {
+  return <FinanceWorkspacePage {...props} workspace="subscriptions"/>;
+}
+
+export function PaymentsPage(props) {
+  return <FinanceWorkspacePage {...props} workspace="payments"/>;
+}
+
+/** Compatibility for older imports/navigation saved in browser sessions. */
+export function FeesPage(props) {
+  return <SubscriptionsPage {...props}/>;
 }

@@ -6,6 +6,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.7.0 — 2026-10-31
+
+### Changed — Subscription, Payments and branch navigation
+
+- **Subscriptions is now a top-level menu.** It contains **Subscriptions &
+  dues**, **One-month passes** and **Plans**. The former Fees menu is now
+  **Payments**, containing payment history, **Record payment**, due/paid
+  invoice PDFs and **Payment setup**. Recording a payment from a
+  subscription or pass row lands in Payments after saving.
+- **Student navigation follows the same split:** the dashboard says **My
+  subscription & passes**, and Students get view-only **My subscriptions &
+  passes** and **My payments** screens. A one-month pass displays **No
+  renewal** instead of a renewal date.
+- **Manager batch work moved under Branches & batches.** The manager page
+  now has **Branches**, **Batches** and **Instructor profiles** tabs, and
+  the standalone manager **Batches** menu was removed. Instructors and
+  Students keep their standalone assigned-batch views because the branch
+  workspace remains manager-only.
+
+### Added — Odoo-style Plan templates and one-month-only passes
+
+- **Plan templates:** each Plan now records its type (**Subscription** or
+  **One-month only**), INR price, billing period in months, default
+  calendar-month/joining-date alignment, renewal-tracking default and
+  Active/Archived status. The Plans table shows the price, billing period,
+  renewal behaviour and currently active count. New subscription and pass
+  forms offer only active templates of the matching type and prefill terms
+  from the selected template. Existing periods keep their amount and now
+  snapshot `offeringType`, so editing a template later cannot convert an
+  existing subscription into a pass or vice versa.
+- **One-month only:** this distinct non-subscription offering creates one
+  fixed month with dues, a due invoice and payment collection. It is shown
+  separately under **Subscriptions → One-month passes** with its own
+  active/scheduled/expired/cancelled filters, outstanding-dues summary and
+  **New one-month pass** action. It offers Invoice, Collect and Cancel pass
+  only—no Pause, Renew, History, next-renewal date or MRR contribution.
+- **Server-enforced invariants:** shared client logic, the this-device
+  store, direct RPCs, offline-sync RPCs and SQL constraints normalize a
+  one-month pass to exactly one month, `autoRenew = false`, no previous
+  period, renewal number 0, zero paused days and never paused. New
+  offering/Plan-type mismatches are rejected, a one-month Plan cannot be
+  used for a renewal, and a one-month pass cannot be a renewal source.
+  Offline renewal attempts against a pass return the named manual conflict
+  `ONE_MONTH_NO_RENEWAL`. Renewal forms only offer active subscription
+  templates, while the payment form labels and accepts either a
+  subscription or a one-month pass.
+- **Out of scope retained:** no Odoo connection/embed, unattended
+  recurring-invoice scheduler, saved-method autopay, retry/dunning,
+  subscription stages/forecasting or Student lifecycle self-service was
+  added. Renewals remain manager-confirmed.
+
+### Validation
+
+- Logic coverage adds Odoo-style template normalization and one-month
+  lifecycle/MRR assertions. The browser suite covers the new
+  Branches/Batches/Instructor paths, Subscriptions/Payments split,
+  Admin/Student visibility, creation of a One-month only Plan, a separate
+  one-month pass with no Pause/Renew/History actions, and the existing
+  subscription pause/resume/renew/cancel journey.
+- Ephemeral PGlite validation passes the previous 41 subscription
+  lifecycle/security checks against SQL v8, 14 dedicated SQL v8
+  template/offering/direct/sync/payment checks, and a SQL v7 → v8 upgrade
+  simulation that preserves active/paused periods while backfilling
+  subscription template and offering fields. Live Supabase UAT remains
+  required after running SQL v8 in the real project.
+
+### Database migration — SQL v8 (includes SQL v7, v6 and v5)
+
+- Run the complete updated `supabase/erp_setup.sql` once in the Supabase SQL
+  Editor. SQL v8 adds Plan `plan_type`, `billing_cycle` and
+  `renewal_enabled_default`; membership `offering_type`; one-month template
+  and period constraints; type/offering indexes; snapshot fields; and
+  matching direct and offline-sync RPC normalization. Existing Plans and
+  memberships backfill as `subscription` with joining-date template
+  alignment and renewal tracking enabled, preserving amounts and period
+  dates. The single setup file remains idempotent and does not delete
+  business rows. Run SQL v8 before using a One-month only Plan/pass from the
+  deployed 1.7.0 app.
+
 ## 1.6.0 — 2026-10-31
 
 ### Added — Fixed Role Access for Owner, Co-owner, Admin, Instructor and Student

@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   attendanceSummary, formatINR, membershipBalance, membershipEnd,
-  monthlyRecurringRevenuePaise, nextRenewalDate, pauseDaysBetween,
+  monthlyRecurringRevenuePaise, nextRenewalDate, normalizePlanTemplate,
+  normalizeSubscriptionLifecycle, pauseDaysBetween, planBillingPeriodLabel,
   renewalStartDate, rupeesToPaise, subscriptionLifecycle, isBatchOnDate,
 } from '../src/lib/erp/logic.js';
 
@@ -50,6 +51,38 @@ test('subscription lifecycle derives scheduled, paused, expired and cancelled st
   assert.equal(renewalStartDate(base, '2026-11-05'), '2026-11-05');
 });
 
+test('Odoo-style plan templates distinguish subscriptions from one-month-only offerings', () => {
+  assert.deepEqual(normalizePlanTemplate({
+    planType: 'subscription', durationMonths: 3, billingCycle: 'calendar',
+    renewalEnabledDefault: false,
+  }), {
+    planType: 'subscription', durationMonths: 3, billingCycle: 'calendar',
+    renewalEnabledDefault: false,
+  });
+  assert.deepEqual(normalizePlanTemplate({
+    planType: 'one_month', durationMonths: 12, billingCycle: 'joining',
+    renewalEnabledDefault: true,
+  }), {
+    planType: 'one_month', durationMonths: 1, billingCycle: 'joining',
+    renewalEnabledDefault: false,
+  });
+  assert.equal(planBillingPeriodLabel({planType: 'subscription', durationMonths: 3}), 'Every 3 months');
+  assert.equal(planBillingPeriodLabel({planType: 'one_month', durationMonths: 12}), 'One month only');
+
+  const oneMonth = normalizeSubscriptionLifecycle({
+    status: 'active', autoRenew: true, previousMembershipId: 'previous',
+    renewalNumber: 4, totalPausedDays: 9,
+  }, null, 'one_month');
+  assert.equal(oneMonth.offeringType, 'one_month');
+  assert.equal(oneMonth.autoRenew, false);
+  assert.equal(oneMonth.previousMembershipId, '');
+  assert.equal(oneMonth.renewalNumber, 0);
+  assert.equal(oneMonth.totalPausedDays, 0);
+  assert.equal(nextRenewalDate({
+    offeringType: 'one_month', status: 'active', endDate: '2026-10-31', autoRenew: false,
+  }, '2026-10-15'), '');
+});
+
 test('paused days extend a subscription end date when it resumes', () => {
   assert.equal(pauseDaysBetween('2026-10-10', '2026-10-20'), 10);
   assert.equal(pauseDaysBetween('2026-10-20', '2026-10-10'), 0);
@@ -63,6 +96,7 @@ test('monthly recurring revenue counts only current active subscriptions', () =>
     {status: 'paused', startDate: '2026-10-01', endDate: '2026-10-31', amountPaise: 900000, durationMonths: 1},
     {status: 'active', startDate: '2026-11-01', endDate: '2026-11-30', amountPaise: 900000, durationMonths: 1},
     {status: 'cancelled', startDate: '2026-10-01', endDate: '2026-10-31', amountPaise: 900000, durationMonths: 1},
+    {offeringType: 'one_month', status: 'active', startDate: '2026-10-01', endDate: '2026-10-31', amountPaise: 900000, durationMonths: 1},
   ];
   assert.equal(monthlyRecurringRevenuePaise(rows, '2026-10-15'), 250000);
 });

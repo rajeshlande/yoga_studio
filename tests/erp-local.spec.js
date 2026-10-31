@@ -113,7 +113,9 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await page.getByRole('button', {name: 'Dashboard', exact: true}).click();
 
   // Branch
-  await page.getByRole('button', {name: 'Branches', exact: true}).click();
+  await page.getByRole('button', {name: 'Branches & batches', exact: true}).click();
+  await expect(page.getByRole('tab', {name: 'Batches'})).toBeVisible();
+  await expect(page.getByRole('tab', {name: 'Instructor profiles'})).toBeVisible();
   await page.getByRole('button', {name: 'Add branch'}).click();
   expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Branch name').fill('Panvel');
@@ -131,12 +133,14 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await page.getByRole('button', {name: 'Save student'}).click();
   await expect(page.getByRole('cell', {name: /Asha Patil/})).toBeVisible();
 
-  // Instructor + batch + enrollment
-  await page.getByRole('button', {name: 'Batches', exact: true}).click();
+  // Instructor + batch + enrollment now live under Branches & batches.
+  await page.getByRole('button', {name: 'Branches & batches', exact: true}).click();
+  await page.getByRole('tab', {name: 'Instructor profiles'}).click();
   await page.getByRole('button', {name: 'Add instructor'}).click();
   expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Instructor name').fill('Meera Joshi');
   await page.getByRole('button', {name: 'Save instructor'}).click();
+  await page.getByRole('tab', {name: 'Batches'}).click();
   await page.getByRole('button', {name: 'Add batch'}).click();
   // Regression: Branch used to sit 21px below Batch name because an
   // auth-only stacked-label margin leaked into ERP's two-column grids.
@@ -173,12 +177,22 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   await expect(page.locator('.toast')).toContainText('Attendance saved');
 
   // Plan + membership + payment + receipt
-  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await page.getByRole('button', {name: 'Subscriptions', exact: true}).click();
   await page.getByRole('tab', {name: 'Plans'}).click();
   await page.getByRole('button', {name: 'Add plan'}).click();
   await page.getByLabel('Plan name').fill('Monthly');
   await page.getByLabel('Price (₹)').fill('1500');
   await page.getByRole('button', {name: 'Save plan'}).click();
+
+  // Odoo-style templates can also be a distinct one-month-only offering.
+  await page.getByRole('button', {name: 'Add plan'}).click();
+  await page.getByLabel('Plan name').fill('One Month Only');
+  await page.getByLabel('Plan type').selectOption('one_month');
+  await page.getByLabel('Price (₹)').fill('1200');
+  await expect(page.getByLabel('Billing period (months)')).toBeDisabled();
+  await expect(page.getByText(/No renewal — each sale is one fixed month/)).toBeVisible();
+  await page.getByRole('button', {name: 'Save plan'}).click();
+
   await page.getByRole('tab', {name: 'Subscriptions & dues'}).click();
   await page.getByRole('button', {name: 'New subscription'}).click();
   await page.getByRole('button', {name: 'Create subscription'}).click();
@@ -196,6 +210,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // Admin configures GST + manual UPI/bank + public gateway identifiers.
   // No gateway secret field exists; auto-confirmation remains not ready until
   // a trusted webhook is configured outside the browser.
+  await page.getByRole('button', {name: 'Payments', exact: true}).click();
   await page.getByRole('tab', {name: 'Payment setup'}).click();
   expectAlignedPair(await fieldBoxes(page, '.erp-panel .erp-form > .erp-field'));
   await page.getByLabel('Billing legal/business name').fill('Example Yoga LLP');
@@ -220,6 +235,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // The same unpaid invoice now carries GST breakup, bank details and an
   // offline-generated dynamic UPI QR. The print regression helper proves the
   // complete invoice fits one A4 page outside the scrolling dialog.
+  await page.getByRole('button', {name: 'Subscriptions', exact: true}).click();
   await page.getByRole('tab', {name: 'Subscriptions & dues'}).click();
   await page.getByRole('button', {name: /Invoice PDF/}).click();
   invoiceDialog = page.getByRole('dialog', {name: 'Payment invoice'});
@@ -249,6 +265,7 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
 
   // Device-only mode uses the same lifecycle rules: pause/resume the paid
   // period, then create a linked renewal from the current Plan.
+  await page.getByRole('button', {name: 'Subscriptions', exact: true}).click();
   await page.getByRole('tab', {name: 'Subscriptions & dues'}).click();
   let localSubscriptionRow = page.getByRole('row', {name: /Asha Patil/});
   await localSubscriptionRow.getByRole('button', {name: 'Pause'}).click();
@@ -271,12 +288,28 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
     .toBe(localMemberships.find(item => item.renewalNumber === 0)?.id);
   expect(localMemberships.find(item => item.renewalNumber === 1)?.autoRenew).toBeTruthy();
 
+  // A one-month pass is separate from subscriptions and has no pause, renew,
+  // or history actions.
+  await page.getByRole('tab', {name: 'One-month passes'}).click();
+  await page.getByRole('button', {name: 'New one-month pass'}).click();
+  await page.getByRole('button', {name: 'Create one-month pass'}).click();
+  const oneMonthRow = page.getByRole('row', {name: /Asha Patil.*One-month pass/});
+  await expect(oneMonthRow).toBeVisible();
+  await expect(oneMonthRow.getByRole('button', {name: 'Pause'})).toHaveCount(0);
+  await expect(oneMonthRow.getByRole('button', {name: 'Renew'})).toHaveCount(0);
+  await expect(oneMonthRow.getByRole('button', {name: 'History'})).toHaveCount(0);
+  const passMembership = await page.evaluate(() => JSON.parse(localStorage.getItem('yoga-studio-erp-v1'))
+    .memberships.find(item => item.offeringType === 'one_month'));
+  expect(passMembership?.durationMonths).toBe(1);
+  expect(passMembership?.autoRenew).toBeFalsy();
+  expect(passMembership?.previousMembershipId || '').toBe('');
+
   // Data survives a reload (offline persistence) and fits a phone screen.
   await page.reload();
   await expect(page.getByRole('navigation')).toBeVisible();
   await page.setViewportSize({width: 390, height: 844});
   await page.getByRole('button', {name: 'Open menu'}).click();
-  await page.getByRole('button', {name: 'Fees', exact: true}).click();
+  await page.getByRole('button', {name: 'Subscriptions', exact: true}).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.context().setOffline(true);
   await expect(page.locator('.connection-badge')).toContainText('Offline · this device');

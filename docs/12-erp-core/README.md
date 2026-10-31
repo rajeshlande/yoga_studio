@@ -1,7 +1,7 @@
-# Yoga Studio ERP — Core (v1.6.0)
+# Yoga Studio ERP — Core (v1.7.0)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
-**Students + Batches + Attendance + Fees/Payments**, with **multi-branch**
+**Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
 support, **Owner / Co-owner / Admin / Instructor / Student portals**, monthly
 fees in **INR**, mobile + desktop UI and offline support. Version 1.3.0
 upgraded the signed-in Supabase mode to **offline-first sync with manual
@@ -16,7 +16,7 @@ signed-in **Student portal access** workflow. Version 1.6.0 generalizes that
 server-checked account-linking model to **fixed Role Access for all five
 roles**: each person creates/confirms a dedicated account first, then an
 authorized manager links the exact sign-in email in **Access** (or
-**Students → Portal access** for a Student). SQL v7 enforces the role,
+**Students → Portal access** for a Student). SQL v8 enforces the role,
 selected-branch and own-record rules on snapshot, direct RPC and offline-sync
 paths; there is no custom permission-group/module editor. It also adds an
 account-first public Student admission link: a signed-in applicant submits
@@ -24,8 +24,12 @@ the form, a manager chooses branch/joining date during review, and
 confirmation creates the Student and grants that same account portal access.
 Plans plus membership periods now provide a native Odoo-style subscription
 lifecycle with pause/resume, cancellation reasons, renewal dates/history
-and manager-confirmed one-click renewals at the current Plan price. This
-release deliberately has no unattended recurring-invoice scheduler or
+and manager-confirmed one-click renewals at the current Plan price. Version
+1.7.0 separates top-level **Subscriptions** from **Payments**, turns Plans
+into operational templates with type/period/alignment/renewal defaults, and
+adds a distinct **One-month only** Plan/pass that does not pause or renew.
+Manager batch and instructor-profile work moves under **Branches & batches**.
+This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
 ## What works today
@@ -33,12 +37,12 @@ saved-method autopay.
 | Area | Included |
 |---|---|
 | Dashboard | KPIs (active students, today's classes, collected this month, pending dues), today's class list, subscriptions expiring in 7 days, first-run setup checklist; role-specific cards for Instructor/Student |
-| Branches | Add/edit/archive branches; per-branch student & batch counts; branch filter everywhere |
+| Branches & batches | Manager workspace with **Branches**, **Batches** and **Instructor profiles** tabs; add/edit/archive branches, per-branch student & batch counts, and branch filtering everywhere |
 | Students | Add/edit/deactivate, search, branch, split name/contact/admission profile, joining date, batches, attendance %, CSV export; in Supabase mode, Owner/Co-owner/branch-Admin portal-access status plus grant/replace/remove by the student's confirmed sign-in email, and a copyable public admission link with pending/confirmed/rejected manager review |
-| Batches | Instructors, recurring days + start time (60 min default), capacity, roster enroll/remove with capacity guard |
+| Batches | Manager tab under Branches & batches; standalone assigned-batch view remains for Instructor/Student. Instructors, recurring days + start time (60 min default), capacity, roster enroll/remove with capacity guard |
 | Attendance | Date + batch picker (today's batch auto-selected), Present/Absent/Late per student, mark-all-present, history + CSV; students see only their own |
-| Fees & subscriptions | Plans (₹, months) as templates; subscription periods with **calendar-month or joining-date** billing, amount snapshot, active/scheduled/paused/expired/cancelled lifecycle, pause/resume date extension, cancellation reasons, renewal tracking/history, one-click current-price renewal, active/paused/renewals-due/MRR summary, dues, verified manual payments (cash/UPI/card/bank), server receipt numbers `YS-YYYY-NNNN`, CSV export; synced payments are append-only and corrected by audited void, never edit/delete |
-| Payment setup & invoices | Owner/Co-owner billing profile with optional GST, UPI/bank instructions and public gateway readiness; themed A4 browser-generated PDFs for unpaid/partial invoices and paid receipts, with dynamic UPI QR only while payment is outstanding |
+| Subscriptions | Odoo-style Plan templates (type, ₹ price, billing period in months, default alignment, renewal default, Active/Archived); subscription periods with **calendar-month or joining-date** billing, amount/offering snapshots, lifecycle, pause/resume, cancellation reasons, renewal tracking/history, one-click current-price renewal, active/paused/renewals-due/MRR summary and dues. **One-month passes** are shown separately and cannot pause/renew or enter MRR |
+| Payments | Payment history, Record verified payment for subscriptions or one-month passes, server receipt numbers `YS-YYYY-NNNN`, CSV export, Owner/Co-owner Payment setup with optional GST/UPI/bank/public-gateway readiness, and themed A4 PDFs for unpaid/partial invoices and paid receipts with dynamic UPI QR only while outstanding; synced payments are append-only and corrected by audited void |
 | Offline sync | Signed-in Supabase mode downloads a per-user device copy, applies ERP changes locally while offline, queues them in a durable mirrored outbox, requests persistent storage, and pushes in dependency order when internet returns; the global top bar plus ERP toolbar/Settings show Online/Offline, synced, waiting, syncing, setup-needed and conflict states |
 | Conflicts | Server row versions detect concurrent edits. Sync never uses last-write-wins: a review dialog compares **This device** with **Supabase now**; Keep Supabase discards the local proposal, while Keep mine reapplies only the fields changed on that device |
 | Access & portals | Five fixed server-enforced roles: protected primary Owner; all-branch Co-owner; selected-branch Admin; Instructor limited to linked batches/rosters/attendance; Student limited to a view-only own-record portal. **Access** manages Co-owner/Admin/Instructor sign-ins by confirmed email; **Students → Portal access** manages Student sign-ins |
@@ -97,7 +101,7 @@ the last successful pull; the sync RPC re-checks current permission on push.
 
 ### Role access and Student portal access
 
-Version 1.6.0 uses five fixed authorization roles, adapting Odoo's
+Version 1.7.0 continues five fixed authorization roles, adapting Odoo's
 security-group and record-rule ideas to this ERP:
 
 | Role | Scope | May manage access for | Important restrictions |
@@ -115,7 +119,7 @@ None/View/Manage permission editors. The SQL snapshot, direct RPCs and
 hiding a screen in React is not treated as authorization.
 
 Instructor profile setup and Instructor Portal authorization are separate
-manager-only steps. **Batches → Instructor profiles** creates the teaching
+manager-only steps. **Branches & batches → Instructor profiles** creates the teaching
 record, while **Access → Instructor sign-ins** links a confirmed account to
 that record for explicit branches. Only the Owner, a Co-owner or an Admin
 acting within assigned branches can perform either step. The React screens
@@ -265,19 +269,24 @@ on the personal dashboard but remains view-only.
 Yoga Studio does not embed or connect to a separate Odoo instance. It maps
 Odoo's concepts onto the existing ERP records:
 
-- a **Plan** is the reusable subscription template (current price and
-  duration);
-- an `erp_memberships` row is one subscription period, retaining the amount
-  agreed for that period;
-- its dues, due invoice, verified payments and paid receipts remain the
-  existing Fees records; and
+- a **Plan** is the reusable Odoo-style template (`plan_type`, current
+  price, billing period in months, default `billing_cycle` alignment,
+  `renewal_enabled_default` and Active/Archived status);
+- an `erp_memberships` row is one subscription period or one-month pass,
+  retaining the amount and `offering_type` agreed for that period, so a later
+  Plan edit cannot convert history;
+- Plans, subscription periods/dues and one-month passes live in the
+  top-level **Subscriptions** menu;
+- verified payments, Payment setup, due invoices and paid receipts live in
+  the top-level **Payments** menu; and
 - the Student portal is the read-only customer view of that student's own
   periods.
 
 SQL stores only durable `active`, `paused` and `cancelled` status.
 `scheduled` and `expired` are derived in shared client logic from the
 inclusive start/end dates, so no cron is required merely to display them.
-Each period also stores `auto_renew` (renewal tracking/reminders enabled),
+Each period also stores `offering_type`, `auto_renew` (renewal
+tracking/reminders enabled),
 `previous_membership_id`, `renewal_number`, current pause dates/reason,
 cumulative `total_paused_days`, and cancellation timestamp/reason.
 
@@ -310,16 +319,23 @@ cumulative `total_paused_days`, and cancellation timestamp/reason.
   `active`/`paused`; offline sync deliberately returns a clear rejected
   result for a cancelled subscription, while preserving idempotent handling
   of a payment that was already recorded.
+- **One-month only:** a `one_month` Plan is normalized everywhere to one
+  month and no renewal default. Its pass is listed under **Subscriptions →
+  One-month passes**, has fixed-month dues/invoice/payment, and is enforced
+  as `duration_months = 1`, `auto_renew = false`, no previous period,
+  `renewal_number = 0`, zero paused days and never paused. It has no Renew,
+  Pause, History or next-renewal display and is excluded from MRR.
 - **Summary:** managers see current active subscriptions, paused count,
   renewals expired or ending within seven days, and monthly recurring
   revenue. MRR is a simple operational sum of each currently active period's
   amount divided by its duration; when prices are GST-exclusive it is shown
   before GST. It is not accounting revenue recognition.
-- **Student view:** the Student dashboard and Fees table show status,
-  period, next renewal, paid/due amounts and linked History for their own
-  subscriptions only. Copy explicitly says renewal is confirmed by the
-  studio and there is no automatic charge. No pause/resume/cancel/renew or
-  payment-write action is exposed.
+- **Student view:** the Student dashboard says **My subscription & passes**;
+  **My subscriptions & passes** and **My payments** show status, period,
+  next renewal or “No renewal”, paid/due amounts, receipts and linked
+  History for their own records only. Copy explicitly says renewal is
+  confirmed by the studio and there is no automatic charge. No
+  pause/resume/cancel/renew or payment-write action is exposed.
 
 The same lifecycle normalization and guards run in Supabase offline sync
 and the separate this-device store. `previousMembershipId` is an offline
@@ -327,7 +343,10 @@ dependency, so a renewal created in the same offline session waits until
 its source subscription has been acknowledged. A duplicate live renewal
 from another device becomes an `ALREADY_RENEWED` manual conflict; trying to
 reopen a server-cancelled period or renew a server-paused period likewise
-returns a named conflict rather than silently overwriting it.
+returns a named conflict rather than silently overwriting it. Attempting to
+renew a one-month pass returns `ONE_MONTH_NO_RENEWAL`; selling a new pass
+with a mismatched offering/Plan type is rejected in client logic, the
+device store, direct RPCs and sync RPCs.
 
 ### Sync and conflict protocol
 
@@ -385,7 +404,7 @@ returns a named conflict rather than silently overwriting it.
 
 ### Payment setup, GST and invoice documents
 
-- **Fees → Payment setup** is Owner/Co-owner-only. It stores the seller/invoice
+- **Payments → Payment setup** is Owner/Co-owner-only. It stores the seller/invoice
   profile, optional GST fields, UPI ID/payee, bank receiving details, and a
   Razorpay/Cashfree **public** key/client ID plus trusted-webhook readiness.
   Validation covers GSTIN format/state prefix, GST rate, SAC/HSN, PIN,
@@ -436,22 +455,21 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.6.0 this upgrades the database to **SQL v7**: all prior sync,
+   For v1.7.0 this upgrades the database to **SQL v8**: all prior sync,
    billing and Student-access objects; SQL v5 Co-owner/selected-branch
    authorization and staff-access RPCs; the SQL v6 organization admission
    code, locked `erp_admissions` workflow and structured Student profile;
-   and SQL v7 subscription lifecycle columns/constraints, the
-   one-live-renewal partial unique index, snapshot fields, lifecycle and
-   lineage checks in direct membership RPCs and `erp_sync_push`, and
-   paused/cancelled payment rules. It is additive and does not delete
-   business rows. Existing periods keep their amount/dates and default to
-   renewal tracking enabled; legacy cancelled rows receive a cancellation
-   timestamp from their last update/creation time. Run SQL v7 before using
-   the deployed subscription lifecycle actions. If the new app reaches an
-   older database, supported older sync changes stay safely on the device,
-   the toolbar can say **Sync setup needed**, Access/Portal/Admission
-   screens report SQL v7, and a queued new lifecycle operation may need to
-   be discarded and re-entered after the SQL upgrade.
+   SQL v7 subscription lifecycle/lineage rules; and SQL v8 Plan
+   `plan_type`, `billing_cycle` and `renewal_enabled_default`, membership
+   `offering_type`, one-month schema constraints/indexes, snapshot fields
+   and matching direct/sync normalization. It is additive and does not
+   delete business rows. Existing Plans/periods backfill as subscriptions
+   with joining-date template alignment and renewal tracking enabled, while
+   preserving amounts and period dates. Run SQL v8 before using One-month
+   only Plans/passes from the deployed app. If the new app reaches an older
+   database, supported older sync changes stay safely on the device, the
+   toolbar can say **Sync setup needed**, and a queued one-month operation
+   may need to be discarded and re-entered after the SQL upgrade.
 2. Ensure the app is built with `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_ANON_KEY` (publishable/anon key only).
 3. The primary Owner signs up with **Create my own studio** selected, signs
@@ -523,9 +541,14 @@ rule), keeping it idempotent and non-destructive.
   paused payments, cancelled-payment rejection, cancelled-period reopen
   denial and RPC/table privileges; a separate simulation loads the committed
   SQL v6 setup, seeds active/cancelled memberships, runs SQL v7, and verifies
-  preservation, cancellation-time backfill and pause. Those harnesses are not
-  shipped and are not live Supabase UAT.
-- Production UAT still required after running SQL v7 in the real project:
+  preservation, cancellation-time backfill and pause. A dedicated SQL v8
+  harness passes 14 fresh-install checks for template/offering schema,
+  direct/sync one-month normalization, mismatch and pause rejection,
+  renewal-source conflicts and one-month payments; a separate v7 → v8
+  simulation preserves active/paused periods and backfills subscription
+  template/offering fields. Those harnesses are not shipped and are not
+  live Supabase UAT.
+- Production UAT still required after running SQL v8 in the real project:
   sign in as Owner and wait for **Online · synced**; save Payment setup as
   Owner/Co-owner; go offline and mark attendance + record a payment; verify
   the close warning, reconnect and verify automatic sync and one receipt
@@ -542,7 +565,8 @@ rule), keeping it idempotent and non-destructive.
   Physical issue; pause/resume a subscription and verify its end date moves
   by the paused days, change its Plan price and verify a manager-created
   renewal uses the new price, verify a cancelled future renewal can be
-  replaced, and verify the Student sees lifecycle/history without write
+  replaced, create a One-month only Plan/pass and verify no pause/renewal
+  control appears, and verify the Student sees lifecycle/history without write
   controls while an other-branch Admin and Instructor cannot mutate it.
   Mocked tests are not
   proof of live Auth, RLS, email delivery or role revocation behaviour.
@@ -575,14 +599,14 @@ rule), keeping it idempotent and non-destructive.
   available in the app. Revocation prevents future server refreshes/writes,
   but cannot erase a snapshot already downloaded to that person's browser
   while they remain offline.
-- Fees use a single amount per subscription period; proration, discounts and
+- Subscriptions and passes use a single amount per period; proration, discounts and
   refunds follow the accounting approvals still open in
   `docs/11-management-plan/`. GST is invoice calculation/display only. A void
   is an audited correction marker, not a cash-refund workflow. Renewal is
   manager-confirmed only—there is no unattended invoice generation,
   saved-method autopay, retry/dunning or Student self-service lifecycle
-  change—and pausing fees does not automatically suspend batch enrolment or
-  attendance.
+  change—and pausing a subscription does not automatically suspend batch
+  enrolment or attendance.
 - Invoice/receipt PDFs are browser-generated on demand; no PDF file or
   immutable invoice document is stored server-side. The due-invoice reference
   is generated for payment reconciliation, while paid documents use the

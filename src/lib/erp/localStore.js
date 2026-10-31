@@ -8,7 +8,8 @@
 // module's internals later without any UI change — see docs/12-erp-core.
 
 import {
-  uid, toISODate, membershipEnd, emptySnapshot, normalizeSubscriptionLifecycle,
+  uid, toISODate, membershipEnd, membershipOfferingType, emptySnapshot,
+  normalizePlanTemplate, normalizePlanType, normalizeSubscriptionLifecycle,
   normalizeBillingSettings, validateBillingSettings,
 } from './logic.js';
 
@@ -163,10 +164,16 @@ export const localStore = {
 
   async savePlan(payload) {
     const db = loadDb();
+    const oldPlan = payload.id ? db.plans.find(plan => plan.id === payload.id) : null;
+    const template = normalizePlanTemplate({...oldPlan, ...payload});
+    const status = payload.status || oldPlan?.status || 'active';
+    if (!['active', 'archived'].includes(status)) {
+      throw new Error('Choose an active or archived plan status.');
+    }
     upsert(db.plans, {
       id: payload.id || uid(), name: payload.name?.trim(), amountPaise: Number(payload.amountPaise) || 0,
-      durationMonths: Number(payload.durationMonths) || 1, status: payload.status || 'active',
-      createdAt: payload.createdAt || nowISO(),
+      ...template, status,
+      createdAt: oldPlan?.createdAt || payload.createdAt || nowISO(),
     });
     return saveDb(db);
   },
@@ -175,13 +182,38 @@ export const localStore = {
     const db = loadDb();
     const plan = db.plans.find(p => p.id === payload.planId);
     const old = payload.id ? db.memberships.find(m => m.id === payload.id) : null;
-    const durationMonths = Number(payload.durationMonths) || plan?.durationMonths || 1;
-    const lifecycleInput = {...(old || {}), ...payload, status: payload.status || old?.status || 'active'};
+    const planTemplate = normalizePlanTemplate(plan || {});
+    const offeringType = old
+      ? normalizePlanType(old.offeringType || 'subscription')
+      : membershipOfferingType(payload || {}, plan);
+    const oneMonth = offeringType === 'one_month';
+    const kindLabel = oneMonth ? 'one-month pass' : 'subscription';
+    if (!old && plan && offeringType !== planTemplate.planType) {
+      throw new Error('Choose a plan type that matches this offering.');
+    }
+    const durationMonths = oneMonth
+      ? 1
+      : Number(payload.durationMonths) || plan?.durationMonths || 1;
+    let lifecycleInput = {...(old || {}), ...payload, status: payload.status || old?.status || 'active', offeringType};
     if (!['active', 'paused', 'cancelled'].includes(lifecycleInput.status)) {
-      throw new Error('Choose an active, paused or cancelled subscription status.');
+      throw new Error(oneMonth
+        ? 'Choose an active or cancelled one-month pass status.'
+        : 'Choose an active, paused or cancelled subscription status.');
+    }
+    if (oneMonth && lifecycleInput.status === 'paused') {
+      throw new Error('A one-month pass cannot be paused or renewed.');
+    }
+    if (oneMonth && lifecycleInput.previousMembershipId) {
+      throw new Error('A one-month pass cannot be linked as a subscription renewal.');
+    }
+    if (oneMonth) {
+      lifecycleInput = {
+        ...lifecycleInput, autoRenew: false, previousMembershipId: '',
+        renewalNumber: 0, totalPausedDays: 0,
+      };
     }
     if (old?.status === 'cancelled' && lifecycleInput.status !== 'cancelled') {
-      throw new Error('A cancelled subscription cannot be reopened. Create a new subscription instead.');
+      throw new Error(`A cancelled ${kindLabel} cannot be reopened. Create a new ${kindLabel} instead.`);
     }
     if (lifecycleInput.status === 'paused') {
       if (!lifecycleInput.pausedFrom || lifecycleInput.pausedFrom < payload.startDate) {
@@ -191,7 +223,7 @@ export const localStore = {
         throw new Error('The expected resume date cannot be before the pause start date.');
       }
     }
-    const lifecycle = normalizeSubscriptionLifecycle(lifecycleInput, nowISO());
+    const lifecycle = normalizeSubscriptionLifecycle(lifecycleInput, nowISO(), offeringType);
     if (lifecycle.status === 'paused' && payload.id && db.memberships.some(m => (
       m.previousMembershipId === payload.id && m.status !== 'cancelled' && m.id !== payload.id
     ))) {
@@ -203,6 +235,12 @@ export const localStore = {
         throw new Error('A renewal must follow an existing subscription for the same student.');
       }
       const isNewLink = !old || old.previousMembershipId !== lifecycle.previousMembershipId;
+      if (normalizePlanType(source.offeringType || 'subscription') === 'one_month') {
+        throw new Error('A one-month pass cannot be renewed. Create a new pass or subscription instead.');
+      }
+      if (isNewLink && planTemplate.planType === 'one_month') {
+        throw new Error('Choose a subscription plan for a renewal.');
+      }
       if (isNewLink && source.status === 'paused') {
         throw new Error('Resume the previous subscription before renewing it, so the renewal start date is final.');
       }
@@ -220,9 +258,12 @@ export const localStore = {
       id: payload.id || uid(), studentId: payload.studentId, planId: payload.planId,
       branchId: payload.branchId || '', startDate: payload.startDate,
       endDate: membershipEnd(
-        payload.startDate, durationMonths, payload.billingCycle || 'joining', lifecycle.totalPausedDays,
+        payload.startDate, durationMonths,
+        payload.billingCycle || old?.billingCycle || planTemplate.billingCycle,
+        lifecycle.totalPausedDays,
       ),
-      billingCycle: payload.billingCycle || 'joining', durationMonths,
+      billingCycle: payload.billingCycle || old?.billingCycle || planTemplate.billingCycle,
+      durationMonths,
       amountPaise: Number(payload.amountPaise) || plan?.amountPaise || 0,
       ...lifecycle, createdAt: old?.createdAt || payload.createdAt || nowISO(),
     });
@@ -237,7 +278,7 @@ export const localStore = {
     if (membership && membership.status !== 'cancelled') {
       Object.assign(membership, normalizeSubscriptionLifecycle({
         ...membership, status: 'cancelled', cancelReason: reason, cancelledAt: nowISO(),
-      }, nowISO()));
+      }, nowISO(), normalizePlanType(membership.offeringType || 'subscription')));
     }
     return saveDb(db);
   },
@@ -248,7 +289,9 @@ export const localStore = {
       ? db.memberships.find(m => m.id === payload.membershipId)
       : null;
     if (membership?.status === 'cancelled') {
-      throw new Error('Payments cannot be recorded against a cancelled subscription.');
+      throw new Error(membership.offeringType === 'one_month'
+        ? 'Payments cannot be recorded against a cancelled one-month pass.'
+        : 'Payments cannot be recorded against a cancelled subscription.');
     }
     db.counters.receipt += 1;
     const paidOn = payload.paidOn || toISODate();

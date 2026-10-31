@@ -14,7 +14,8 @@
 import {supabase} from '../auth.js';
 import {localStore} from './localStore.js';
 import {
-  emptySnapshot, membershipEnd, normalizeSubscriptionLifecycle, toISODate,
+  emptySnapshot, membershipEnd, membershipOfferingType, normalizePlanTemplate,
+  normalizePlanType, normalizeSubscriptionLifecycle, toISODate,
   normalizeBillingSettings, validateBillingSettings,
 } from './logic.js';
 import {
@@ -74,7 +75,7 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v7) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v8) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -112,7 +113,7 @@ function studentAccessError(error) {
 
 function roleAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v7) in Supabase, then try again.');
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v8) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
@@ -165,7 +166,7 @@ function roleAccessError(error) {
 
 function admissionError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v7) in Supabase, then try again.');
+    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v8) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ADMISSION_LINK_INVALID/.test(text)) {
@@ -1159,10 +1160,15 @@ export function createErpClient(mode, options = {}) {
 
     savePlan: payload => queue((state, snapshot) => {
       if (!payload?.name?.trim()) throw new Error('Plan name is required.');
+      const oldPlan = existing(snapshot, 'plans', payload);
+      const template = normalizePlanTemplate({...oldPlan, ...payload});
+      const status = payload.status || oldPlan?.status || 'active';
+      if (!['active', 'archived'].includes(status)) {
+        throw validationError('Choose an active or archived plan status.');
+      }
       return enqueueUpsert(state, 'plans', proposed(snapshot, 'plans', payload, {
         name: payload.name.trim(), amountPaise: Number(payload.amountPaise) || 0,
-        durationMonths: Number(payload.durationMonths) || 1,
-        status: payload.status || existing(snapshot, 'plans', payload)?.status || 'active',
+        ...template, status,
       }));
     }),
 
@@ -1170,13 +1176,38 @@ export function createErpClient(mode, options = {}) {
       const plan = existing(snapshot, 'plans', payload?.planId);
       const student = existing(snapshot, 'students', payload?.studentId);
       const old = payload?.id ? existing(snapshot, 'memberships', payload) : null;
-      const durationMonths = Number(payload?.durationMonths) || plan?.durationMonths || 1;
-      const lifecycleInput = {...(old || {}), ...(payload || {}), status: payload?.status || old?.status || 'active'};
+      const planTemplate = normalizePlanTemplate(plan || {});
+      const offeringType = old
+        ? normalizePlanType(old.offeringType || 'subscription')
+        : membershipOfferingType(payload || {}, plan);
+      const oneMonth = offeringType === 'one_month';
+      const kindLabel = oneMonth ? 'one-month pass' : 'subscription';
+      if (!old && plan && offeringType !== planTemplate.planType) {
+        throw validationError('Choose a plan type that matches this offering.');
+      }
+      const durationMonths = oneMonth
+        ? 1
+        : Number(payload?.durationMonths) || plan?.durationMonths || 1;
+      let lifecycleInput = {...(old || {}), ...(payload || {}), status: payload?.status || old?.status || 'active', offeringType};
       if (!['active', 'paused', 'cancelled'].includes(lifecycleInput.status)) {
-        throw validationError('Choose an active, paused or cancelled subscription status.');
+        throw validationError(oneMonth
+          ? 'Choose an active or cancelled one-month pass status.'
+          : 'Choose an active, paused or cancelled subscription status.');
+      }
+      if (oneMonth && lifecycleInput.status === 'paused') {
+        throw validationError('A one-month pass cannot be paused or renewed.');
+      }
+      if (oneMonth && lifecycleInput.previousMembershipId) {
+        throw validationError('A one-month pass cannot be linked as a subscription renewal.');
+      }
+      if (oneMonth) {
+        lifecycleInput = {
+          ...lifecycleInput, autoRenew: false, previousMembershipId: '',
+          renewalNumber: 0, totalPausedDays: 0,
+        };
       }
       if (old?.status === 'cancelled' && lifecycleInput.status !== 'cancelled') {
-        throw validationError('A cancelled subscription cannot be reopened. Create a new subscription instead.');
+        throw validationError(`A cancelled ${kindLabel} cannot be reopened. Create a new ${kindLabel} instead.`);
       }
       if (lifecycleInput.status === 'paused') {
         if (!lifecycleInput.pausedFrom) throw validationError('Choose the date this subscription pauses from.');
@@ -1187,7 +1218,7 @@ export function createErpClient(mode, options = {}) {
           throw validationError('The expected resume date cannot be before the pause start date.');
         }
       }
-      const lifecycle = normalizeSubscriptionLifecycle(lifecycleInput, nowISO());
+      const lifecycle = normalizeSubscriptionLifecycle(lifecycleInput, nowISO(), offeringType);
       if (lifecycle.status === 'paused' && payload.id && (snapshot.memberships || []).some(item => (
         item.previousMembershipId === payload.id && item.status !== 'cancelled' && item.id !== payload.id
       ))) {
@@ -1199,6 +1230,12 @@ export function createErpClient(mode, options = {}) {
           throw validationError('A renewal must follow an existing subscription for the same student.');
         }
         const isNewLink = !old || old.previousMembershipId !== lifecycle.previousMembershipId;
+        if (normalizePlanType(source.offeringType || 'subscription') === 'one_month') {
+          throw validationError('A one-month pass cannot be renewed. Create a new pass or subscription instead.');
+        }
+        if (isNewLink && planTemplate.planType === 'one_month') {
+          throw validationError('Choose a subscription plan for a renewal.');
+        }
         if (isNewLink && source.status === 'paused') {
           throw validationError('Resume the previous subscription before renewing it, so the renewal start date is final.');
         }
@@ -1216,9 +1253,12 @@ export function createErpClient(mode, options = {}) {
         branchId: payload.branchId || student?.branchId || '',
         startDate: payload.startDate,
         endDate: membershipEnd(
-          payload.startDate, durationMonths, payload.billingCycle || 'joining', lifecycle.totalPausedDays,
+          payload.startDate, durationMonths,
+          payload.billingCycle || old?.billingCycle || planTemplate.billingCycle,
+          lifecycle.totalPausedDays,
         ),
-        billingCycle: payload.billingCycle || 'joining', durationMonths,
+        billingCycle: payload.billingCycle || old?.billingCycle || planTemplate.billingCycle,
+        durationMonths,
         amountPaise: Number(payload.amountPaise) || plan?.amountPaise || 0,
         ...lifecycle,
       }));
@@ -1232,16 +1272,18 @@ export function createErpClient(mode, options = {}) {
       if (old.status === 'cancelled') return state;
       const lifecycle = normalizeSubscriptionLifecycle({
         ...old, status: 'cancelled', cancelReason: reason, cancelledAt: nowISO(),
-      }, nowISO());
+      }, nowISO(), normalizePlanType(old.offeringType || 'subscription'));
       return enqueueUpsert(state, 'memberships', {...old, ...lifecycle});
     }),
 
     recordPayment: payload => queue((state, snapshot) => {
       const membership = existing(snapshot, 'memberships', payload?.membershipId);
       const amountPaise = Number(payload?.amountPaise) || 0;
-      if (!membership || amountPaise <= 0) throw new Error('Choose a membership and enter an amount received.');
+      if (!membership || amountPaise <= 0) throw new Error('Choose a subscription or one-month pass and enter an amount received.');
       if (membership.status === 'cancelled') {
-        throw validationError('Payments cannot be recorded against a cancelled subscription.');
+        throw validationError(membership.offeringType === 'one_month'
+          ? 'Payments cannot be recorded against a cancelled one-month pass.'
+          : 'Payments cannot be recorded against a cancelled subscription.');
       }
       return enqueuePaymentCreate(state, {
         id: payload.id || newUuid(), studentId: membership.studentId,
