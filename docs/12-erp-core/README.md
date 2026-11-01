@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.11.1)
+# Yoga Studio ERP — Core (v1.11.2)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
@@ -54,7 +54,8 @@ flow with password creation and Terms & Conditions acceptance, and lets
 Instructor-and-above reviewers approve/reject scoped requests before batch
 assignment and plan selection. Patch 1.11.1 is a responsive UX/performance
 pass (touch targets, readable type, drawer behavior, font loading and lazy QR
-generation) with no database change.
+generation) with no database change. Patch 1.11.2 standardizes filter-bar and
+panel-header label/control alignment, also with no database change.
 This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
@@ -551,7 +552,7 @@ a backup.
    `setupVersion: 12` in the context response. It is additive and does not
    delete business rows. Existing Instructors preserve
    name/contact/home branch/status and gain an empty profile. Run SQL v12
-   (rather than stopping at v11 or v10) before using the deployed 1.11.1 app.
+   (rather than stopping at v11 or v10) before using the deployed 1.11.2 app.
    If the new app reaches an older
    database, supported older sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and a queued one-month operation

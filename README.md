@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
 INR payments, payment setup and one-page A4 invoice PDFs.
 
-> **Current source release:** 1.11.1 · **Database setup:** SQL v12 in
+> **Current source release:** 1.11.2 · **Database setup:** SQL v12 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -541,7 +541,7 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.11.1:
+Recommended go-live order for 1.11.2:
 
 1. Back up/verify the Supabase project according to your operational policy.
 2. Ensure the complete current `supabase/erp_setup.sql` has installed
@@ -550,7 +550,7 @@ Recommended go-live order for 1.11.1:
    admission review and the `setupVersion: 12` context response. If upgrading
    from SQL v11 or earlier, run the complete SQL v12 file instead of stopping
    at an older version; it is cumulative and preserves existing business rows.
-3. Deploy the 1.11.1 web build with the two public Actions secrets.
+3. Deploy the 1.11.2 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.

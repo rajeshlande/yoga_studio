@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.11.2 — 2026-11-01
+
+### Fixed — Filter-bar and panel-header alignment
+
+- Instructor profiles no longer mixes an unlabeled search box and action
+  buttons with a taller labeled **Status** field in one center-aligned row.
+  **Portal access** / **Add instructor** now stay in the panel header, while
+  Search and Status sit in a separate filter row with matching labels and
+  exactly aligned 44px control boxes.
+- Applied the same one-pattern filter bar to Branches, Batches and Admission
+  requests: Search is now a labeled field like Status/Sort/Day, so label
+  baselines and control baselines line up across screens. Search-only
+  toolbars (Students, Access) remain single-height rows with no select label.
+- Panel title blocks now flex and wrap their subtitle instead of pushing
+  header actions below-left on desktop; bottom-aligned operation headers
+  (Attendance) align their action rows to the field bottom. A Playwright
+  assertion now guards Instructor Search/Status alignment. No database/SQL
+  change is required (still SQL v12).
+
 ## 1.11.1 — 2026-11-01
 
 ### Improved — Responsive layout, readability and performance

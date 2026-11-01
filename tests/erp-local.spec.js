@@ -147,6 +147,14 @@ test('offline device mode runs the core ERP flow end to end', async ({page}) => 
   // Instructor + batch + enrollment now live under Branches & batches.
   await page.getByRole('button', {name: 'Branches & batches', exact: true}).click();
   await page.getByRole('tab', {name: 'Instructor profiles'}).click();
+  const instructorFilters = await page.evaluate(() => {
+    const search = document.querySelector('[aria-label="Instructor filters"] .erp-search')?.getBoundingClientRect();
+    const status = document.querySelector('[aria-label="Instructor status filter"]')?.getBoundingClientRect();
+    return [search, status].map(rect => rect && {top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height)});
+  });
+  expect(Math.abs(instructorFilters[0].top - instructorFilters[1].top)).toBeLessThanOrEqual(1);
+  expect(Math.abs(instructorFilters[0].bottom - instructorFilters[1].bottom)).toBeLessThanOrEqual(1);
+  expect(instructorFilters.map(box => box.height)).toEqual([44, 44]);
   await page.getByRole('button', {name: 'Add instructor'}).click();
   expectAlignedPair(await fieldBoxes(page, '.erp-dialog .erp-form > .erp-field'));
   await page.getByLabel('Instructor name').fill('Meera Joshi');

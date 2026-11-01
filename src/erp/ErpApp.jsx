@@ -1034,7 +1034,7 @@ function BranchesSection(props) {
       {canManageOrg(ctx) && <button className="primary-button" onClick={() => setEditing({name: '', city: '', address: '', phone: ''})}><Plus size={16}/> Add branch</button>}</div>
 
       {data.branches.length > 0 && <div className="erp-workspace-controls" aria-label="Branch filters">
-        <label className="erp-search"><Search size={16}/><input aria-label="Search branches" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search branch, city, address or phone…"/></label>
+        <label className="erp-field erp-filter-search">Search<span className="erp-search"><Search size={16}/><input aria-label="Search branches" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search branch, city, address or phone…"/></span></label>
         <label className="erp-field erp-workspace-field">Status<select aria-label="Branch status filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
           <option value="all">All statuses</option><option value="active">Active</option><option value="archived">Archived</option>
         </select></label>
@@ -2608,7 +2608,7 @@ function AdmissionsPanel(props) {
     </div>
 
     <div className="erp-workspace-controls admission-controls" aria-label="Admission request filters">
-      <label className="erp-search"><Search size={16}/><input aria-label="Search admission requests" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search applicant, phone, email or subject…"/></label>
+      <label className="erp-field erp-filter-search">Search<span className="erp-search"><Search size={16}/><input aria-label="Search admission requests" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search applicant, phone, email or subject…"/></span></label>
       <label className="erp-field erp-workspace-field">Admission status
         <select value={status} onChange={event => setStatus(event.target.value)}>
           <option value="pending">Pending</option>
@@ -3418,17 +3418,24 @@ function InstructorProfilesSection(props) {
   if (!canSetupInstructorProfiles(ctx)) return null;
   return <>
     <section className="erp-panel">
-      <div className="erp-panel-head align-end">
+      <div className="erp-panel-head">
         <div>
           <h2>Instructor profiles</h2>
           <p>{data.instructors.length} instructor(s) · Teaching profiles can be set up only by the Owner, Co-owner or an authorized branch Admin.</p>
         </div>
         <div className="erp-actions">
-          <span className="erp-search"><Search size={15}/><input aria-label="Search instructors" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or specialty…"/></span>
-          <label className="erp-field erp-instructor-status-filter">Status<select aria-label="Instructor status filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
           <button className="secondary-button" onClick={() => go('access')}><KeyRound size={15}/> Portal access</button>
           <button className="primary-button" onClick={openNew}><Plus size={15}/> Add instructor</button>
         </div>
+      </div>
+
+      <div className="erp-workspace-controls" aria-label="Instructor filters">
+        <label className="erp-field erp-filter-search">Search
+          <span className="erp-search"><Search size={16}/><input aria-label="Search instructors" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name or specialty…"/></span>
+        </label>
+        <label className="erp-field erp-workspace-field">Status
+          <select aria-label="Instructor status filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
+        </label>
       </div>
 
       <div className="erp-instructor-summary" aria-label="Instructor summary">
@@ -3670,7 +3677,7 @@ function BatchesSection(props) {
       </div></div>
 
       {baseBatches.length > 0 && <div className="erp-workspace-controls" aria-label="Batch filters">
-        <label className="erp-search"><Search size={16}/><input aria-label="Search batches" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search batch, branch or instructor…"/></label>
+        <label className="erp-field erp-filter-search">Search<span className="erp-search"><Search size={16}/><input aria-label="Search batches" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search batch, branch or instructor…"/></span></label>
         <label className="erp-field erp-workspace-field">Status<select aria-label="Batch status filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
           <option value="active">Active</option><option value="all">All statuses</option><option value="archived">Archived</option>
         </select></label>
