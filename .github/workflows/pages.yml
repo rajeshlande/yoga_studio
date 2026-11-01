@@ -28,7 +28,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ''
       - name: Save failed browser diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-test-diagnostics
           path: test-results/
