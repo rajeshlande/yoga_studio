@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.11.3 — 2026-11-01
+
+### Fixed — Stale-tab “useEffect of null” screen crash
+
+- A browser tab left open while the app files changed could mix old and new
+  JavaScript modules and stop on **“Cannot read properties of null (reading
+  'useEffect')”**. The error translator now recognizes this stale-tab/module
+  signature (including dynamic-import/chunk failures and invalid-hook
+  dispatcher errors) as an app-update issue instead of a generic failure.
+- The top-level error boundary now reloads the app **once** for that exact
+  stale-module signature, guarded by a 30-second session timestamp so a real
+  repeating bug cannot cause a reload loop. If the same error returns
+  immediately after the reload, the normal recovery screen remains visible
+  with copyable technical details.
+- Verified there is only one React/ReactDOM copy in the dependency tree and
+  that a fresh pass through Dashboard, Branches & batches, Students, Access,
+  Attendance, Subscriptions, Payments, Profile and Settings opens without the
+  error. No database/SQL change is required (still SQL v12).
+
 ## 1.11.2 — 2026-11-01
 
 ### Fixed — Filter-bar and panel-header alignment

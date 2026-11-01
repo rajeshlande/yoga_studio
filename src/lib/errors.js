@@ -51,6 +51,12 @@ function collectErrorText(error) {
   ].filter(Boolean).join(' ');
 }
 
+const STALE_APP_MODULE_PATTERN = /dynamically imported module|importing a module script failed|failed to load.*module|loading chunk|chunkloaderror|invalid hook call|cannot read properties of null \(reading 'use(effect|state|memo|callback|ref|context|reducer)'\)|cannot read property 'use(effect|state|memo|callback|ref|context|reducer)' of null|null is not an object.*use(effect|state|memo|callback|ref|context|reducer)/;
+
+export function isStaleAppModuleError(error) {
+  return STALE_APP_MODULE_PATTERN.test(collectErrorText(error).toLocaleLowerCase('en-IN'));
+}
+
 function technicalDetails(error, originalMessage) {
   if (!error) return originalMessage;
   if (typeof error === 'string') return truncate(error);
@@ -119,6 +125,15 @@ export function describeError(error, options = {}) {
       title: options.title || 'Something went wrong',
       message: options.fallbackMessage || 'The action could not be completed.',
       solution: 'Try again. If it repeats, refresh the page after checking that any offline changes are synced.',
+    });
+  }
+
+  if (isStaleAppModuleError(error)) {
+    return make({
+      kind: 'app_update',
+      title: 'This tab is using mixed app files',
+      message: 'The browser tab loaded part of an older Yoga Studio build after the app changed, so this screen stopped before it could finish opening. This display error did not intentionally change your saved studio data.',
+      solution: 'Reload the app once so the browser loads one consistent current build. Yoga Studio automatically reloads once for this specific stale-tab error; if you still see this message after that reload, do not keep retrying the same action—copy the technical details and share them with support.',
     });
   }
 
@@ -436,15 +451,6 @@ export function describeError(error, options = {}) {
       title: 'That file could not be imported',
       message: 'The selected file is not a valid Yoga Studio backup or its contents are damaged.',
       solution: 'Select the original exported Yoga Studio backup file without editing it. If every copy fails, keep the file unchanged and ask the studio owner/support to inspect it before trying recovery.',
-    });
-  }
-
-  if (/dynamically imported module|chunk.*failed|loading chunk|failed to load.*module/.test(text)) {
-    return make({
-      kind: 'app_update',
-      title: 'The app update did not finish loading',
-      message: 'The browser could not load part of the current Yoga Studio app, often because a new version was deployed while this tab was open.',
-      solution: 'Reconnect to the internet and reload the app. If you have unsynced ERP changes, check sync status after reload; the durable device queue should still be present for the same signed-in account.',
     });
   }
 

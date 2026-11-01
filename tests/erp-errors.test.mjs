@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {describeError, errorSummary, formatErrorDetails} from '../src/lib/errors.js';
+import {describeError, errorSummary, formatErrorDetails, isStaleAppModuleError} from '../src/lib/errors.js';
 
 test('missing Supabase RPCs become an actionable SQL setup error', () => {
   const info = describeError({code: 'PGRST202', message: 'Could not find the function'}, {context: 'Load admissions'});
@@ -60,6 +60,19 @@ test('database constraint errors are translated into duplicate/link guidance', (
   const linked = describeError({code: '23503', message: 'foreign key constraint fails'});
   assert.equal(linked.kind, 'record_state');
   assert.match(linked.solution, /reselect/);
+});
+
+test('stale tab module errors are classified as an app update reload', () => {
+  const hookError = new TypeError("Cannot read properties of null (reading 'useEffect')");
+  assert.equal(isStaleAppModuleError(hookError), true);
+  assert.equal(isStaleAppModuleError(new Error('Failed to fetch dynamically imported module')), true);
+  assert.equal(isStaleAppModuleError(new Error('Phone is required')), false);
+
+  const info = describeError(hookError, {context: 'Open this screen'});
+  assert.equal(info.kind, 'app_update');
+  assert.match(info.title, /mixed app files/);
+  assert.match(info.message, /did not intentionally change/);
+  assert.match(info.solution, /automatically reloads once/);
 });
 
 test('unknown errors preserve the message and support details are copyable', () => {

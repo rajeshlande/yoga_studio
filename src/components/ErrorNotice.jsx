@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {AlertCircle, Check, Copy, RefreshCw, WifiOff, X} from 'lucide-react';
-import {describeError, formatErrorDetails} from '../lib/errors.js';
+import {describeError, formatErrorDetails, isStaleAppModuleError} from '../lib/errors.js';
 
 async function copyText(text) {
   if (navigator.clipboard?.writeText) {
@@ -16,6 +16,29 @@ async function copyText(text) {
   area.select();
   document.execCommand('copy');
   area.remove();
+}
+
+const STALE_MODULE_RELOAD_KEY = 'yoga-studio-stale-module-reload-at';
+const STALE_MODULE_RELOAD_WINDOW_MS = 30000;
+
+function reloadOnceForStaleModule() {
+  try {
+    const lastReloadAt = Number(sessionStorage.getItem(STALE_MODULE_RELOAD_KEY) || 0);
+    if (Date.now() - lastReloadAt < STALE_MODULE_RELOAD_WINDOW_MS) return false;
+    sessionStorage.setItem(STALE_MODULE_RELOAD_KEY, String(Date.now()));
+  } catch {
+    // If session storage is unavailable we cannot prove this is not a reload
+    // loop, so leave the manual Reload app button as the recovery path.
+    return false;
+  }
+  window.location.reload();
+  return true;
+}
+
+function clearStaleModuleReloadGuard() {
+  try {
+    sessionStorage.removeItem(STALE_MODULE_RELOAD_KEY);
+  } catch { /* Storage may be restricted; the timestamp window still expires. */ }
 }
 
 export function ErrorNotice({
@@ -88,10 +111,21 @@ export class AppErrorBoundary extends React.Component {
     return {error};
   }
 
+  componentDidMount() {
+    // A page that stays healthy for a few seconds is no longer in the
+    // immediate post-reload window, so a later stale-tab error may recover.
+    this.staleReloadGuardTimer = window.setTimeout(clearStaleModuleReloadGuard, 15000);
+  }
+
+  componentWillUnmount() {
+    if (this.staleReloadGuardTimer) window.clearTimeout(this.staleReloadGuardTimer);
+  }
+
   componentDidCatch(error, info) {
     // Keep the browser console useful for support without sending private ERP
     // records anywhere. The on-screen notice gives the user a safe next step.
     console.error('Yoga Studio UI error:', error, info);
+    if (isStaleAppModuleError(error)) reloadOnceForStaleModule();
   }
 
   render() {
