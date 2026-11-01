@@ -1459,6 +1459,8 @@ test('manager confirms an admission, creating the student and granting portal ac
 
 test('manager pauses, resumes, renews and cancels a subscription at the current plan price', async ({page}) => {
   page.on('pageerror', error => console.error('Browser page error:', error.message));
+  // The seeded membership ends 31 Oct 2026; keep the lifecycle dates stable.
+  await page.clock.setFixedTime(new Date('2026-10-31T12:00:00+05:30'));
   await mockAuth(page);
   const PLAN = '88888888-8888-4888-8888-888888888888';
   const MEMBERSHIP = '99999999-9999-4999-8999-999999999998';

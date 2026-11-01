@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import {createErpClient, isMissingRpcError} from '../lib/erp/data.js';
 import {ErrorNotice} from '../components/ErrorNotice.jsx';
-import QRCode from 'qrcode';
 import {
   ATTENDANCE_STATUSES, DAY_LABELS, PAYMENT_METHODS, PLAN_TYPES, ROLES,
   admissionWaitingDays, attendanceSummary,
@@ -23,6 +22,11 @@ import {
   formatInvoiceINR, normalizeBillingSettings,
 } from '../lib/erp/logic.js';
 import './erp.css';
+
+async function qrCodeToDataURL(text, options) {
+  const {default: QRCode} = await import('qrcode');
+  return QRCode.toDataURL(text, options);
+}
 
 /* ---------------- data hook: one snapshot load, one call per action ---------------- */
 
@@ -1514,7 +1518,7 @@ function AdmissionQrDialog({item, onClose}) {
 
   useEffect(() => {
     let active = true;
-    QRCode.toDataURL(item.url, {width: 420, margin: 2, errorCorrectionLevel: 'M'})
+    qrCodeToDataURL(item.url, {width: 420, margin: 2, errorCorrectionLevel: 'M'})
       .then(url => { if (active) setQrUrl(url); })
       .catch(qrError => { if (active) setError({
         title: 'QR code could not be generated',
@@ -4082,7 +4086,7 @@ function InvoiceDialog({data, invoice, onClose}) {
   useEffect(() => {
     let cancelled = false;
     if (!upiUri) { setQrDataUrl(''); return undefined; }
-    QRCode.toDataURL(upiUri, {width: 240, margin: 1, errorCorrectionLevel: 'M'})
+    qrCodeToDataURL(upiUri, {width: 240, margin: 1, errorCorrectionLevel: 'M'})
       .then(url => { if (!cancelled) setQrDataUrl(url); })
       .catch(() => { if (!cancelled) setQrDataUrl(''); });
     return () => { cancelled = true; };
@@ -4091,7 +4095,7 @@ function InvoiceDialog({data, invoice, onClose}) {
   const printInvoice = async () => {
     if (upiUri && !qrDataUrl) {
       try {
-        const url = await QRCode.toDataURL(upiUri, {width: 240, margin: 1, errorCorrectionLevel: 'M'});
+        const url = await qrCodeToDataURL(upiUri, {width: 240, margin: 1, errorCorrectionLevel: 'M'});
         const image = new Image();
         image.src = url;
         await image.decode().catch(() => {});

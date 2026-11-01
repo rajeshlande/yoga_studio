@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.11.1 — 2026-11-01
+
+### Improved — Responsive layout, readability and performance
+
+- **Mobile/tablet/desktop audit:** checked 72 screen/width states (320, 360,
+  390, 768, 1024 and 1440px) across sign-in, public admission, Terms and the
+  local ERP workspace. No page-level horizontal overflow was found after the
+  fixes; a new Playwright regression test now guards key breakpoints.
+- **Touch and button layout:** theme/profile/icon controls, segmented tabs,
+  sync actions, day chips, quick amounts, error actions and admission-link
+  actions now use consistent 40–44px targets. Mobile panel actions wrap into
+  clear full-width rows, dialogs use the available small-screen space, and
+  the toast respects device safe-area insets.
+- **Font visibility:** raised the smallest labels, breadcrumbs, badges, table
+  headers, KPI captions, settings/profile helper text and ERP muted text from
+  7–10px/low-contrast values to a more legible 10–13px scale with darker
+  muted foregrounds. Mobile form controls, including selects, now render at
+  16px to prevent focus zoom on phones.
+- **Behavior/accessibility:** the closed mobile navigation drawer is now
+  hidden from pointer, keyboard and assistive-technology navigation until it
+  is opened; search inputs fill their 44px control height; horizontal ERP
+  table regions no longer rubber-band the page scroll.
+- **Performance:** Google Fonts now load through preconnected HTML font links
+  with trimmed weights instead of a CSS `@import`, and QR generation is
+  code-split so it loads only when an admission QR or invoice is opened. The
+  initial production JS decreased from 901.25 kB to 879.46 kB
+  (gzip 243.38 → 234.87 kB), with QR code deferred into a separate
+  23.45 kB chunk. No database/SQL change is required (still SQL v12).
+
 ## 1.11.0 — 2026-11-01
 
 ### Changed — Public admission is now student registration

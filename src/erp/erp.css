@@ -763,3 +763,81 @@
  .admission-link-card>footer .secondary-button{flex:1 1 112px;justify-content:center}
  .erp-admission-card>footer .primary-button{flex:1 1 100%;justify-content:center}
 }
+
+/* Responsive UX polish for ERP screens (screen only; invoice print rules stay exact). */
+@media screen{
+ :root:not([data-theme="dark"]) .erp-toolbar label,
+ :root:not([data-theme="dark"]) .erp-kpi small,
+ :root:not([data-theme="dark"]) .erp-kpi p,
+ :root:not([data-theme="dark"]) .erp-panel-head p,
+ :root:not([data-theme="dark"]) .erp-table th,
+ :root:not([data-theme="dark"]) .erp-person small,
+ :root:not([data-theme="dark"]) .erp-empty,
+ :root:not([data-theme="dark"]) .erp-student-hero-copy p,
+ :root:not([data-theme="dark"]) .erp-student-next span,
+ :root:not([data-theme="dark"]) .erp-student-batch-card p,
+ :root:not([data-theme="dark"]) .erp-student-batch-card small,
+ :root:not([data-theme="dark"]) .erp-student-detail-grid small,
+ :root:not([data-theme="dark"]) .erp-student-note,
+ :root:not([data-theme="dark"]) .erp-student-list small,
+ :root:not([data-theme="dark"]) .erp-subscription-history-item p,
+ :root:not([data-theme="dark"]) .erp-subscription-history-item small,
+ :root:not([data-theme="dark"]) .erp-detail-list dt,
+ :root:not([data-theme="dark"]) .erp-setup-status small,
+ :root:not([data-theme="dark"]) .erp-setup-save-note,
+ :root:not([data-theme="dark"]) .admission-link-note,
+ :root:not([data-theme="dark"]) .erp-card-stats dt,
+ :root:not([data-theme="dark"]) .erp-capacity-line small,
+ :root:not([data-theme="dark"]) .erp-capacity-block small,
+ :root:not([data-theme="dark"]) .erp-schedule-note,
+ :root:not([data-theme="dark"]) .erp-schedule-day>header small,
+ :root:not([data-theme="dark"]) .erp-schedule-empty,
+ :root:not([data-theme="dark"]) .erp-schedule-class small,
+ :root:not([data-theme="dark"]) .enrollment-step-head small,
+ :root:not([data-theme="dark"]) .enrollment-step-head p,
+ :root:not([data-theme="dark"]) .enrollment-choice-card small,
+ :root:not([data-theme="dark"]) .enrollment-batch-preview-head small,
+ :root:not([data-theme="dark"]) .enrollment-plan-price small,
+ :root:not([data-theme="dark"]) .enrollment-plan-price span,
+ :root:not([data-theme="dark"]) .enrollment-plan-preview dt,
+ :root:not([data-theme="dark"]) .enrollment-payment-balance dt,
+ :root:not([data-theme="dark"]) .enrollment-review-head p,
+ :root:not([data-theme="dark"]) .enrollment-review-list small{color:#756586}
+ :root:not([data-theme="dark"]) .erp-badge.grey{color:#6f5d7d}
+ :root:not([data-theme="dark"]) .erp-badge.lavender{color:#7551aa}
+ .erp-toolbar label,.erp-kpi small,.erp-table th,.erp-detail-list dt,.erp-card-stats dt,
+ .enrollment-step-head small,.enrollment-plan-price small,.enrollment-plan-preview dt,
+ .enrollment-payment-balance dt,.enrollment-review-list small{font-size:11px}
+ .erp-field{font-size:12px}
+ .erp-field small{font-size:11px;line-height:1.55}
+ .erp-badge,.erp-mode-badge{font-size:11px;min-height:24px;padding:5px 10px}
+ .erp-sync-btn{min-height:42px;padding:10px 13px}
+ .erp-seg button{min-height:42px;padding:10px 14px}
+ .erp-day{min-height:44px}
+ .erp-link-btn{min-height:42px;padding:9px 6px}
+ .erp-search{align-items:stretch}
+ .erp-search svg{align-self:center}
+ .erp-search input{min-height:42px;height:42px}
+ .erp-table-wrap{overscroll-behavior-inline:contain;scrollbar-gutter:stable}
+ .admission-link-card>footer .secondary-button{min-height:42px}
+ .admission-terms-row a{display:inline-block;padding:10px 1px}
+ .enrollment-quick-amounts button{min-height:42px;padding:10px 13px}
+ .enrollment-review-list .secondary-button{min-height:42px}
+}
+@media screen and (max-width:650px){
+ .erp-dialog,.admission-review-dialog,.erp-dialog-wide{width:calc(100vw - 24px);max-height:calc(100svh - 24px);border-radius:18px}
+ .erp-panel-head{align-items:stretch}
+ .erp-panel-head .erp-actions{width:100%}
+ .erp-panel-head .erp-actions>.primary-button{flex:1 1 170px}
+ .erp-panel-head .erp-actions>.secondary-button{flex:1 1 120px}
+ .erp-panel-head .erp-search{flex:1 1 100%}
+ .erp-table th,.erp-table td{padding:11px 9px}
+ .erp-student-detail-grid{gap:9px}
+}
+@media screen and (max-width:360px){
+ .erp-toolbar{padding:12px}
+ .erp-panel{padding:14px}
+ .erp-dialog{padding:20px 15px}
+ .erp-grid{gap:10px}
+ .erp-kpi{padding:14px}
+}

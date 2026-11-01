@@ -105,3 +105,29 @@ test('mobile navigation and installation dialog preserve focus without overflow'
  await expect(close).toBeFocused();await page.keyboard.press('Tab');await expect(close).toBeFocused();
  await page.keyboard.press('Escape');await expect(install).toBeFocused();
 });
+
+test('responsive layout keeps key controls readable and touchable across widths',async({page})=>{
+ const boxHeight=async locator=>(await locator.boundingBox()).height;
+ const boxWidth=async locator=>(await locator.boundingBox()).width;
+ const noHorizontalOverflow=async()=>expect(await page.evaluate(()=>Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)<=innerWidth)).toBeTruthy();
+ for(const width of [320,390,768,1440]){
+  await page.setViewportSize({width,height:width<=430?844:950});
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Welcome to your flow.'})).toBeVisible();
+  await noHorizontalOverflow();
+  expect(await boxHeight(page.getByRole('button',{name:/Switch theme/}))).toBeGreaterThanOrEqual(44);
+  expect(await boxHeight(page.getByRole('button',{name:'Forgot password?'}))).toBeGreaterThanOrEqual(40);
+  expect(await boxWidth(page.getByRole('button',{name:'Show password'}))).toBeGreaterThanOrEqual(40);
+  if(width<=430) expect(await page.getByLabel('Email address').evaluate(input=>parseFloat(getComputedStyle(input).fontSize))).toBeGreaterThanOrEqual(16);
+ }
+ await page.setViewportSize({width:390,height:844});
+ await page.goto('/');await signIn(page);
+ await page.waitForTimeout(350);
+ await expect(page.locator('.sidebar')).toBeHidden();
+ await page.getByRole('button',{name:'Open menu'}).click();
+ await expect(page.locator('.sidebar')).toBeVisible();
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await noHorizontalOverflow();
+ expect(await boxHeight(page.getByRole('button',{name:'Open profile'}))).toBeGreaterThanOrEqual(44);
+ for(const label of ['Light','Dark','System']) expect(await boxHeight(page.getByRole('radio',{name:label}))).toBeGreaterThanOrEqual(42);
+});

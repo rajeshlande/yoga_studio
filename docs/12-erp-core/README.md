@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.11.0)
+# Yoga Studio ERP — Core (v1.11.1)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
@@ -52,7 +52,9 @@ and centralizes actionable error notices. Version 1.11.0 / SQL v12 turns
 the public admission link into a one-form student registration + admission
 flow with password creation and Terms & Conditions acceptance, and lets
 Instructor-and-above reviewers approve/reject scoped requests before batch
-assignment and plan selection.
+assignment and plan selection. Patch 1.11.1 is a responsive UX/performance
+pass (touch targets, readable type, drawer behavior, font loading and lazy QR
+generation) with no database change.
 This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
@@ -526,7 +528,7 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.11.0 the required database is **SQL v12**. Version 1.11.0 changes
+   For v1.11.x the required database is **SQL v12**. Version 1.11.0 changes
    public admission registration/review authorization, so rerun the complete
    SQL file if SQL v11 or earlier is live. Upgrading from an earlier release installs SQL
    v12: all prior sync,
@@ -549,7 +551,7 @@ a backup.
    `setupVersion: 12` in the context response. It is additive and does not
    delete business rows. Existing Instructors preserve
    name/contact/home branch/status and gain an empty profile. Run SQL v12
-   (rather than stopping at v11 or v10) before using the deployed 1.11.0 app.
+   (rather than stopping at v11 or v10) before using the deployed 1.11.1 app.
    If the new app reaches an older
    database, supported older sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and a queued one-month operation
