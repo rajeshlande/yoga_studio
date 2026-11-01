@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.11.4 — 2026-11-01
+
+### Changed — Dependency and deployment-toolchain maintenance
+
+- Updated **lucide-react 1.64.0 → 1.66.0**, the only outdated package in the
+  full npm dependency tree. React, React DOM, Supabase JS, qrcode, Vite,
+  @vitejs/plugin-react and Playwright were already on their latest stable
+  releases; `npm audit` reports **0 vulnerabilities**.
+- Checked the project under **Node.js 26.13.0 LTS** and **npm 12.2.1**. The
+  repository continues to target Node `>=22 <27`, and GitHub Actions
+  continues to install the newest Node 26 patch.
+- Updated each GitHub Pages workflow action separately and validated the
+  workflow after each step: `actions/checkout` v4 → v7,
+  `actions/setup-node` v4 → v7, `actions/upload-artifact` v4 → v7,
+  `actions/upload-pages-artifact` v3 → v5 and `actions/deploy-pages`
+  v4 → v5. The hosted Actions run itself is verified on the next push to
+  `main`.
+- No product-behavior or database change is included; SQL remains **v12**.
+
 ## 1.11.3 — 2026-11-01
 
 ### Fixed — Stale-tab “useEffect of null” screen crash
