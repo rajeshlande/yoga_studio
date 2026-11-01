@@ -46,7 +46,7 @@ jobs:
         run: |
           npm run preview -- --base=/yoga_studio/ --port 4174 > /tmp/yoga-preview.log 2>&1 &
           node scripts/test-pages.mjs
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
   deploy:
