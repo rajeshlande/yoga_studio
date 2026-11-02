@@ -1,4 +1,4 @@
-# Yoga Studio ERP — Core (v1.11.4)
+# Yoga Studio ERP — Core (v1.11.5)
 
 Implemented on 2026-10-29 at the owner's request. Scope chosen by the owner:
 **Students + Batches + Attendance + Subscriptions/Payments**, with **multi-branch**
@@ -59,7 +59,11 @@ panel-header label/control alignment, also with no database change. Patch
 1.11.3 adds guarded one-time recovery when an open tab mixes stale app modules
 and hits a hook-dispatcher crash, also with no database change. Patch 1.11.4
 is dependency/deployment-toolchain maintenance only, also with no database
-change.
+change. Patch 1.11.5 / SQL v13 applies security-audit hardening: batch seat
+capacity is never projected to Students, payment-gateway integration fields
+are organization-manager only, account-grant failures collapse into one
+generic outcome that cannot be used to enumerate accounts by email, and CSV
+exports neutralize spreadsheet formulas.
 This release deliberately has no unattended recurring-invoice scheduler or
 saved-method autopay.
 
@@ -533,10 +537,11 @@ a backup.
 
 1. Supabase project → **SQL Editor** → paste **all** of
    `supabase/erp_setup.sql` → **Run**. Re-running after updates is safe.
-   For v1.11.x the required database is **SQL v12**. Version 1.11.0 changes
-   public admission registration/review authorization, so rerun the complete
-   SQL file if SQL v11 or earlier is live. Upgrading from an earlier release installs SQL
-   v12: all prior sync,
+   For v1.11.5 the required database is **SQL v13**. Version 1.11.0 changes
+   public admission registration/review authorization, and 1.11.5 adds the
+   audit hardening described above, so rerun the complete
+   SQL file if SQL v12 or earlier is live. Upgrading from an earlier release installs SQL
+   v13: all prior sync,
    billing and Student-access objects; SQL v5 Co-owner/selected-branch
    authorization and staff-access RPCs; the SQL v6 organization admission
    code, locked `erp_admissions` workflow and structured Student profile;
@@ -552,11 +557,14 @@ a backup.
    active-plan/billing snapshot visibility with own-batch finance only,
    server-enforced Instructor walk-in/enrolment/payment rules; plus SQL v12
    admission terms columns, the narrow public target/guarded-submit flow,
-   scoped Instructor admission review with server-side redaction, and
-   `setupVersion: 12` in the context response. It is additive and does not
+   and scoped Instructor admission review with server-side redaction; plus
+   SQL v13 audit hardening (batch capacity excluded from Student snapshots,
+   gateway integration fields limited to organization managers, and
+   non-enumerable account-grant errors), and
+   `setupVersion: 13` in the context response. It is additive and does not
    delete business rows. Existing Instructors preserve
-   name/contact/home branch/status and gain an empty profile. Run SQL v12
-   (rather than stopping at v11 or v10) before using the deployed 1.11.4 app.
+   name/contact/home branch/status and gain an empty profile. Run SQL v13
+   (rather than stopping at v12 or earlier) before using the deployed 1.11.5 app.
    If the new app reaches an older
    database, supported older sync changes stay safely on the device, the
    toolbar can say **Sync setup needed**, and a queued one-month operation
@@ -667,7 +675,7 @@ rule), keeping it idempotent and non-destructive.
   harness still passes 24/24, and v9 → v10 and v8 → v10 upgrade simulations
   pass 7/7 and 6/6. Those harnesses are not shipped and are not live
   Supabase UAT.
-- Production UAT still required after running SQL v12 in the real project:
+- Production UAT still required after running SQL v13 in the real project:
   sign in as Owner and wait for **Online · synced**; save Payment setup as
   Owner/Co-owner; go offline and mark attendance + record a payment; verify
   the close warning, reconnect and verify automatic sync and one receipt

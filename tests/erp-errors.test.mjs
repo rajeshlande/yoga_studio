@@ -7,7 +7,7 @@ test('missing Supabase RPCs become an actionable SQL setup error', () => {
   assert.equal(info.kind, 'setup');
   assert.match(info.title, /Database setup/);
   assert.match(info.solution, /supabase\/erp_setup\.sql/);
-  assert.match(info.solution, /SQL v12/);
+  assert.match(info.solution, /SQL v13/);
   assert.equal(info.code, 'PGRST202');
 });
 
@@ -42,6 +42,21 @@ test('validation and sync-conflict errors are separated clearly', () => {
   const conflict = describeError({code: 'SYNC_CONFLICT_EXISTS', message: 'Version conflict'});
   assert.equal(conflict.kind, 'sync_conflict');
   assert.match(conflict.solution, /compare “mine” and “server”/);
+});
+
+test('account-grant failures stay generic across account states', () => {
+  // SQL v13 collapses unknown / unconfirmed / other-studio accounts into one
+  // code; the client message must not reintroduce the distinction (and must
+  // not be intercepted by the "account already uses this email" branch).
+  const info = describeError(new Error('That sign-in account can’t be linked yet. Ask the student to create a Yoga Studio account with this exact email and confirm it, using a separate student-only account that is not used for another studio or ERP role. They should not create an organization.'), {context: 'Grant student portal access'});
+  assert.equal(info.kind, 'access');
+  assert.match(info.title, /can’t be used yet/);
+  assert.match(info.solution, /Join an existing studio/);
+  assert.doesNotMatch(info.title + info.message, /already uses|not confirmed/);
+
+  const raw = describeError({code: 'P0001', message: 'ACCESS_ACCOUNT_UNAVAILABLE'}, {context: 'Grant role'});
+  assert.equal(raw.kind, 'access');
+  assert.match(raw.title, /can’t be used yet/);
 });
 
 test('admission branch errors tell the user to request a fresh studio link', () => {

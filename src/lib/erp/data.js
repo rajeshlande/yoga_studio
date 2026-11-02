@@ -76,23 +76,18 @@ function isOfflineError(error) {
 
 function studentAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v12) in Supabase, then try again.');
+    return new Error('Student portal access needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v13) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
-  if (/STUDENT_ACCOUNT_NOT_FOUND/.test(text)) {
-    return new Error('No usable Yoga Studio account uses that email yet. Ask the student to create an account with this exact email, confirm it, and then try again. They should not create an organization.');
-  }
-  if (/STUDENT_ACCOUNT_UNCONFIRMED/.test(text)) {
-    return new Error('That student account exists, but its email has not been confirmed yet. Ask the student to open the confirmation link, then grant access again.');
+  // SQL v13 deliberately returns ONE code for every out-of-organization
+  // account state (unknown, unconfirmed, manager, other studio) so grant
+  // attempts cannot enumerate accounts by email. The legacy codes are
+  // still mapped here for a not-yet-upgraded database.
+  if (/STUDENT_ACCOUNT_UNAVAILABLE|STUDENT_ACCOUNT_NOT_FOUND|STUDENT_ACCOUNT_UNCONFIRMED|STUDENT_ACCOUNT_IS_MANAGER|STUDENT_ACCOUNT_OTHER_ORG/.test(text)) {
+    return new Error('That sign-in account can’t be linked yet. Ask the student to create a Yoga Studio account with this exact email and confirm it, using a separate student-only account that is not used for another studio or ERP role. They should not create an organization.');
   }
   if (/STUDENT_ACCOUNT_ALREADY_LINKED/.test(text)) {
     return new Error('That sign-in email is already linked to a different student in this studio. Remove that student’s portal access first, or use a different student account.');
-  }
-  if (/STUDENT_ACCOUNT_IS_MANAGER/.test(text)) {
-    return new Error('That account already owns or manages an organization, so it cannot also be used as a dedicated student sign-in. Ask the student to use a separate student-only account.');
-  }
-  if (/STUDENT_ACCOUNT_OTHER_ORG/.test(text)) {
-    return new Error('That account already has access to a different studio organization. Use a separate student-only account for this studio.');
   }
   if (/STUDENT_INACTIVE/.test(text)) {
     return new Error('This student is inactive. Reactivate the student record before granting portal access.');
@@ -114,20 +109,18 @@ function studentAccessError(error) {
 
 function roleAccessError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v12) in Supabase, then try again.');
+    return new Error('Role access management needs the latest database setup. Run the full supabase/erp_setup.sql (SQL v13) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
-  if (/ACCESS_ACCOUNT_NOT_FOUND/.test(text)) {
-    return new Error('No usable Yoga Studio account uses that email yet. Ask the person to create an account with this exact email, confirm it, and not create an organization. Then grant access again.');
-  }
-  if (/ACCESS_ACCOUNT_UNCONFIRMED/.test(text)) {
-    return new Error('That account exists, but its email has not been confirmed yet. Ask the person to open the confirmation link, then grant access again.');
+  // SQL v13 deliberately returns ONE code for every out-of-organization
+  // account state (unknown, unconfirmed, other studio) so grant attempts
+  // cannot enumerate accounts by email. The legacy codes are still mapped
+  // here for a not-yet-upgraded database.
+  if (/ACCESS_ACCOUNT_UNAVAILABLE|ACCESS_ACCOUNT_NOT_FOUND|ACCESS_ACCOUNT_UNCONFIRMED|ACCESS_ACCOUNT_OTHER_ORG/.test(text)) {
+    return new Error('That sign-in account can’t be granted access yet. Ask the person to create a Yoga Studio account with this exact email and confirm it, using a separate account that is not used for another studio. They should not create an organization. Then grant access again.');
   }
   if (/ACCESS_ACCOUNT_ALREADY_OWNER/.test(text)) {
     return new Error('That account is already an organization Owner. Use a separate account for a different ERP role.');
-  }
-  if (/ACCESS_ACCOUNT_OTHER_ORG/.test(text)) {
-    return new Error('That account already has access to a different studio organization. Use a separate account for this studio.');
   }
   if (/ACCESS_ACCOUNT_ROLE_CONFLICT/.test(text)) {
     return new Error('That account already has another active ERP role in this studio. Remove that role first, or use a separate account.');
@@ -167,7 +160,7 @@ function roleAccessError(error) {
 
 function admissionError(error) {
   if (isMissingRpcError(error)) {
-    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v12) in Supabase, then try again.');
+    return new Error('Public admissions need the latest database setup. Run the full supabase/erp_setup.sql (SQL v13) in Supabase, then try again.');
   }
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
   if (/ADMISSION_LINK_INVALID/.test(text)) {

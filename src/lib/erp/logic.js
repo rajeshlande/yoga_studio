@@ -449,7 +449,11 @@ export function initials(name) {
 
 export function toCSV(rows, columns) {
   const escape = value => {
-    const text = String(value ?? '');
+    let text = String(value ?? '');
+    // Neutralize spreadsheet formulas: a cell beginning with tab/CR or
+    // (after optional spaces) with = + - @ executes as a formula in
+    // Excel/Sheets. Prefixing an apostrophe forces literal text.
+    if (/^[\t\r]/.test(text) || /^\s*[=+\-@]/.test(text)) text = `'${text}`;
     return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const header = columns.map(c => escape(c.label)).join(',');

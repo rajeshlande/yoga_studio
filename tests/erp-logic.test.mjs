@@ -7,7 +7,7 @@ import {
   monthlyRecurringRevenuePaise, nextBatchDate, nextRenewalDate, normalizeInstructorProfile,
   normalizePlanTemplate,
   normalizeSubscriptionLifecycle, pauseDaysBetween, planBillingPeriodLabel,
-  renewalStartDate, rupeesToPaise, subscriptionLifecycle, isBatchOnDate,
+  renewalStartDate, rupeesToPaise, subscriptionLifecycle, isBatchOnDate, toCSV,
 } from '../src/lib/erp/logic.js';
 
 test('joining-date membership ends one day before the monthly anniversary', () => {
@@ -195,4 +195,22 @@ test('instructor profiles normalize specialties, experience and joining date', (
     experienceYears: 80,
     joiningDate: '',
   });
+});
+
+test('CSV export neutralizes spreadsheet formulas but keeps plain values intact', () => {
+  const columns = [
+    {label: 'Name', value: row => row.name},
+    {label: 'Phone', value: row => row.phone},
+    {label: 'Note', value: row => row.note},
+  ];
+  const csv = toCSV([
+    {name: '=2+2', phone: '+919999988888', note: 'plain text'},
+    {name: '  -SUM(A1:A9)', phone: '0999988888', note: '@cmd'},
+    {name: 'Asha Asha Patil', phone: '9876543210', note: 'needs, "quotes"'},
+  ], columns);
+  const lines = csv.split('\n');
+  assert.equal(lines[0], 'Name,Phone,Note');
+  assert.ok(lines[1].startsWith("'=2+2,'+919999988888,plain text"), lines[1]);
+  assert.ok(lines[2].startsWith("'  -SUM(A1:A9),0999988888,'@cmd"), lines[2]);
+  assert.equal(lines[3], 'Asha Asha Patil,9876543210,"needs, ""quotes"""');
 });

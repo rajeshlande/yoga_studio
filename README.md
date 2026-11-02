@@ -4,7 +4,7 @@ A mobile- and desktop-friendly progressive web app (PWA) for running a yoga
 studio: branches, students, instructors, batches, attendance, subscriptions,
 INR payments, payment setup and one-page A4 invoice PDFs.
 
-> **Current source release:** 1.11.4 · **Database setup:** SQL v12 in
+> **Current source release:** 1.11.5 · **Database setup:** SQL v13 in
 > [`supabase/erp_setup.sql`](supabase/erp_setup.sql) · **Live path:**
 > <https://rajeshlande.github.io/yoga_studio/>
 >
@@ -367,7 +367,7 @@ The Vite development server binds to `0.0.0.0`. Use the URL printed by Vite.
    password-recovery email delivery.
 2. Open **SQL Editor**, paste the complete contents of
    `supabase/erp_setup.sql`, and run it. Re-running the current file upgrades
-   earlier ERP installs to SQL v12 without deleting business rows.
+   earlier ERP installs to SQL v13 without deleting business rows.
 3. Configure the production Site URL for
    `https://rajeshlande.github.io/yoga_studio/` and add the scoped redirect
    pattern `https://rajeshlande.github.io/yoga_studio/**` so email links can
@@ -504,7 +504,7 @@ node scripts/test-pages.mjs
 ```
 
 Mocked tests and ephemeral-Postgres checks are not live-provider UAT. After
-running SQL v12 in the real Supabase project, test real Owner, Co-owner,
+running SQL v13 in the real Supabase project, test real Owner, Co-owner,
 branch-Admin, Instructor and Student sign-ins; grant/revoke each role by its
 confirmed email; open a public admission link signed out and verify it shows
 the registration form (not sign-in), submit it with password + Terms,
@@ -541,16 +541,18 @@ Then dispatch or push a fresh `main` workflow run. If the public bundle was
 previously built without those values, deploy the rebuilt bundle and clear
 the installed PWA/site data once so the old service-worker shell is replaced.
 
-Recommended go-live order for 1.11.4:
+Recommended go-live order for 1.11.5:
 
 1. Back up/verify the Supabase project according to your operational policy.
 2. Ensure the complete current `supabase/erp_setup.sql` has installed
-   **SQL v12**. Versions 1.11.x require SQL v12 for the public registration
-   admission target/submit flow, terms acceptance, scoped Instructor
-   admission review and the `setupVersion: 12` context response. If upgrading
-   from SQL v11 or earlier, run the complete SQL v12 file instead of stopping
-   at an older version; it is cumulative and preserves existing business rows.
-3. Deploy the 1.11.4 web build with the two public Actions secrets.
+   **SQL v13**. Version 1.11.5 uses SQL v13 for the audit hardening
+   (Student-safe snapshot projections and non-enumerable account-grant
+   errors) and the `setupVersion: 13` context response; the SQL v12 public
+   registration admission target/submit flow, terms acceptance and scoped
+   Instructor admission review are included. If upgrading from SQL v12 or
+   earlier, run the complete SQL v13 file instead of stopping at an older
+   version; it is cumulative and preserves existing business rows.
+3. Deploy the 1.11.5 web build with the two public Actions secrets.
 4. Sign in online as the Owner, wait for **Online · synced**, open
    **Access**, and complete the five-role UAT checks with separate confirmed
    accounts before granting production staff/student access.

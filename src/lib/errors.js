@@ -142,7 +142,7 @@ export function describeError(error, options = {}) {
       kind: 'setup',
       title: 'Database setup needs updating',
       message: 'Yoga Studio could not find one or more database functions required by this screen. The app and the Supabase setup are probably on different versions.',
-      solution: 'Ask the studio Owner to open Supabase → SQL Editor, run the full current supabase/erp_setup.sql file (SQL v12), wait for it to finish, then retry. Do not create tables/functions manually one by one.',
+      solution: 'Ask the studio Owner to open Supabase → SQL Editor, run the full current supabase/erp_setup.sql file (SQL v13), wait for it to finish, then retry. Do not create tables/functions manually one by one.',
       retryable: true,
     });
   }
@@ -311,12 +311,12 @@ export function describeError(error, options = {}) {
     });
   }
 
-  if (/account.*not found|no usable .* account uses that email|access_account_not_found|student_account_not_found/.test(text)) {
+  if (/account_unavailable|be linked yet|be granted access yet|account.*not found|no usable .* account uses that email|access_account_not_found|student_account_not_found/.test(text)) {
     return make({
       kind: 'access',
-      title: 'No confirmed account was found for that email',
-      message: 'Yoga Studio could not find a usable account with the exact email entered.',
-      solution: 'Ask the person to create an account with that exact email, confirm the email, and choose “Join an existing studio” (not “Create organization”). Then grant access again.',
+      title: 'That account can’t be used yet',
+      message: 'Yoga Studio couldn’t link a usable account with the exact email entered. For privacy, the app doesn’t say whether the account is missing, unconfirmed, or used somewhere else.',
+      solution: 'Ask the person to create an account with that exact email, confirm the email, and choose “Join an existing studio” (not “Create organization”), using an account that is not used for another studio or role. Then grant access again.',
     });
   }
 

@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and version numbers follow [Semantic Versioning](https://semver.org/).
 `package.json` is the authoritative application version.
 
+## 1.11.5 — 2026-11-02
+
+### Security — Audit run-1 hardening (SQL v13)
+
+- **Batch seat capacity is no longer sent to Students.** The ERP snapshot
+  now returns the real `capacity` only to organization managers, branch
+  Admins for that branch, and the batch's own Instructor; Students receive
+  `0`. This matches the existing UI rule that Students never see seat
+  counts.
+- **Payment-gateway details are organization-manager only.** The snapshot
+  no longer sends `gatewayEnvironment`, `gatewayPublicKeyId` or
+  `gatewayWebhookUrl` to Admins, Instructors or Students. Payer-facing
+  invoice details (legal name, GST, UPI, bank) are unchanged, and the app
+  still stores no gateway secret.
+- **Account grants no longer reveal account status by email.** Granting
+  Student portal or role access previously distinguished "no account",
+  "email unconfirmed", "account manages an organization" and "account
+  belongs to another studio". All out-of-organization states now return one
+  `*_ACCOUNT_UNAVAILABLE` outcome with one generic message, so staff
+  grants can't be used to check whether an email has an account. Precise
+  errors remain for conflicts inside your own studio (already an Owner,
+  already linked, role conflict).
+- **CSV exports neutralize spreadsheet formulas.** Cells starting with
+  `=`, `+`, `-`, `@` (or tab/CR) are prefixed with an apostrophe so
+  exported values such as phone numbers or notes open as text, not
+  formulas, in Excel/Sheets.
+- Database setup is now **SQL v13** in `supabase/erp_setup.sql` (cumulative
+  and re-runnable; existing business rows are preserved). The app works
+  against an older database during rollout — run the full file to activate
+  the fix.
+
 ## 1.11.4 — 2026-11-01
 
 ### Changed — Dependency and deployment-toolchain maintenance

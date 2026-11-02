@@ -48,12 +48,25 @@ test('SQL role boundary keeps internal helpers private and portal snapshots leas
   assert.match(plansBlock,/m\.plan_id = p\.id/);
   assert.match(plansBlock,/m\.student_id = v_student/);
   assert.match(plansBlock,/v_instructor is not null and \([\s\S]*p\.status = 'active'/);
-  assert.match(sql,/'setupVersion', 12/);
+  assert.match(sql,/'setupVersion', 13/);
 
-  // SQL v12 keeps the unambiguous three-argument admission RPC pair and
-  // adds only the guarded public-registration target/submit surface; the
-  // SQL v10 overloads must be dropped and must not remain granted.
-  assert.match(sql,/SQL version 12/);
+  // SQL v13 audit hardening (run-1): batch capacity is never projected to
+  // Students, gateway integration fields are organization-manager only, and
+  // every out-of-organization account state collapses into ONE grant error
+  // so staff grants cannot double as an account-existence oracle.
+  assert.match(sql,/SQL version 13/);
+  const batchesBlock=sql.slice(sql.indexOf("'batches',"),sql.indexOf("'enrollments',"));
+  assert.match(batchesBlock,/'capacity', case when/);
+  assert.match(batchesBlock,/bt\.instructor_id = v_instructor\)\s+then bt\.capacity else 0 end/);
+  const billingBlock=sql.slice(sql.indexOf("'billingSettings',"),sql.indexOf('create or replace function public.erp_get_admission_link_info'));
+  assert.match(billingBlock,/'gatewayPublicKeyId', case when v_org_mgr/);
+  assert.match(billingBlock,/'gatewayWebhookUrl', case when v_org_mgr/);
+  assert.match(billingBlock,/'gatewayEnvironment', case when v_org_mgr/);
+  for(const legacy of ['STUDENT_ACCOUNT_NOT_FOUND','STUDENT_ACCOUNT_UNCONFIRMED','STUDENT_ACCOUNT_IS_MANAGER','STUDENT_ACCOUNT_OTHER_ORG','ACCESS_ACCOUNT_NOT_FOUND','ACCESS_ACCOUNT_UNCONFIRMED','ACCESS_ACCOUNT_OTHER_ORG']){
+    assert.equal(sql.includes(legacy),false,`${legacy} must not be raised after SQL v13`);
+  }
+  assert.match(sql,/raise exception 'STUDENT_ACCOUNT_UNAVAILABLE'/);
+  assert.match(sql,/raise exception 'ACCESS_ACCOUNT_UNAVAILABLE'/);
   assert.match(sql,/drop function if exists public\.erp_get_my_admission\(text\)/);
   assert.match(sql,/drop function if exists public\.erp_submit_admission\(text, jsonb\)/);
   assert.ok(grantBlock.includes("'erp_get_my_admission(text, uuid)'"));

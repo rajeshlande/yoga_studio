@@ -1480,7 +1480,7 @@ function StudentAccessDialog({student, erp, notify, onClose}) {
         </div>
       </div>
       {meta.status === 'unknown' && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
-        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v12) and try again.</span>
+        <AlertCircle size={18}/><span>The current snapshot does not include portal status. If granting fails, run the latest <b>supabase/erp_setup.sql</b> (SQL v13) and try again.</span>
       </div>}
       {student.syncPending && <div className="erp-banner" role="note" style={{gridColumn: '1 / -1', margin: 0}}>
         <AlertCircle size={18}/><span>This student record is still waiting to sync. Connect to the internet and finish syncing before changing portal access.</span>
@@ -2236,8 +2236,8 @@ function EnrollmentWizardDialog({
             error={instructorPlanSetupOutdated ? {
               title: 'Instructor plans need the SQL update',
               message: 'The connected Supabase setup is older than SQL v11. In the older snapshot, Owners could receive the plan list but Instructors received no plans, so Step 3 is empty for your Instructor account even though the Owner can see the plan.',
-              solution: 'Ask the studio Owner to run the complete current supabase/erp_setup.sql (SQL v12) once in Supabase → SQL Editor. After it finishes, stay online and click “Reload plans” here or Sync now; active plans will then be included in the Instructor snapshot. Instructors still cannot create/edit plan templates.',
-              technical: `Connected setupVersion: ${setupVersion || 'not reported by this older database'}; required for Instructor plans: 11 or later (current file: 12). Active/non-archived plans loaded for Instructor: 0`,
+              solution: 'Ask the studio Owner to run the complete current supabase/erp_setup.sql (SQL v13) once in Supabase → SQL Editor. After it finishes, stay online and click “Reload plans” here or Sync now; active plans will then be included in the Instructor snapshot. Instructors still cannot create/edit plan templates.',
+              technical: `Connected setupVersion: ${setupVersion || 'not reported by this older database'}; required for Instructor plans: 11 or later (current file: 13). Active/non-archived plans loaded for Instructor: 0`,
               severity: 'error',
             } : {
               title: 'No active plan is available yet',

@@ -1,6 +1,6 @@
 -- ============================================================================
--- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 12.
--- Matches app version 1.11.0 (safer autosync, GST/UPI invoicing,
+-- Yoga Studio ERP (Core) — THE single Supabase setup file. SQL version 13.
+-- Matches app version 1.11.5 (safer autosync, GST/UPI invoicing,
 -- Owner/Co-owner payment configuration/readiness checks, Student portal
 -- access, Odoo-style fixed Role Access management for all five roles,
 -- public Student registration/admissions with staff confirmation,
@@ -9,8 +9,11 @@
 -- rich Instructor profiles, assigned-batch roster editing for a signed-in
 -- Instructor, SQL v10 least-privilege field/record hardening, SQL v11
 -- branch-aware admissions plus narrow Instructor walk-in enrolment and
--- own-batch verified-payment collection, and SQL v12 public admission
--- registration with terms acceptance plus scoped Instructor admission review).
+-- own-batch verified-payment collection, SQL v12 public admission
+-- registration with terms acceptance plus scoped Instructor admission
+-- review, and SQL v13 security-audit hardening: Student-safe snapshot
+-- field projections (no batch seat capacity, no gateway configuration
+-- for non-managers) and non-enumerating account-grant errors).
 --
 -- MAINTENANCE RULE (owner's instruction): every future table / function /
 -- policy change for the ERP is added to THIS file only. The file is
@@ -1183,7 +1186,7 @@ begin
   if auth.uid() is null then raise exception 'UNAUTHENTICATED'; end if;
   v_org := public.erp_current_org();
   if v_org is null then
-    return jsonb_build_object('organizationId', null, 'roles', '[]'::jsonb, 'setupVersion', 12);
+    return jsonb_build_object('organizationId', null, 'roles', '[]'::jsonb, 'setupVersion', 13);
   end if;
   select name into v_name from public.erp_organizations where id = v_org;
   v_roles := public.erp_my_roles();
@@ -1222,7 +1225,7 @@ begin
     'branchIds', to_jsonb(v_branch_ids),
     'instructorId', public.erp_my_instructor_id(),
     'studentId', v_student,
-    'setupVersion', 12
+    'setupVersion', 13
   );
 end $$;
 
@@ -1371,7 +1374,13 @@ begin
         'id', bt.id, 'branchId', bt.branch_id, 'name', bt.name,
         'instructorId', coalesce(bt.instructor_id::text, ''), 'days', to_jsonb(bt.days),
         'startTime', to_char(bt.start_time, 'HH24:MI'), 'durationMins', bt.duration_mins,
-        'capacity', bt.capacity, 'status', bt.status, 'createdAt', bt.created_at, 'updatedAt', bt.updated_at, 'syncVersion', bt.sync_version)
+        -- Seat capacity is an operational manager/instructor field. The
+        -- Student portal shows only the student's own batches and schedule,
+        -- never class counts or capacity (SQL v13 audit hardening).
+        'capacity', case when v_org_mgr or bt.branch_id = any(v_admin_branches)
+          or (v_instructor is not null and bt.instructor_id = v_instructor)
+          then bt.capacity else 0 end,
+        'status', bt.status, 'createdAt', bt.created_at, 'updatedAt', bt.updated_at, 'syncVersion', bt.sync_version)
         order by bt.start_time), '[]')
       from public.erp_batches bt
      where bt.org_id = v_org and bt.branch_id = any(v_branches)
@@ -1491,9 +1500,13 @@ begin
         'bankAccountNumber', bs.bank_account_number,
         'bankAccountType', bs.bank_account_type, 'ifsc', bs.ifsc,
         'gatewayProvider', bs.gateway_provider,
-        'gatewayEnvironment', bs.gateway_environment,
-        'gatewayPublicKeyId', bs.gateway_public_key_id,
-        'gatewayWebhookUrl', bs.gateway_webhook_url,
+        -- Gateway configuration is Owner/Co-owner payment-setup data.
+        -- Students and Instructors receive the invoice/GST/UPI/bank fields
+        -- they need, never the gateway identifiers or the trusted webhook
+        -- URL (SQL v13 audit hardening).
+        'gatewayEnvironment', case when v_org_mgr then bs.gateway_environment else '' end,
+        'gatewayPublicKeyId', case when v_org_mgr then bs.gateway_public_key_id else '' end,
+        'gatewayWebhookUrl', case when v_org_mgr then bs.gateway_webhook_url else '' end,
         'gatewayWebhookConfigured', bs.gateway_webhook_configured,
         'status', bs.status, 'createdAt', bs.created_at,
         'updatedAt', bs.updated_at, 'syncVersion', bs.sync_version)), '[]')
@@ -1705,11 +1718,16 @@ begin
    where lower(email::text) = v_email
    order by coalesce(email_confirmed_at, confirmed_at) desc nulls last, created_at
    limit 1;
+  -- SQL v13 audit hardening: account states outside this organization
+  -- (unknown email, unconfirmed email, manager account, account active in
+  -- another organization) intentionally collapse into ONE error so a
+  -- grant attempt cannot be used to enumerate global account status by
+  -- email. Same-organization conflicts below keep their precise errors.
   if v_user_id is null or v_deleted_at is not null
      or (v_banned_until is not null and v_banned_until > now()) then
-    raise exception 'STUDENT_ACCOUNT_NOT_FOUND';
+    raise exception 'STUDENT_ACCOUNT_UNAVAILABLE';
   end if;
-  if v_confirmed_at is null then raise exception 'STUDENT_ACCOUNT_UNCONFIRMED'; end if;
+  if v_confirmed_at is null then raise exception 'STUDENT_ACCOUNT_UNAVAILABLE'; end if;
 
   -- A student sign-in must be a dedicated account. The current product
   -- resolves one organization per account, with organization membership
@@ -1718,12 +1736,12 @@ begin
   -- workspace.
   if exists (select 1 from public.erp_org_members
               where user_id = v_user_id and status = 'active') then
-    raise exception 'STUDENT_ACCOUNT_IS_MANAGER';
+    raise exception 'STUDENT_ACCOUNT_UNAVAILABLE';
   end if;
   if exists (select 1 from public.erp_branch_members bm
                join public.erp_branches b on b.id = bm.branch_id
               where bm.user_id = v_user_id and bm.status = 'active' and b.org_id <> v_org) then
-    raise exception 'STUDENT_ACCOUNT_OTHER_ORG';
+    raise exception 'STUDENT_ACCOUNT_UNAVAILABLE';
   end if;
   if exists (select 1 from public.erp_branch_members bm
                join public.erp_branches b on b.id = bm.branch_id
@@ -2429,12 +2447,16 @@ begin
    where lower(email::text) = v_email
    order by coalesce(email_confirmed_at, confirmed_at) desc nulls last, created_at
    limit 1;
+  -- SQL v13 audit hardening: unknown, banned/deleted, and unconfirmed
+  -- accounts deliberately share ONE error (with the other-organization
+  -- case in erp__assert_access_account_available) so grant attempts
+  -- cannot enumerate global account status by email.
   if o_user_id is null or v_deleted_at is not null
      or (v_banned_until is not null and v_banned_until > now()) then
-    raise exception 'ACCESS_ACCOUNT_NOT_FOUND';
+    raise exception 'ACCESS_ACCOUNT_UNAVAILABLE';
   end if;
   if v_confirmed_at is null then
-    raise exception 'ACCESS_ACCOUNT_UNCONFIRMED';
+    raise exception 'ACCESS_ACCOUNT_UNAVAILABLE';
   end if;
 end $$;
 
@@ -2456,7 +2478,7 @@ begin
    limit 1;
   if v_existing_org is not null then
     if v_existing_org <> p_org then
-      raise exception 'ACCESS_ACCOUNT_OTHER_ORG';
+      raise exception 'ACCESS_ACCOUNT_UNAVAILABLE';
     end if;
     if v_existing_role = 'owner' then
       raise exception 'ACCESS_ACCOUNT_ALREADY_OWNER';
@@ -2471,7 +2493,7 @@ begin
       join public.erp_branches b on b.id = bm.branch_id
      where bm.user_id = p_user_id and bm.status = 'active' and b.org_id <> p_org
   ) then
-    raise exception 'ACCESS_ACCOUNT_OTHER_ORG';
+    raise exception 'ACCESS_ACCOUNT_UNAVAILABLE';
   end if;
 
   if p_role = 'co_owner' and exists (

@@ -194,7 +194,7 @@ test('owner grants and removes student portal access by registered email', async
     if (name === 'erp_grant_student_access') {
       grantCalls.push(structuredClone(body));
       if (body.p_email === 'missing@example.test') {
-        return reply({code: 'P0001', message: 'STUDENT_ACCOUNT_NOT_FOUND'}, 400);
+        return reply({code: 'P0001', message: 'STUDENT_ACCOUNT_UNAVAILABLE'}, 400);
       }
       server.students[0].portalAccessStatus = 'active';
       server.students[0].portalAccessEmail = body.p_email;
@@ -228,7 +228,7 @@ test('owner grants and removes student portal access by registered email', async
   await expect(dialog.getByText('The student must not create their own organization.')).toBeVisible();
   await dialog.getByLabel('Student sign-in email').fill('missing@example.test');
   await dialog.getByRole('button', {name: 'Grant access'}).click();
-  await expect(page.locator('.app-error-toast')).toContainText('No confirmed account was found for that email');
+  await expect(page.locator('.app-error-toast')).toContainText('That account can’t be used yet');
   await expect(page.locator('.app-error-toast')).toContainText('What happened:');
   await expect(page.locator('.app-error-toast')).toContainText('Possible solution:');
   await expect(page.locator('.app-error-toast')).toContainText('Join an existing studio');
